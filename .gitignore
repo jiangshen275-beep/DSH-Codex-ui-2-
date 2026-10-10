@@ -1,0 +1,8 @@
+node_modules/
+*.tgz
+*.zip
+*.log
+.env
+.env.*
+.DS_Store
+Thumbs.db

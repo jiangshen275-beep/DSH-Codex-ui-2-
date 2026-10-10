@@ -1,0 +1,1162 @@
+/* Target: dsh 0.2.0-rc.2. Stable data attributes first; pinned CSS modules only
+   where that release exposes no semantic hook. All rules are fiber-scoped. */
+@font-face { font-family: "OpenAI Sans"; src: url("__OPENAI_SANS_REGULAR__") format("woff2"); font-style: normal; font-weight: 400; font-display: swap; }
+@font-face { font-family: "OpenAI Sans"; src: url("__OPENAI_SANS_MEDIUM__") format("woff2"); font-style: normal; font-weight: 500; font-display: swap; }
+@font-face { font-family: "OpenAI Sans"; src: url("__OPENAI_SANS_SEMIBOLD__") format("woff2"); font-style: normal; font-weight: 600; font-display: swap; }
+html[data-chatgpt-ui] { --cg-rail: 48px; --cg-sidebar: 288px; --cg-page: #fff; --cg-nav: #fbfbfb; --cg-chrome: #f3f3f3; --cg-text: #202123; --cg-muted: #999; --font-sans-default: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; --font-openai-sans: "OpenAI Sans", var(--font-sans-default); --dsw-font-family: var(--font-sans-default); font-family: var(--font-sans-default); }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) { --cg-page: #212121; --cg-nav: #171717; --cg-chrome: #171717; --cg-text: #ececec; --cg-muted: #929292; --cg-hover: #303030; }
+html[data-chatgpt-ui] body { background: var(--cg-chrome); color: var(--cg-text); font-family: var(--font-sans-default); -webkit-font-smoothing: antialiased; }
+/* The desktop shell draws its own title bar into the page (`#__dsh_desktop_chrome__`,
+   because the main window runs with decorations(false)) and the skin reserves 36px for it
+   through `html[data-dsh-title-bar-height] body { padding-top: 36px !important }`.
+   Auto-hide it here: the app gets the full height back, and the bar slides out only while
+   the pointer is at the top edge, so the drag handle and the window buttons stay reachable
+   (drag = hover the top strip first, then drag; close/minimize still work). */
+html[data-chatgpt-ui][data-dsh-title-bar-height] body { padding-top: 0 !important; }
+html[data-chatgpt-ui] #__dsh_desktop_chrome__ {
+  height: 6px; opacity: 0; overflow: hidden;
+  transition: height 180ms ease, opacity 160ms ease;
+}
+html[data-chatgpt-ui] #__dsh_desktop_chrome__:hover,
+html[data-chatgpt-ui] #__dsh_desktop_chrome__:focus-within {
+  height: 36px; opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-chatgpt-ui] #__dsh_desktop_chrome__ { transition: none; }
+}
+html[data-chatgpt-ui] #root { box-sizing: border-box; padding: 4px 4px 4px 48px !important; height: 100dvh; }
+html[data-chatgpt-ui] .pI_x6G_frame { box-sizing: border-box; border: 0; box-shadow: 0 1px 5px #0000000d, 0 0 1px #00000014; border-radius: 13px 13px 4px 13px; background: var(--cg-page); }
+html[data-chatgpt-ui] .pI_x6G_frame:not([data-sidebar-collapsed])[data-rightbar-collapsed] { grid-template-columns: 288px minmax(0, 1fr) 0 !important; }
+html[data-chatgpt-ui] .pI_x6G_sidebarCol { background: var(--cg-nav); border-right: 1px solid #e2e2e2; }
+/* The fixed icon rail already supplies collapsed navigation. Reclaim the
+   native compact sidebar track without changing the right-panel drag math. */
+html[data-chatgpt-ui] .pI_x6G_frame[data-sidebar-collapsed] .pI_x6G_sidebarCol { grid-column: 1; grid-row: 1; width: 0; min-width: 0; border-right: 0; overflow: visible; }
+html[data-chatgpt-ui] .pI_x6G_frame[data-sidebar-collapsed]:not([data-rightbar-fullscreen]) .pI_x6G_centerCol { grid-column: 1 / 3; grid-row: 1; }
+html[data-chatgpt-ui] .pI_x6G_frame[data-sidebar-collapsed] .pI_x6G_rightbarCol { grid-column: 3; grid-row: 1; }
+html[data-chatgpt-ui] .pI_x6G_handle[data-side="left"] { display: none; }
+html[data-chatgpt-ui] button { font-family: var(--dsw-font-family); }
+html[data-chatgpt-ui] button:focus-visible { outline: 2px solid #3982fa; outline-offset: 2px; }
+.cg-button { display: inline-flex; align-items: center; gap: 9px; background: none; border: 0; color: inherit; cursor: pointer; padding: 6px; border-radius: 7px; font-size: 14px; line-height: 20px; }
+.cg-button:hover { background: var(--cg-hover); }
+.cg-sidebar { height: 100%; color: var(--cg-text); font-size: 14px; }
+.cg-rail { position: fixed; z-index: 24; left: 0; top: 0; bottom: 0; width: var(--cg-rail); box-sizing: border-box; padding: calc(12px + 3cm) 6px 12px; display: flex; align-items: center; flex-direction: column; gap: 8px; color: #888; }
+.cg-rail > .cg-button { flex: none; width: 36px; height: 36px; padding: 9px; }
+.cg-rail .cg-home { background: #e6e7e8; color: #202123; }
+.cg-rail-bottom { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 20px; padding-bottom: 10px; }
+.cg-navigation { height: 100%; box-sizing: border-box; padding: 10px 14px; display: flex; flex-direction: column; }
+.cg-brand-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.cg-brand { padding: 2px; font-size: 18px; font-weight: 600; gap: 7px; height: 30px; }
+.cg-brand-actions { display: flex; gap: 4px; color: #929292; }
+.cg-brand-actions .cg-button { padding: 6px; }
+.cg-brand-actions svg { width: 14px; height: 14px; }
+.cg-new { width: 100%; text-align: left; min-height: 32px; padding: 4px 2px; }
+.cg-new svg { width: 14px; height: 14px; }
+.cg-workspaces { flex: 1; min-height: 0; margin-top: 15px; }
+.cg-workspaces[hidden] { display: none; }
+.cg-browse { margin-top: 15px; flex: none; }
+.cg-pinned-label { color: var(--cg-muted); line-height: 22px; margin-bottom: 6px; }
+.cg-pinned-row { width: 100%; display: block; text-align: left; height: 31px; padding: 4px 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cg-section-toggle { display: flex; padding: 5px 2px; color: var(--cg-muted); margin-top: 18px; gap: 5px; }
+.cg-projects .cg-button { display: flex; width: 100%; text-align: left; }
+.cg-collapsed .cg-browse { display: none; }
+.cg-footer { display: none; }
+.cg-menu { position: fixed; left: 48px; top: 195px; min-width: 150px; border: 1px solid #e5e5e5; border-radius: 12px; background: var(--cg-page); padding: 6px; box-shadow: 0 8px 25px #0001; }
+.cg-menu .cg-button { display: flex; width: 100%; }
+.cg-notice { padding: 10px; border: 1px solid #e5e5e5; border-radius: 10px; font-size: 12px; color: var(--cg-muted); }
+.cg-collapsed .cg-navigation { display: none; }
+.cg-collapsed .cg-brand-actions,.cg-collapsed .cg-brand { display: none; }
+.cg-collapsed .cg-new { font-size: 0; justify-content: center; }
+.cg-header { flex: none; position: relative; height: 60px; }
+/* Reply-style tabs. `position: fixed` puts them in viewport coordinates, and the
+   component writes `left`/`top` inline once it has measured the hero's brand mark, so
+   neither the stylesheet cascade nor the containing block can swallow the value. Until
+   then the fallback below centers the row. The sliding pill is one element translating
+   between the two halves; labels cross-fade on top of it. `pointer-events` must be
+   re-enabled: the shell overlay hosting this row is a pass-through layer, and the
+   property is inherited. */
+.cg-tabs {
+  --cg-tab-shift: 0px;
+  position: fixed; top: 96px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 0; width: 212px; height: 36px; padding: 0;
+  border-radius: 22px; background: #f7f7f7;
+  pointer-events: auto; z-index: 30;
+}
+.cg-tabs[data-style="chat"] { --cg-tab-shift: 0px; }
+.cg-tabs[data-style="work"] { --cg-tab-shift: 106px; }
+.cg-tabs-slider {
+  position: absolute; top: 2px; left: 2px; width: 104px; height: 32px;
+  border-radius: 999px; background: var(--cg-page); border: 1px solid #e8e8e8;
+  box-shadow: 0 2px 4px #00000008;
+  transform: translateX(var(--cg-tab-shift));
+  transition: transform 260ms cubic-bezier(.22, .8, .28, 1);
+}
+.cg-tabs button {
+  position: relative; z-index: 1; flex: 1; border: 0; background: transparent; cursor: pointer;
+  font-size: 14px; color: var(--cg-muted); transition: color 200ms ease;
+}
+.cg-tabs button[aria-selected="true"] { color: var(--cg-text); }
+.cg-tabs button:focus-visible { outline: 2px solid #3982fa; outline-offset: 2px; border-radius: 22px; }
+.cg-tab-label { display: inline-block; transition: transform 260ms cubic-bezier(.22, .8, .28, 1); }
+.cg-tabs button[aria-selected="true"] .cg-tab-label { transform: scale(1.02); }
+@media (prefers-reduced-motion: reduce) {
+  .cg-tabs-slider, .cg-tab-label, .cg-tabs button { transition: none; }
+}
+.cg-header-corner { position: absolute; right: 18px; top: 16px; color: #999; }
+.cg-header-corner button { background: none; }
+html[data-chatgpt-ui] .wSkVaW_root { --dsh-composer-card-max-width: 642px !important; --dsh-composer-side-clearance: 0px; }
+/* Hero placement. The composer used to be pushed down by a margin on its seat, which lives
+   inside the scrolling column: that margin was ~245px of scrollable content, so every line
+   the composer grew while typing scrolled the column further down. Centring places it at
+   roughly the same height with no extra scrollable content, and `safe` keeps the top
+   reachable if the composer ever grows past the column. */
+html[data-chatgpt-ui] [data-content-phase="hero"] [data-conversation-scroll] { justify-content: safe center; scrollbar-gutter: auto; margin: 0; }
+html[data-chatgpt-ui] [data-content-phase="hero"] [data-composer-seat] { margin-top: 0; }
+/* Third-party "cost details" entry (dsh-cost-meter's .cm-stat-entry). It ships as a filled
+   elevated pill (background: var(--dsw-alias-button-elevated-fill) -> #43454a in the dark theme),
+   which makes it the only bright control among flat siblings in the session header. Flatten it to
+   match them; the control keeps working, it just stops standing out. */
+html[data-chatgpt-ui] .cm-stat-entry {
+  background: none; border: 0; padding: 2px 8px; border-radius: 8px;
+  color: var(--cg-muted); font-size: 13px; line-height: 20px;
+}
+html[data-chatgpt-ui] .cm-stat-entry:hover,
+html[data-chatgpt-ui] .cm-stat-entry:focus-visible { background: var(--cg-hover); color: var(--cg-text); }
+html[data-chatgpt-ui] .wSkVaW_composerHero { width: min(642px, calc(100% - 48px)); margin: 0 auto; gap: 0; padding: 0; position: relative; }
+html[data-chatgpt-ui]:not(:has([data-ds-dark-theme])) .wSkVaW_composerHero .wSkVaW_heroWorkspaceRow { order: 5; margin: 0 14px; padding: 4px 10px; min-height: 40px; border-radius: 0 0 18px 18px; background: #f5f5f5; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .wSkVaW_composerHero .wSkVaW_heroWorkspaceRow { background: #2c2c2e; }
+html[data-chatgpt-ui] .wSkVaW_composerHero .wSkVaW_heroWorkspaceRow button { font-size: 13px; }
+html[data-chatgpt-ui] .wSkVaW_composerHero > div:first-child { margin-bottom: 15px; padding: 0; }
+html[data-chatgpt-ui] .pXSMma_body { display: none; }
+html[data-chatgpt-ui] .uV2eYG_hero { padding: 0; }
+/* These selectors stay hash-independent on purpose: the rules below were written against the
+   author's build, whose CSS-module hashes (wSkVaW_*, uV2eYG_*, pI_x6G_*) this installation never
+   emits, so every one of them silently missed here. The fish hitbox carries the brand-mark slot
+   this plugin fills with the DeepSeek whale, so it must stay visible; only the native preview
+   badge is dropped. */
+html[data-chatgpt-ui] [class*="fishHitbox"] { display: inline-flex !important; }
+html[data-chatgpt-ui] [class*="previewBadge"] { display: none !important; }
+/* One visible title only: the native headline span goes, the project name is re-drawn from a clone. */
+html[data-chatgpt-ui] [class*="titleGroup"] > span:not(.cg-hero-title) { display: none !important; }
+/* The DeepSeek mark sits above the headline, not beside it. */
+html[data-chatgpt-ui] [class*="headline"] { flex-direction: column; justify-content: center; align-items: center; gap: 8px; }
+html[data-chatgpt-ui] .wSkVaW_composerHero [class*="titleGroup"] { font-size: 0 !important; }
+/* The native headline, its preview badge and the chip's chevron stay in the DOM for
+   accessibility, but the visible title is `.cg-hero-title` (see the hero sync effect).
+   The native chip is hidden with the rest; the project name is re-drawn from a clone. */
+html[data-chatgpt-ui] .wSkVaW_composerHero [class*="titleGroup"] > span { display: none !important; }
+html[data-chatgpt-ui] .wSkVaW_composerHero [class*="titleGroup"]:after { content: none !important; }
+html[data-chatgpt-ui] .wSkVaW_composerHero .cg-hero-title {
+  display: inline-flex; align-items: center; gap: 12px; max-width: 100%;
+  font-size: 28px; line-height: 40px; font-weight: 400; color: var(--cg-text);
+}
+html[data-chatgpt-ui] .cg-hero-title-text { white-space: nowrap; }
+/* The project chip reuses the hero chip's own markup, so only its size and the parts that
+   read as a control (background, hit area, chevron) are neutralized here. */
+html[data-chatgpt-ui] .cg-hero-title .cg-hero-project {
+  all: unset; display: inline-flex; align-items: center; gap: 6px; max-width: 260px;
+  padding: 3px 12px; border-radius: 999px; background: var(--cg-hover);
+  color: var(--cg-muted); font-size: 14px; line-height: 20px; font-weight: 500;
+  cursor: default; white-space: nowrap;
+}
+html[data-chatgpt-ui] .cg-hero-title .cg-hero-project [class*="workspaceLabel"] {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+html[data-chatgpt-ui] .cg-hero-title .cg-hero-project svg { width: 14px; height: 14px; flex: none; }
+html[data-chatgpt-ui] .wSkVaW_composerHero [class*="headline"] { justify-content: center; }
+html[data-chatgpt-ui] [data-composer-card] { border: 1px solid #ededed; border-radius: 24px; background: var(--cg-page); box-shadow: 0 2px 5px #00000005,0 12px 40px #00000003; padding-top: 9px; gap: 3px; }
+html[data-chatgpt-ui] [data-composer-input] { font-size: 14px; padding: 4px 12px 0; }
+/* Typing grows the composer; if the browser picks it as the scroll anchor it compensates by
+   scrolling the transcript, which reads as the view sliding down a line per keystroke until
+   it reaches the bottom. Excluding the composer alone stops that, while leaving anchoring
+   active for messages arriving above the viewport. The app already disables anchoring itself
+   while it is following the tail, so this only affects the reading-up case. */
+html[data-chatgpt-ui] [data-composer-seat],
+html[data-chatgpt-ui] [data-composer-card],
+html[data-chatgpt-ui] [data-composer-input] { overflow-anchor: none; }
+html[data-chatgpt-ui] .uV2eYG_hero [data-composer-input] { min-height: 47px; }
+html[data-chatgpt-ui] .uV2eYG_row { padding: 2px 8px 7px; gap: 8px; }
+html[data-chatgpt-ui] .uV2eYG_primary { width: 28px; height: 28px; transform: none; }
+html[data-chatgpt-ui] .uV2eYG_add { background: transparent; }
+html[data-chatgpt-ui] .uV2eYG_trailing,.uV2eYG_tools,.uV2eYG_modes { gap: 8px; }
+html[data-chatgpt-ui] .uV2eYG_dock:empty { display: none; }
+.cg-goal { font-size: 13px; padding: 0 8px; height: 26px; color: var(--cg-muted); border-left: 1px solid #eeeeee; border-radius: 0; gap: 5px; }
+html[data-chatgpt-ui] .uV2eYG_hero { position: relative; }
+html[data-chatgpt-ui] .uV2eYG_hero .uV2eYG_dock { padding: 0; }
+html[data-chatgpt-ui] [data-slot="conversation.hero.agentPreset"] { margin-left: auto; }
+/* The picker rides the workspace row's own flex line (the host renders this slot as the last child
+   of `.Jd07YW_heroWorkspaceRow`, a `display:flex; align-items:center` box), so `margin-left:auto` on
+   the slot is what puts it at the right end. It is deliberately NOT absolutely positioned: an
+   absolute picker depends on a measurement landing, and when that measurement missed — a slot that
+   had not been laid out yet — it stayed at the stylesheet origin and showed up under the workspace
+   row. Nothing here needs a measurement, so nothing here can miss one. */
+.cg-agent-picker { position: absolute; right: 18px; bottom: 6px; z-index: 6; display: inline-flex; align-items: center; }
+.cg-agent-trigger { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid #e8e8e8; border-radius: 999px; background: var(--cg-page); color: var(--cg-text); font-size: 13px; line-height: 20px; cursor: pointer; white-space: nowrap; }
+.cg-agent-trigger:hover, .cg-agent-trigger[aria-expanded=true] { background: var(--cg-hover); }
+.cg-agent-trigger:disabled { opacity: .6; cursor: default; }
+.cg-agent-trigger svg { width: 14px; height: 14px; flex: none; color: var(--cg-muted); }
+.cg-agent-menu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 60; display: flex; flex-direction: column; gap: 2px; width: min(320px, calc(100vw - 96px)); padding: 6px; border: 1px solid #e8e8e8; border-radius: 14px; background: var(--cg-page); box-shadow: 0 12px 32px #0000001f; }
+.cg-agent-option { display: flex; flex-direction: column; gap: 2px; padding: 7px 10px; border: 0; border-radius: 9px; background: none; color: var(--cg-text); text-align: left; cursor: pointer; }
+.cg-agent-option:hover { background: var(--cg-hover); }
+.cg-agent-option-name { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 500; line-height: 20px; }
+.cg-agent-option-desc { color: var(--cg-muted); font-size: 12px; line-height: 16px; white-space: normal; }
+.cg-agent-note { margin: 4px 0 0; color: #d4380d; font-size: 12px; line-height: 16px; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-agent-trigger, html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-agent-menu { border-color: #383838; background: #292929; }
+html[data-chatgpt-ui] .wSkVaW_composerHero .wSkVaW_heroWorkspaceRow { box-sizing: border-box; height: 40px; }
+html[data-chatgpt-ui] .cg-workspaces [class*="sectionHeader"] { padding-inline: 0; }
+html[data-chatgpt-ui] .cg-workspaces [class*="sectionLabel"] { color: var(--cg-muted); font-weight: 400; }
+html[data-chatgpt-ui] .cg-workspaces [class*="treeBody"] { padding-inline: 0; }
+html[data-chatgpt-ui] .cg-workspaces [class*="sessionRow"] { min-height: 31px; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-tabs,html[data-chatgpt-ui]:has([data-ds-dark-theme]) .wSkVaW_heroWorkspaceRow { background: #292929; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .pI_x6G_frame,html[data-chatgpt-ui]:has([data-ds-dark-theme]) [data-composer-card],html[data-chatgpt-ui]:has([data-ds-dark-theme]) .pI_x6G_sidebarCol { border-color: #383838; }
+@media (max-width: 720px) { html[data-chatgpt-ui] #root { padding: 4px 4px 4px 48px; } .cg-rail { width: 48px; padding-inline: 6px; } .cg-header { height: 56px; } .cg-tabs { width: 170px; } html[data-chatgpt-ui] .wSkVaW_composerHero { width: calc(100% - 24px); } html[data-chatgpt-ui] [class*="titleGroup"]:after { font-size: 24px; } }
+@media (max-width: 720px) {
+  html[data-chatgpt-ui] .pI_x6G_frame[data-sidebar-collapsed][data-rightbar-collapsed] { grid-template-columns: 0 minmax(0,1fr) 0 !important; }
+  html[data-chatgpt-ui] [data-sidebar-collapsed] .cg-tabs { left: 50%; }
+  html[data-chatgpt-ui] .wSkVaW_composerHero .wSkVaW_heroWorkspaceRow { margin-inline: 10px; }
+}
+
+html[data-chatgpt-ui] { --cg-laptop: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%224%22%20y%3D%224%22%20width%3D%2216%22%20height%3D%2212%22%20rx%3D%222%22%2F%3E%3Cpath%20d%3D%22M3%2018h18l1%202H2l1-2Z%22%2F%3E%3C%2Fsvg%3E"); }
+.cg-rail > .cg-button svg { width: 18px; height: 18px; flex: none; }
+.cg-rail > .cg-home { padding: 10px; }
+.cg-goal [data-icon="target"] { width: 16px; height: 16px; }
+
+html[data-chatgpt-ui] { --cg-corner: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%223%22%2F%3E%3Cpath%20d%3D%22M12%207v10M7%2012h10%22%2F%3E%3C%2Fsvg%3E"); }
+html[data-chatgpt-ui] { --cg-folder: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M3%208V6a2%202%200%200%201%202-2h5l3%203h6a2%202%200%200%201%202%202v10a2%202%200%200%201-2%202H5a2%202%200%200%201-2-2V8Zm0%202h18%22%2F%3E%3C%2Fsvg%3E"); }
+html[data-chatgpt-ui] [data-slot="conversation.hero.agentPreset"] > .cubgiG_menuAnchor { margin-left: auto; }
+html[data-chatgpt-ui] [data-slot="conversation.hero.agentPreset"] .cubgiG_seatLabel { display: none; }
+html[data-chatgpt-ui] [data-slot="conversation.hero.agentPreset"] button:after { display: block; flex: 0 0 16px; }
+html[data-chatgpt-ui] [data-sidebar-right-expand] svg { display: none; }
+html[data-chatgpt-ui] [data-sidebar-right-expand]:after { content: ''; display: block; width: 14px; height: 14px; background: #999; mask: var(--cg-corner) center / contain no-repeat; }
+html[data-chatgpt-ui] .pXSMma_folder { background: currentColor; mask: var(--cg-folder) center / contain no-repeat; }
+html[data-chatgpt-ui] .pXSMma_folder > * { display: none; }
+html[data-chatgpt-ui] ._7KE1Ra_triggerIcon { display: none; }
+.cg-settings { position: relative; width: 36px; height: 36px; color: #888; }
+.cg-settings button { position: absolute !important; inset: 0; display: flex !important; align-items: center; justify-content: center; border: 0; padding: 9px !important; width: 36px !important; height: 36px !important; border-radius: 7px; color: inherit; background: transparent; }
+.cg-settings button:hover { background: var(--cg-hover); }
+.cg-settings button svg { width: 18px; height: 18px; }
+.cg-native-settings[hidden] { display: none !important; }
+.cg-account-menu { position: fixed; z-index: 1000; left: 8px; bottom: 54px; width: min(228px, calc(100vw - 16px)); box-sizing: border-box; padding: 6px; border: 1px solid #e5e5e5; border-radius: 20px; background: var(--cg-page); color: var(--cg-text); box-shadow: 0 6px 20px #00000012; animation: cg-model-enter 120ms ease-out; }
+.cg-account-summary { display: flex; align-items: center; gap: 8px; padding: 6px 5px 4px; min-height: 46px; }
+.cg-account-avatar { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; background: #4d6bfe; color: white; font-size: 11px; }
+.cg-account-title { font-size: 13px; line-height: 18px; }
+.cg-account-balance { font-size: 15px; font-weight: 500; line-height: 21px; overflow-wrap: anywhere; }
+.cg-account-caption { color: #999; font-size: 11px; line-height: 16px; }
+.cg-account-separator { height: 1px; background: color-mix(in srgb, var(--cg-text) 9%, transparent); margin: 5px 6px; }
+.cg-settings .cg-account-menu > .cg-button { position: static !important; inset: auto; justify-content: flex-start; width: 100% !important; height: 29px !important; padding: 4px 6px !important; border-radius: 9px; color: var(--cg-text); font-size: 13px; line-height: 20px; gap: 7px; }
+.cg-settings .cg-account-menu > .cg-button:hover { background: var(--cg-hover); }
+.cg-settings .cg-account-menu > .cg-button:disabled { opacity: .5; cursor: default; }
+.cg-settings .cg-account-menu > .cg-button svg { width: 15px; height: 15px; flex: none; }
+.cg-account-hint { margin-left: auto; color: #999; font-size: 12px; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-account-menu { border-color: #383838; }
+@media (prefers-reduced-motion: reduce) { .cg-account-menu { animation: none; } }
+
+html[data-chatgpt-ui]:not([data-cg-setting-goal]) [data-slot="conversation.hero.agentPreset"] > * { display: none; }
+
+.cg-goal { display: inline-flex; align-items: center; cursor: default; }
+html[data-chatgpt-ui]:not([data-cg-setting-goal]) .cg-goal { display: none; }
+
+.cg-brand-anchor { position: relative; }
+.cg-brand { border-radius: 12px; padding: 3px 6px; margin-left: -6px; }
+.cg-brand:hover,.cg-brand[aria-expanded="true"] { background: var(--cg-hover); }
+.cg-brand-menu { box-sizing: border-box; position: absolute; z-index: 30; top: 36px; left: -2px; width: 240px; padding: 4px; border: 1px solid #e5e5e5; border-radius: 17px; background: var(--cg-page); box-shadow: 0 8px 24px #0000000c; }
+.cg-brand-menu .cg-brand-option { display: flex; justify-content: space-between; width: 100%; min-height: 54px; padding: 9px 8px; border-radius: 13px; text-align: left; gap: 12px; font-size: 13px; }
+.cg-brand-option:hover,.cg-brand-option:focus-visible { background: #f1f1f1; }
+.cg-brand-copy { display: flex; flex-direction: column; gap: 1px; }
+.cg-brand-name { line-height: 18px; color: var(--cg-text); }
+.cg-brand-description { color: var(--cg-muted); font-size: 12px; line-height: 17px; }
+.cg-brand-option > svg { flex: none; color: #555; margin-right: 3px; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-brand-option:hover,html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-brand-option:focus-visible { background: #303030; }
+
+.cg-schedule-nav strong { font-size: 18px; }
+.cg-task-upcoming { margin-top: 18px; color: var(--cg-muted); font-size: 14px; }
+.cg-task-empty { color: var(--cg-muted); font-size: 13px; margin: 12px 0 0; }
+.cg-schedules { height: 100%; overflow: auto; background: var(--cg-page); color: var(--cg-text); }
+.cg-schedule-content { max-width: 738px; margin: 0 auto; padding: clamp(70px, 23vh, 245px) 24px 60px; }
+.cg-task-clock { font-size: 44px; line-height: 54px; text-align: center; }
+.cg-schedule-content h1 { font-size: 18px; font-weight: 500; text-align: center; margin: 10px 0 4px; }
+.cg-task-subtitle { text-align: center; color: var(--cg-muted); font-size: 14px; margin: 0 0 46px; }
+.cg-task-templates { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
+.cg-task-template { display: flex; align-items: center; gap: 16px; min-height: 110px; padding: 20px; border: 1px dashed #e8e8e8; border-radius: 24px; color: var(--cg-text); background: transparent; text-align: left; cursor: pointer; }
+.cg-task-template:hover { background: var(--cg-hover); }
+.cg-task-template strong { font-size: 16px; font-weight: 400; }
+.cg-task-emoji { flex: none; width: 24px; font-size: 26px; }
+.cg-task-description { display: block; font-size: 14px; line-height: 21px; color: var(--cg-muted); margin-top: 4px; }
+.cg-task-note { font-size: 12px; color: var(--cg-muted); text-align: center; margin-top: 24px; }
+.cg-task-drafts { margin-top: 28px; }
+.cg-task-drafts h2,.cg-task-modal h2 { font-size: 18px; font-weight: 500; }
+.cg-task-drafts article { border-bottom: 1px solid #eee; padding: 16px 0; }
+.cg-task-drafts article > span { float: right; font-size: 12px; color: var(--cg-muted); }
+.cg-task-drafts article p { font-size: 14px; }
+.cg-task-modal-backdrop { position: fixed; inset: 0; z-index: 100; background: #0004; display: grid; place-items: center; }
+.cg-task-error { margin: 8px 0 0; color: #c54545; font-size: 12px; line-height: 17px; }
+.cg-task-modal { width: min(420px,calc(100vw - 80px)); padding: 24px; border-radius: 20px; background: var(--cg-page); box-shadow: 0 20px 80px #0002; }
+.cg-task-modal label { display: block; font-size: 13px; margin: 14px 0; }
+.cg-task-modal input,.cg-task-modal textarea,.cg-task-modal select,.cg-task-search { box-sizing: border-box; display: block; width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 9px; background: var(--cg-page); color: var(--cg-text); margin-top: 6px; font: inherit; }
+.cg-task-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.cg-task-form-actions > button[type=submit] { background: #3982fa; color: white; border: 0; border-radius: 8px; padding: 8px 16px; cursor: pointer; }
+@media(max-width: 850px) { .cg-task-templates { grid-template-columns: 1fr; } .cg-schedule-content { padding-top: 60px; } }
+
+.cg-model-root { position: relative; min-width: 0; color: var(--cg-text); }
+.cg-model-trigger { display: inline-flex; align-items: center; gap: 4px; max-width: min(300px,38vw); height: 28px; padding: 0 5px; border: 0; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; font-size: 12px; white-space: nowrap; }
+.cg-model-trigger:hover { background: var(--cg-hover); }
+.cg-model-trigger:disabled { opacity: .5; cursor: default; }
+.cg-model-trigger-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cg-model-trigger-effort { color: var(--cg-muted); }
+.cg-model-trigger-effort[data-ultra="true"] { color: #9b50ff; }
+/* Max's label takes the light purple end of the ramp — in the composer label and in the
+   popover's headline. Only the text: the other accents keep their own colour roles. */
+.cg-model-root[data-effort="xhigh"] .cg-model-trigger-effort,
+.cg-model-root[data-effort="max"] .cg-model-trigger-effort,
+.cg-model-popover[data-effort="xhigh"] .cg-model-summary strong,
+.cg-model-popover[data-effort="max"] .cg-model-summary strong { color: #a273f2; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-effort="xhigh"] .cg-model-trigger-effort,
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-effort="max"] .cg-model-trigger-effort,
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-popover[data-effort="xhigh"] .cg-model-summary strong,
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-popover[data-effort="max"] .cg-model-summary strong { color: #c9aaff; }
+.cg-model-trigger svg { color: var(--cg-muted); width: 12px; height: 12px; flex: none; }
+.cg-model-popover { --cg-effort-color: #3982fa; box-sizing: border-box; width: 256px; position: absolute; z-index: 60; right: 0; bottom: calc(100% + 10px); padding: 11px 12px 12px; border: 1px solid #e6e6e6; border-radius: 19px; background: var(--cg-page); box-shadow: 0 6px 14px #0000000c; }
+.cg-model-popover[data-ultra="true"] { --cg-effort-color: #9b50ff; }
+/* A model row is a selector plus its rename affordance. The button is a sibling of the selector (a
+   button inside a button is invalid markup) and stays out of the way: its box is always reserved so
+   nothing shifts, but it only becomes visible under the pointer. It carries no colour of its own —
+   an accent tinted by the current effort tier looked like it belonged to a different surface — so it
+   is the row's muted tone, and the row's own text tone under the pointer. */
+.cg-model-row { display: flex; align-items: center; gap: 2px; }
+.cg-model-row .cg-model-option { flex: 1 1 auto; min-width: 0; }
+.cg-model-rename { display: flex; flex: none; width: 20px; height: 20px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 6px; background: transparent; opacity: 0; color: var(--cg-muted); cursor: pointer; transition: opacity 120ms ease; }
+.cg-model-row:hover .cg-model-rename, .cg-model-rename:focus-visible { opacity: .45; }
+.cg-model-rename:hover, .cg-model-rename:focus-visible { opacity: .9; color: var(--cg-text); }
+/* The rename field takes the name's own place inside the row: no frame, the row's type, and it
+   wraps — a long name makes the box taller instead of running off the edge. The two glyphs at its
+   ends are the row's muted tone with no fill, so they read as part of the row, not as a form. */
+.cg-model-row-editing { gap: 2px; align-items: flex-start; }
+.cg-model-alias-input { box-sizing: border-box; flex: 1 1 auto; min-width: 0; margin: 0 2px; padding: 2px 2px 3px; border: 0; border-bottom: 1px solid var(--cg-effort-color); border-radius: 0; background: transparent; color: var(--cg-text); font: inherit; font-size: 13px; line-height: 18px; /* No height cap at all: a long name keeps making the field taller, which is what "no limit" has to mean. The list around it is the only thing that scrolls. */ overflow: hidden; resize: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cg-model-alias-input:focus { outline: none; }
+.cg-model-alias-input::placeholder { color: var(--cg-muted); }
+/* The two glyphs are the same weight and the same tone: a bright tick next to a dim cross read as
+   two different kinds of control, which is what made the pair look foreign in a list of names. */
+.cg-model-alias-save, .cg-model-alias-cancel { display: flex; flex: none; width: 20px; height: 20px; margin-top: 1px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--cg-muted); opacity: .75; cursor: pointer; }
+.cg-model-alias-save:hover, .cg-model-alias-cancel:hover { color: var(--cg-text); opacity: 1; }
+.cg-model-top { position: relative; display: flex; justify-content: center; align-items: center; min-height: 20px; color: var(--cg-effort-color); }
+/* Reaching Ultra stands the three controls down for a moment and puts the cost notice in
+   their row — the same exchange the original client makes. They fade rather than unmount so
+   the popover keeps its height and nothing jumps when the notice arrives or leaves. */
+.cg-model-ultra-notice {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  color: #a273f2; font-size: 12px; letter-spacing: .2px; white-space: nowrap;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity 180ms ease, visibility 0s linear 180ms;
+}
+.cg-model-popover[data-notice="true"] .cg-model-ultra-notice {
+  opacity: 1; visibility: visible;
+  transition: opacity 180ms ease, visibility 0s linear 0s;
+}
+.cg-model-popover[data-notice="true"] .cg-model-zap,
+.cg-model-popover[data-notice="true"] .cg-model-summary,
+.cg-model-popover[data-notice="true"] .cg-model-reset {
+  opacity: 0; visibility: hidden;
+  transition: opacity 180ms ease, visibility 0s linear 180ms;
+}
+.cg-model-popover .cg-model-zap,
+.cg-model-popover .cg-model-summary,
+.cg-model-popover .cg-model-reset { transition: opacity 180ms ease, visibility 0s linear 0s; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-ultra-notice { color: #c9aaff; }
+@media (prefers-reduced-motion: reduce) {
+  .cg-model-ultra-notice,
+  .cg-model-popover .cg-model-zap,
+  .cg-model-popover .cg-model-summary,
+  .cg-model-popover .cg-model-reset { transition: none; }
+}
+.cg-model-top strong { font-size: 14px; font-weight: 600; }
+.cg-model-zap { position: absolute; left: 0; top: 1px; width: 16px; height: 16px; color: var(--cg-effort-color); }
+.cg-model-reset { position: absolute; right: -2px; top: -2px; display: grid; place-items: center; width: 24px; height: 24px; padding: 4px; border: 0; border-radius: 50%; background: transparent; color: #999; cursor: pointer; }
+.cg-model-reset:hover { background: var(--cg-hover); }
+.cg-model-reset svg { width: 16px; height: 16px; }
+.cg-model-choice { display: flex; justify-content: center; align-items: center; gap: 2px; width: 100%; height: 20px; padding: 0; margin: 0 0 10px; border: 0; background: none; color: #888; font-size: 12px; cursor: pointer; }
+.cg-model-choice svg { width: 11px; height: 11px; }
+.cg-model-slider-shell { position: relative; height: 24px; margin: 0; border-radius: 20px; background: #e8e6e8; box-shadow: inset 0 0 0 1px #00000004; }
+.cg-model-slider-fill { position: absolute; left: 0; top: 0; height: 24px; border-radius: 20px; pointer-events: none; background: var(--cg-effort-color); }
+.cg-model-popover[data-ultra="true"] .cg-model-slider-fill { background: linear-gradient(95deg,#5055f5,#bb74ff); }
+.cg-model-slider-dots { position: absolute; inset: 0 12px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
+.cg-model-slider-dots span { width: 4px; height: 4px; border-radius: 50%; background: #b7b4b7; }
+/* The input is the drag surface and keeps the keyboard behaviour, but it is not the *painted* control:
+   the plugin draws the track, the fill, the tier dots and the round knob itself.
+   `opacity: 0` rather than styling the thumb pseudo-element, because that is the only way that does not
+   depend on the browser honouring `appearance: none` on `::-webkit-slider-thumb`. In the owner's build
+   it did not: the native widget kept painting a white rounded square at the value position while
+   ignoring `background: transparent` on that pseudo-element. Opacity affects the whole native widget,
+   whatever it decides to draw, and it does not affect hit testing — the slider still drags and still
+   takes arrow keys. Every white box this plugin owns is circular by construction (`.cg-model-thumb` is
+   28x28 with `border-radius: 50%`), so the square was never ours to round.
+   The focus ring moves to the shell, since an invisible input cannot show one. */
+.cg-model-slider { appearance: none; -webkit-appearance: none; box-sizing: border-box; position: relative; width: 100%; height: 24px; margin: 0; background: transparent; cursor: pointer; display: block; border: 0; padding: 0; opacity: 0; }
+.cg-model-slider-shell:has(.cg-model-slider:focus-visible) { outline: 2px solid #3982fa; outline-offset: 4px; }
+/* The plugin draws its own knob (`.cg-model-thumb`), so the input's own thumb is made *invisible*
+   rather than styled. Reason, observed: with `appearance: none` only declared unprefixed, some WebKit
+   builds never apply it to the `::-webkit-slider-thumb` pseudo-element, and the native control kept
+   painting a small white rounded square on top of our round knob — the "white square" the owner asked
+   about. `border-radius` could never have fixed that, because the square was not our element. The
+   knob itself is still rendered whenever the slider is, so nothing becomes invisible by accident. */
+.cg-model-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 28px; height: 28px; border: 0; border-radius: 50%; background: transparent; box-shadow: none; }
+.cg-model-slider::-moz-range-thumb { width: 26px; height: 26px; border: 0; border-radius: 50%; background: transparent; box-shadow: none; }
+.cg-model-slider:disabled { cursor: default; opacity: .6; }
+.cg-model-catalog { display: flex; flex-direction: column; max-height: 260px; overflow: auto; gap: 3px; padding: 2px 0 0; }
+.cg-model-provider { color: var(--cg-muted); font-size: 11px; padding: 6px 4px; }
+.cg-model-option { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 7px; border: 0; border-radius: 8px; background: none; color: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.cg-model-option:hover,.cg-model-option:focus-visible { background: var(--cg-hover); }
+.cg-model-option svg { width: 14px; height: 14px; flex: none; }
+.cg-model-error { font-size: 11px; color: #c54545; line-height: 16px; margin: 8px 0 0; }
+.cg-model-message { font-size: 12px; color: var(--cg-muted); text-align: center; margin: 8px 0; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-popover { border-color: #444; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-shell { background: #494649; }
+@media(max-width: 720px) { .cg-model-popover { width: min(256px,calc(100vw - 80px)); } .cg-model-trigger { max-width: 40vw; } }
+
+.cg-model-search { box-sizing: border-box; width: 100%; font-size: 12px; padding: 8px; margin: 4px 0; color: var(--cg-text); background: var(--cg-page); border: 1px solid #ddd; border-radius: 8px; }
+
+.cg-model-top { min-height: 40px; margin-bottom: 10px; }
+.cg-model-summary { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 102px; max-width: 190px; height: 40px; padding: 3px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--cg-effort-color); cursor: pointer; }
+.cg-model-summary:hover,.cg-model-summary:focus-visible { background: #f1f1f3; }
+.cg-model-summary-name { display: flex; align-items: center; justify-content: center; max-width: 100%; color: #888; font-size: 12px; line-height: 16px; white-space: nowrap; }
+.cg-model-summary-name svg { width: 11px; height: 11px; flex: none; }
+.cg-model-reset { border-radius: 7px; }
+.cg-model-reset:hover,.cg-model-reset:focus-visible { background: #f1f1f3; }
+.cg-model-tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); padding: 7px 12px; border-radius: 13px; background: #1c1e20; color: #fff; font-size: 12px; line-height: 16px; white-space: nowrap; box-shadow: 0 5px 14px #0002; pointer-events: none; }
+.cg-model-reset:hover .cg-model-tooltip,.cg-model-reset:focus-visible .cg-model-tooltip { display: block; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-summary:hover,html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-summary:focus-visible,html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-reset:hover,html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-reset:focus-visible { background: #404043; }
+
+.cg-rail-item { position: relative; justify-content: center; border-radius: 11px; color: #888; }
+/* The rail's hover growth lives on the *icon*, not on the button box: the name tooltip is a child of
+   the button, so scaling the box dragged the tooltip along and made the label twitch for the length
+   of the transition. Growing the glyph keeps the same feedback and leaves the tooltip's geometry
+   alone. */
+.cg-rail-item:hover { background: #e7e7e7; color: #202123; }
+.cg-rail > .cg-rail-item:hover { box-shadow: 0 3px 10px #00000026; }
+.cg-rail > .cg-rail-item svg { transition: transform 160ms cubic-bezier(.22, .8, .28, 1); }
+.cg-rail > .cg-rail-item:hover svg { transform: scale(1.2); }
+.cg-rail > .cg-rail-item:active svg { transform: scale(.94); }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-rail > .cg-rail-item:hover { box-shadow: 0 3px 10px #00000059; }
+.cg-rail-item.cg-rail-selected { background: #e7e7e7; color: #202123; }
+/* The name label arrives: hidden by opacity + visibility rather than `display`, because `display`
+   cannot be transitioned and a hard swap is what made it read as a twitch. It slides the last few
+   pixels into place, and the centering translate stays part of every state. */
+.cg-rail-tooltip { position: absolute; left: calc(100% + 5px); top: 50%; opacity: 0; visibility: hidden; transform: translateY(-50%) translateX(-4px); padding: 7px 12px; border-radius: 13px; background: #1c1e20; color: white; font-size: 12px; font-weight: 500; line-height: 16px; white-space: nowrap; box-shadow: 0 4px 14px #0002; pointer-events: none; z-index: 100; transition: opacity 120ms cubic-bezier(.22, .8, .28, 1), transform 170ms cubic-bezier(.22, .8, .28, 1), visibility 0s linear 120ms; }
+.cg-rail-item:hover .cg-rail-tooltip,.cg-rail-item:focus-visible .cg-rail-tooltip { opacity: 1; visibility: visible; transform: translateY(-50%) translateX(0); transition: opacity 110ms cubic-bezier(.22, .8, .28, 1), transform 170ms cubic-bezier(.22, .8, .28, 1), visibility 0s; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-rail-selected,html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-rail-item:hover { background: #343434; color: #ececec; --cg-rail-hand: #343434; }
+
+
+.cg-rail-item { --cg-icon-surface: #f2f2f2; }
+.cg-rail-item:hover,.cg-rail-selected { --cg-icon-surface: #e7e7e7; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-rail-item { --cg-icon-surface: #171717; }
+
+/* Match the visible footprint of 20px Lottie artwork and 24-unit icons. */
+.cg-rail > .cg-rail-item svg { width: 20px; height: 20px; display: block; flex: none; }
+
+.cg-pins-toggle { margin-top: 0; }
+.cg-section-toggle { color: #737373; font-size: 14px; line-height: 22px; }
+.cg-task-row { position: relative; height: 31px; border-radius: 10px; margin-inline: -6px; margin-bottom: 0; transition: background-color 150ms cubic-bezier(.22, .8, .28, 1); }
+.cg-task-row:hover, .cg-task-current { background: var(--cg-hover); }
+.cg-task-row .cg-pinned-row { padding: 4px 8px; border-radius: 10px; color: var(--cg-text); font-size: 13px; height: 31px; }
+/* Room for the action strip: 27px per button plus the 4px offset, so 93px for pin+archive+more
+   and 120px once an archived row adds delete. */
+.cg-task-row:hover .cg-pinned-row { padding-right: 93px; background: transparent; }
+.cg-task-actions { display: none; position: absolute; right: 4px; top: 2px; }
+.cg-task-row:hover .cg-task-actions, .cg-task-row:focus-within .cg-task-actions { display: flex; }
+.cg-task-actions .cg-button { width: 27px; height: 27px; padding: 5px; color: #888; }
+/* An archived row carries one extra action (delete), so its title keeps more room clear. */
+.cg-task-row.cg-task-archived:hover .cg-pinned-row { padding-right: 120px; }
+.cg-task-actions .cg-purge-action:hover svg { color: #d4380d; }
+/* A pinned row's pin stays tinted, so the row state is readable without opening the menu. */
+.cg-task-actions .cg-pin-on { color: #3982fa; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-task-actions .cg-pin-on { color: #6b9fff; }
+.cg-task-menu .cg-purge-action { color: #c54545; }
+/* Child sessions: two groups disclosed independently under a spawning row, children indent one
+   step per level. Each header carries its own label and count, so the two never read alike. */
+.cg-task-row.cg-task-with-children > .cg-pinned-row,
+.cg-task-row.cg-task-child > .cg-pinned-row { padding-left: calc(22px + var(--cg-branch-indent, 0px)); }
+/* The chevron is absolutely positioned on purpose: the row is a fixed 31px box, not a flex
+   container, so an inline button would push the full-width title onto a second line. The title
+   reserves its space through the padding rule above instead. */
+.cg-children-toggle { position: absolute; left: 4px; top: 6px; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 19px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--cg-muted); cursor: pointer; }
+.cg-children-toggle:hover { color: var(--cg-text); }
+.cg-children-toggle svg { transition: transform 150ms ease; }
+.cg-children-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.cg-task-row.cg-task-child > .cg-children-toggle { left: calc(4px + var(--cg-branch-indent, 0px)); }
+.cg-group-toggle { box-sizing: border-box; display: flex; align-items: center; gap: 6px; width: calc(100% + 12px); height: 24px; margin: 0 -6px 2px; padding: 2px 8px 2px calc(22px + var(--cg-branch-indent, 0px)); border: 0; border-radius: 8px; background: none; color: var(--cg-muted); font: inherit; font-size: 12px; line-height: 18px; text-align: left; cursor: pointer; }
+.cg-group-toggle:hover { background: var(--cg-hover); color: var(--cg-text); }
+.cg-group-toggle svg { flex: none; transition: transform 150ms ease; }
+.cg-group-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.cg-group-label { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cg-group-badge { flex: none; min-width: 17px; padding: 0 5px; border-radius: 9px; background: var(--cg-hover); color: var(--cg-muted); font-size: 11px; line-height: 15px; text-align: center; }
+.cg-group-more { box-sizing: border-box; display: block; width: calc(100% + 12px); margin: 0 -6px 3px; padding: 2px 8px 2px calc(22px + var(--cg-branch-indent, 0px)); border: 0; border-radius: 8px; background: none; color: var(--cg-muted); font: inherit; font-size: 12px; line-height: 18px; text-align: left; cursor: pointer; }
+.cg-group-more:hover { background: var(--cg-hover); color: var(--cg-text); }
+.cg-task-row.cg-task-child::before { content: ''; position: absolute; left: calc(10px + var(--cg-branch-indent, 0px)); top: 0; bottom: 0; width: 1px; background: var(--cg-hover); }
+.cg-task-preview { width: 300px; padding: 10px; box-sizing: border-box; z-index: 50; background: var(--cg-page); border: 1px solid #dedede; border-radius: 15px; box-shadow: 0 5px 12px #00000012; color: var(--cg-text); font-size: 13px; pointer-events: none; }
+/* The floating card is one element for the whole list. It is positioned by `transform`, which the
+   browser animates, so it slides after the pointer instead of being rebuilt (and its entrance
+   replayed) on every row. Hidden by opacity + visibility, since `display` cannot be transitioned. */
+.cg-task-preview-floating { position: fixed; left: 0; top: 0; opacity: 0; visibility: hidden; transition: transform 190ms cubic-bezier(.22, .8, .28, 1), opacity 140ms cubic-bezier(.22, .8, .28, 1), visibility 0s linear 140ms; }
+.cg-task-preview-floating[data-on="true"] { opacity: 1; visibility: visible; transition: transform 190ms cubic-bezier(.22, .8, .28, 1), opacity 120ms cubic-bezier(.22, .8, .28, 1); }
+.cg-task-preview strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; margin-bottom: 8px; }
+.cg-task-preview > div { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.cg-task-menu { position: absolute; z-index: 55; right: 0; top: 30px; padding: 4px; border: 1px solid #ddd; border-radius: 10px; background: var(--cg-page); box-shadow: 0 4px 12px #0001; }
+.cg-task-menu .cg-button { display: flex; width: 100%; white-space: nowrap; }
+
+/* Rename dialog, fixed so the sidebar's own scroller cannot clip it. */
+.cg-rename-backdrop { position: fixed; inset: 0; z-index: 120; background: #0004; display: grid; place-items: center; }
+.cg-rename-dialog { width: min(400px,calc(100vw - 80px)); padding: 20px; border-radius: 18px; background: var(--cg-page); box-shadow: 0 20px 80px #0002; }
+.cg-rename-dialog h2 { margin: 0 0 12px; font-size: 16px; font-weight: 500; color: var(--cg-text); }
+.cg-rename-input { box-sizing: border-box; display: block; width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 9px; background: var(--cg-page); color: var(--cg-text); font: inherit; }
+.cg-rename-error { margin: 8px 0 0; color: #c54545; font-size: 12px; line-height: 17px; }
+.cg-rename-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.cg-rename-actions button { border: 0; border-radius: 8px; padding: 8px 16px; font: inherit; cursor: pointer; }
+.cg-rename-cancel { background: var(--cg-hover); color: var(--cg-text); }
+.cg-rename-save { background: #3982fa; color: #fff; }
+.cg-rename-save:disabled, .cg-rename-cancel:disabled { opacity: .5; cursor: default; }
+
+/* Align disclosure and new-chat hit areas with the task rows. */
+.cg-navigation > .cg-new, .cg-browse > .cg-section-toggle { box-sizing: border-box; width: calc(100% + 12px); margin-left: -6px; margin-right: -6px; padding-left: 8px; padding-right: 8px; border-radius: 10px; justify-content: flex-start; }
+.cg-browse > .cg-section-toggle { min-height: 30px; }
+.cg-collapsed .cg-navigation > .cg-new { width: 100%; margin-inline: 0; padding-inline: 4px; justify-content: center; }
+
+.cg-model-root:has(.cg-model-popover) { z-index: 100; }
+.cg-model-popover { padding-bottom: 16px; background-color: var(--cg-page); isolation: isolate; }
+.cg-model-reset { box-sizing: border-box; padding: 4px; }
+.cg-model-reset svg { display: block; flex: none; width: 16px; height: 16px; overflow: visible; }
+.cg-model-slider-shell { margin-bottom: 2px; }
+
+/* Neutralize native/global range tracks; the shell draws the sole visible track. */
+.cg-model-slider::-webkit-slider-runnable-track { appearance: none; height: 24px; border: 0; border-radius: 20px; background: transparent !important; box-shadow: none !important; }
+.cg-model-slider::-webkit-slider-thumb { margin-top: -2px; }
+.cg-model-slider::-moz-range-track { height: 24px; border: 0; background: transparent !important; box-shadow: none !important; }
+.cg-model-slider::-moz-range-progress { background: transparent !important; border: 0; box-shadow: none !important; }
+.cg-model-slider { background: transparent !important; box-shadow: none !important; outline: none; }
+
+/* Both visible track ends stop at the thumb center, including minimum. */
+.cg-model-slider-shell { background: transparent !important; box-shadow: none; }
+.cg-model-slider-shell::before { content: ''; position: absolute; inset: 0 14px; border-radius: 20px; background: #e8e6e8; }
+.cg-model-slider-fill { left: 14px; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-shell::before { background: #494649; }
+
+/* Full-width track and an independent thumb with two-pixel end overlap. */
+.cg-model-slider-shell::before { inset: 0; }
+.cg-model-slider-fill { left: 0; }
+.cg-model-thumb { position: absolute; top: -2px; transform: translateX(-50%); box-sizing: border-box; width: 28px; height: 28px; border: 1px solid #e0e0e0; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px #00000004; pointer-events: none; z-index: 2; }
+.cg-model-slider::-webkit-slider-thumb { background: transparent; border-color: transparent; box-shadow: none; }
+.cg-model-slider::-moz-range-thumb { background: transparent; border-color: transparent; box-shadow: none; }
+
+/* Reference: pill track and a clean maximum-effort gradient. */
+.cg-model-slider-shell, .cg-model-slider-shell::before, .cg-model-slider-fill { border-radius: 12px; }
+.cg-model-slider-shell[data-max="true"] .cg-model-slider-dots { visibility: hidden; }
+.cg-model-thumb { border-radius: 50%; border-color: #e3e3e3; box-shadow: none; }
+.cg-model-popover[data-ultra="true"] .cg-model-slider-fill { background: linear-gradient(95deg, #5055f5 0%, #bb74ff 58%, #793af5 100%); }
+
+/* Depth ramp. The fill deepens with the tier instead of only changing at Ultra: six stops
+   are shared by every model, so three-tier and five-tier effort lists both move
+   monotonically, and the top tier — Max — runs into purple without any meteor. Only Ultra
+   keeps the animated shower (its rules are keyed on [data-ultra="true"] further down).
+   Low starts on a clean light blue: mixing the grey Off stop into it reads as dirty, and
+   nothing here lowers opacity — every stop is an opaque colour. */
+.cg-model-slider-shell {
+  --cg-e1: #b3cdff; /* Low: a real blue — a paler tone sat at the track's own lightness
+                       and read as grey-blue mud */
+  --cg-e2: #86acff;
+  --cg-e3: #6488f5; /* Medium */
+  --cg-e4: #4a63d8; /* High */
+  --cg-e5: #8a4ff0; /* Max -> purple */
+}
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-shell {
+  --cg-e1: #7fa3f5;
+  --cg-e2: #6b91ee;
+  --cg-e3: #5b80ea;
+  --cg-e4: #4f6ae0;
+  --cg-e5: #9a5cf5;
+}
+/* An unknown level id falls back to its bucketed position ... */
+.cg-model-slider-shell[data-depth="0"] .cg-model-slider-fill { background: transparent; }
+.cg-model-slider-shell[data-depth="1"] .cg-model-slider-fill { background: var(--cg-e1); }
+.cg-model-slider-shell[data-depth="2"] .cg-model-slider-fill { background: var(--cg-e2); }
+.cg-model-slider-shell[data-depth="3"] .cg-model-slider-fill { background: var(--cg-e3); }
+.cg-model-slider-shell[data-depth="4"] .cg-model-slider-fill { background: var(--cg-e4); }
+/* ... while an id the ramp knows wins, because it is the tier the model itself names.
+   Off fills nothing: a grey stub against a grey track only looked like a stray artefact. */
+.cg-model-slider-shell[data-effort="off"] .cg-model-slider-fill { background: transparent; }
+.cg-model-slider-shell[data-effort="none"] .cg-model-slider-fill { background: transparent; }
+.cg-model-slider-shell[data-effort="minimal"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e1), var(--cg-e2)); }
+.cg-model-slider-shell[data-effort="low"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e1), var(--cg-e2)); }
+.cg-model-slider-shell[data-effort="medium"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e2), var(--cg-e3)); }
+.cg-model-slider-shell[data-effort="high"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e3), var(--cg-e4)); }
+.cg-model-slider-shell[data-effort="xhigh"] .cg-model-slider-fill,
+.cg-model-slider-shell[data-effort="max"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e4), var(--cg-e5)); }
+/* Ultra must be declared here, after the depth buckets: the top position is depth 4, so a
+   bucket rule placed later silently outranks the gradient and leaves the whole bar blue —
+   which is exactly how the purple went missing.
+   Shape: a short blue lead-in and a bright purple right end stay put, while a soft deep
+   purple shade drifts slowly across the purple middle.
+   The shade is its own element rather than a sized background layer: a layer narrower than
+   the bar ends mid-falloff, and that cut-off painted a visible seam down each side. As an
+   element whose radial radii are exactly half its box, the falloff reaches zero before any
+   edge, and only the transform moves. */
+.cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill {
+  background: linear-gradient(90deg, #3f57c4 0%, #6f5ff2 12%, #8a4ff0 42%, #a855f7 74%, #bb74ff 100%);
+}
+.cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill::after {
+  content: '';
+  position: absolute;
+  top: -70%; bottom: -70%; left: 0; width: 62%;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, #4c1d95e6 0%, #4c1d9545 45%, #4c1d9500 100%);
+  animation: cg-model-ultra-drift 12s ease-in-out infinite alternate;
+}
+/* The shade is 62% of the bar, so its centre sits at translateX * 0.62 + 31%. 11%..50% keeps
+   that centre between 38% and 62% of the bar: the deep purple floats in the middle and never
+   reaches the blue lead-in on the left or the bright purple end on the right. */
+@keyframes cg-model-ultra-drift {
+  from { transform: translateX(11%); }
+  to { transform: translateX(50%); }
+}
+/* Max reads purple at the rim, and stays free of the Ultra shower. The rim keys on the
+   tier, not on the top position: with a virtual Ultra step appended, Max is the last real
+   tier and is deliberately not the maximum position. */
+.cg-model-slider-shell[data-effort="xhigh"]:not([data-ultra="true"])::before,
+.cg-model-slider-shell[data-effort="max"]:not([data-ultra="true"])::before { box-shadow: inset 0 0 0 1px #8a4ff04d; }
+.cg-model-slider-shell:not([data-ultra="true"]) .cg-model-slider-dots span[data-ultra="true"] { background: #b7b4b7; box-shadow: none; }
+.cg-model-slider-shell:not([data-ultra="true"]) .cg-model-meteors { display: none; }
+/* The dots carry the fill, not a fixed grey: a dot the fill has reached turns white with a
+   dark hairline so it stays legible on the pale Low blue as well as on the deep tiers, and
+   a dot still ahead stays the track marker. */
+.cg-model-slider-dots span[data-on="true"] { background: #fff; box-shadow: 0 0 0 1px #0000002e; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-dots span { background: #8b8992; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-dots span[data-on="true"] { background: #fff; box-shadow: 0 0 0 1px #00000052; }
+
+.cg-model-thumb { transition: left 100ms ease-out; }
+/* The transient Ultra cost notice is longer than any tier name, so it gets its own fit
+   instead of stretching the summary pill. */
+.cg-model-summary strong[data-notice="true"], .cg-model-trigger-effort[data-notice="true"] { font-size: 11px; letter-spacing: .2px; white-space: nowrap; }
+.cg-model-slider-fill { transition: width 100ms ease-out; }
+.cg-model-popover { animation: cg-model-enter 120ms ease-out; transform-origin: bottom right; }
+@keyframes cg-model-enter { from { opacity: 0; transform: translateY(3px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .cg-model-thumb, .cg-model-slider-fill { transition: none; } .cg-model-popover { animation: none; } }
+
+/* Reference sidebar typography and disclosure behavior. */
+.cg-brand { color: #424242; }
+.cg-navigation > .cg-new, .cg-browse > .cg-section-toggle { font-family: var(--dsw-font-family); color: #737373; }
+.cg-browse > .cg-section-toggle:hover, .cg-browse > .cg-section-toggle:active, .cg-browse > .cg-section-toggle:focus { background: transparent; }
+.cg-section-toggle svg { transition: transform 150ms ease-out, opacity 120ms ease-out; opacity: 1; }
+.cg-section-toggle[aria-expanded="true"] svg { transform: rotate(90deg); opacity: 0; }
+.cg-section-toggle[aria-expanded="true"]:hover svg, .cg-section-toggle[aria-expanded="true"]:focus-visible svg { opacity: 1; }
+.cg-browse { overflow: visible; }
+.cg-task-row .cg-pinned-row { color: #424242; }
+.cg-projects { display: flex; flex-direction: column; gap: 0; }
+.cg-projects > .cg-button { width: 100%; min-height: 31px; text-align: left; color: #424242; }
+.cg-navigation { min-height: 0; overflow: visible; }
+.cg-navigation .cg-browse { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; margin-inline: -6px; padding-inline: 6px; }
+.cg-navigation .cg-workspaces[hidden] { display: none; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-brand, html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-task-row .cg-pinned-row, html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-projects > .cg-button { color: var(--cg-text); }
+@media (prefers-reduced-motion: reduce) { .cg-section-toggle svg { transition: none; } }
+
+/* Animate a stable wrapper so native SVG styles cannot cancel rotation. */
+.cg-disclosure-arrow { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; flex: none; transform: rotate(0deg); transform-origin: center; opacity: 1; transition: transform 180ms ease, opacity 120ms ease; }
+.cg-section-toggle[aria-expanded="true"] .cg-disclosure-arrow { transform: rotate(90deg); opacity: 0; }
+.cg-section-toggle[aria-expanded="true"]:hover .cg-disclosure-arrow, .cg-section-toggle[aria-expanded="true"]:focus-visible .cg-disclosure-arrow { opacity: 1; }
+.cg-section-toggle .cg-disclosure-arrow svg { display: block; transform: none !important; opacity: 1 !important; transition: none; }
+
+.cg-task-preview-floating { display: block; position: fixed; z-index: 1000; margin: 0; }
+
+.cg-mode-status { margin: 4px 10px 6px; color: #777; font-size: 12px; line-height: 1.5; }
+.cg-brand-option:disabled { opacity: .55; cursor: default; }
+
+/* Completed turn disclosure: one shared color for text and arrow. */
+html[data-chatgpt-ui] .cg-turn-process {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  max-width: 100%;
+  min-height: 30px;
+  margin: 0 0 8px;
+  padding: 2px 0;
+  border: 0;
+  border-bottom: .5px solid var(--dsw-alias-border-l2, #e5e5e5);
+  background: transparent;
+  color: #999;
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  text-align: left;
+  cursor: pointer;
+  transition: color 140ms ease;
+}
+html[data-chatgpt-ui] .cg-turn-process:hover,
+html[data-chatgpt-ui] .cg-turn-process:focus-visible { color: #000; }
+html[data-chatgpt-ui] .cg-turn-process:focus-visible {
+  outline: 2px solid #3982fa;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+html[data-chatgpt-ui] .cg-turn-process:disabled { cursor: default; }
+html[data-chatgpt-ui] .cg-turn-process-arrow {
+  display: inline-flex;
+  color: inherit;
+  transition: transform 160ms ease;
+}
+html[data-chatgpt-ui] .cg-turn-process[aria-expanded="true"] .cg-turn-process-arrow { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+  html[data-chatgpt-ui] .cg-turn-process,
+  html[data-chatgpt-ui] .cg-turn-process-arrow { transition: none; }
+}
+
+
+
+/* Model catalog follows the reference's compact menu spacing. */
+.cg-model-popover[data-pane="model"] { padding: 4px; border-radius: 16px; box-shadow: 0 6px 14px #0000000c; }
+.cg-model-catalog-title { margin: 4px 8px 8px; color: #999; font-size: 12px; line-height: 20px; }
+.cg-model-catalog-default { padding: 0 8px; color: var(--cg-text); font-size: 12px; line-height: 18px; }
+.cg-model-popover[data-pane="model"] .cg-model-catalog { max-height: min(440px, 72vh); gap: 0; padding: 0; }
+.cg-model-popover[data-pane="model"] .cg-model-provider { padding: 0 8px 3px; font-size: 12px; line-height: 18px; }
+.cg-model-popover[data-pane="model"] .cg-model-option { box-sizing: border-box; min-height: 29px; padding: 4px 8px; line-height: 21px; border-radius: 10px; }
+.cg-model-popover[data-pane="model"] .cg-model-option[aria-checked="true"] { background: #f1f1f1; }
+.cg-model-popover[data-pane="model"] .cg-model-option:hover { background: var(--cg-hover); }
+.cg-model-trigger { padding: 0 9px; border-radius: 999px; }
+.cg-model-trigger[aria-expanded="true"] { background: #f1f1f1; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-option[aria-checked="true"],
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-trigger[aria-expanded="true"] { background: #404043; }
+
+/* User bubble metadata appears near the bubble and its action strip.
+   The pale blue is a light-theme choice and has to say so: unguarded it outranked DSH's own
+   `.Sixlwa_bubble { background: var(--dsw-specific-bubble) }` in the dark theme too, and the
+   dark label token (#ececec) on that pale blue came out at roughly 1.1:1 — an unreadable
+   message. In dark the token wins again, which is #2c2c2e under #ececec. */
+html[data-chatgpt-ui]:not(:has([data-ds-dark-theme])) .Sixlwa_userRow .Sixlwa_bubble { background: #E8F3FE; }
+html[data-chatgpt-ui] .Sixlwa_userRow > .xzv4MW_actions { opacity: 0; transition: opacity 120ms ease; }
+html[data-chatgpt-ui] .Sixlwa_userRow:has(.Sixlwa_userStack:hover) > .xzv4MW_actions,
+html[data-chatgpt-ui] .Sixlwa_userRow > .xzv4MW_actions:hover,
+html[data-chatgpt-ui] .Sixlwa_userRow:focus-within > .xzv4MW_actions { opacity: 1; }
+html[data-chatgpt-ui] button[aria-label="访问模式，当前：完全权限"] { color: #FF5C00; }
+@media (hover: none) {
+  html[data-chatgpt-ui] .Sixlwa_userRow > .xzv4MW_actions { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-chatgpt-ui] .Sixlwa_userRow > .xzv4MW_actions { transition: none; }
+}
+
+html[data-chatgpt-ui] { --cg-hover: #EEEFEF; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) { --cg-hover: #303030; }
+html[data-chatgpt-ui] .iWlSmW_trigger { position: relative; border-radius: 999px; }
+html[data-chatgpt-ui] .iWlSmW_chevron { display: none; }
+html[data-chatgpt-ui] .iWlSmW_trigger:hover,
+html[data-chatgpt-ui] .iWlSmW_trigger:focus-visible { background: var(--cg-hover); }
+html[data-chatgpt-ui] .iWlSmW_trigger::after {
+  content: '更改权限';
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 11px;
+  border-radius: 12px;
+  background: #1c1e20;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px #0002;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  z-index: 100;
+}
+html[data-chatgpt-ui] .iWlSmW_trigger:hover::after,
+html[data-chatgpt-ui] .iWlSmW_trigger:focus-visible::after { opacity: 1; visibility: visible; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .iWlSmW_trigger:hover,
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .iWlSmW_trigger:focus-visible { background: #404043; }
+
+/* Keep native UI aliases and queue text on the same interface family. */
+html[data-chatgpt-ui] {
+  --dsw-font: var(--font-sans-default);
+  --dsw-font-family-brand: var(--font-sans-default);
+}
+html[data-chatgpt-ui] ._7yHdaG_count,
+html[data-chatgpt-ui] ._7yHdaG_preview,
+html[data-chatgpt-ui] ._7yHdaG_editor { font-family: var(--dsw-font-family); }
+
+html[data-chatgpt-ui] .iWlSmW_trigger:has(.iWlSmW_chevronOpen)::after { opacity: 0; visibility: hidden; }
+html[data-chatgpt-ui] .wSkVaW_tabs { display: none; }
+html[data-chatgpt-ui] .wSkVaW_header:not(.wSkVaW_headerBlank) { min-height: 50px; padding-bottom: 10px; }
+
+/* Lightning orchestrator switch: a real button. Armed, the glyph paints itself with the
+   shared deep purple gradient and carries its sparkles, so no colour override is needed. */
+.cg-model-zap {
+  box-sizing: border-box; display: grid; place-items: center; width: 26px; height: 26px;
+  padding: 3px; border: 0; border-radius: 8px; background: transparent;
+  color: #b9b8bb; cursor: pointer; transition: color 140ms ease, background 140ms ease;
+}
+.cg-model-zap:hover:not(:disabled) { background: #f1f1f3; color: #6f6f73; }
+.cg-model-zap:focus-visible { outline: 2px solid #3982fa; outline-offset: 1px; }
+.cg-model-zap:disabled { cursor: default; opacity: .45; }
+.cg-model-zap-glyph { display: block; width: 18px; height: 18px; flex: none; transition: filter 160ms ease; }
+.cg-model-zap[data-on="true"] { color: #8a4ff0; }
+.cg-model-zap[data-on="true"] .cg-model-zap-glyph { filter: drop-shadow(0 0 5px #8a4ff08c); }
+.cg-model-zap[data-on="true"]:hover { background: #f3ebff; }
+/* The sparkles breathe out of phase; they are stars around the bolt, not a streak. */
+.cg-bolt-star { transform-box: fill-box; transform-origin: center; animation: cg-bolt-twinkle 2.2s ease-in-out infinite; }
+@keyframes cg-bolt-twinkle {
+  0%, 100% { opacity: .35; transform: scale(.7); }
+  45% { opacity: 1; transform: scale(1.15); }
+}
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-zap:hover:not(:disabled) { background: #404043; color: #d6d6d8; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-zap[data-on="true"] { color: #bb8dff; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-zap[data-on="true"]:hover { background: #362a4d; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-zap[data-on="true"]:hover { background: #2c3852; }
+
+/* Armed-state marker in the collapsed trigger, so the mode is visible with the
+   popover closed. */
+.cg-model-trigger-bolt { display: inline-flex; align-items: center; flex: none; color: #8a4ff0; }
+.cg-model-trigger-bolt svg { width: 14px; height: 14px; color: currentColor; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-trigger-bolt { color: #bb8dff; }
+
+/* Ultra: a meteor shower crosses the track. Each meteor is a gradient streak with a
+   bright leading point; the eleven of them run on negative delays, so the field is full
+   from the first painted frame instead of filling in over two seconds. Track width is
+   measured from the shell by the component, and this value is only the fallback for the
+   frames before that measurement lands. It is a pixel distance on purpose: `translateX`
+   resolves a percentage against the meteor's own width (14-42px), so `calc(100% + 36px)`
+   here let every streak die less than a third of the way along the rail. An extra sweep
+   runs along the track edge at maximum, and everything collapses to a static sheen under
+   reduced motion. */
+.cg-model-slider-shell { --cg-meteor-travel: 420px; overflow: hidden; }
+.cg-model-meteors { position: absolute; inset: 0; z-index: 1; border-radius: inherit; pointer-events: none; }
+.cg-model-meteor {
+  position: absolute; top: var(--cg-meteor-y); left: 0; display: block;
+  width: var(--cg-meteor-len); height: var(--cg-meteor-thick);
+  border-radius: 999px; transform-origin: left center;
+  background: linear-gradient(90deg, #ffffff00, #a98cff5c 32%, #d9c8ffdd 70%, #ffffff);
+  filter: drop-shadow(0 0 3px #c9a8ffcc);
+  opacity: 0; animation: cg-model-meteor var(--cg-meteor-dur) linear var(--cg-meteor-delay) infinite;
+}
+/* The leading point: brighter, round, and slightly ahead of the tail. */
+.cg-model-meteor::after {
+  content: ''; position: absolute; right: -1px; top: 50%; width: 2px; height: 2px;
+  margin-top: -1px; border-radius: 50%; background: #fff; box-shadow: 0 0 6px 1px #d9c2ffff;
+}
+/* Eleven streaks, every gap under ~0.4s and none of the periods a multiple of another, so
+   the field never falls into a visible rhythm; the short ones read as fast dust. */
+.cg-model-meteor:nth-child(1) { --cg-meteor-y: 3px; --cg-meteor-delay: -0.1s; --cg-meteor-dur: 1.5s; --cg-meteor-len: 26px; --cg-meteor-thick: 2px; }
+.cg-model-meteor:nth-child(2) { --cg-meteor-y: 8px; --cg-meteor-delay: -0.5s; --cg-meteor-dur: 1.9s; --cg-meteor-len: 34px; --cg-meteor-thick: 2px; }
+.cg-model-meteor:nth-child(3) { --cg-meteor-y: 13px; --cg-meteor-delay: -0.88s; --cg-meteor-dur: 2.1s; --cg-meteor-len: 20px; --cg-meteor-thick: 3px; }
+.cg-model-meteor:nth-child(4) { --cg-meteor-y: 18px; --cg-meteor-delay: -1.26s; --cg-meteor-dur: 1.7s; --cg-meteor-len: 30px; --cg-meteor-thick: 2px; }
+.cg-model-meteor:nth-child(5) { --cg-meteor-y: 21px; --cg-meteor-delay: -1.62s; --cg-meteor-dur: 2.3s; --cg-meteor-len: 42px; --cg-meteor-thick: 2px; }
+.cg-model-meteor:nth-child(6) { --cg-meteor-y: 6px; --cg-meteor-delay: -1.98s; --cg-meteor-dur: 2.6s; --cg-meteor-len: 16px; --cg-meteor-thick: 2px; }
+.cg-model-meteor:nth-child(7) { --cg-meteor-y: 11px; --cg-meteor-delay: -0.3s; --cg-meteor-dur: 1.6s; --cg-meteor-len: 14px; --cg-meteor-thick: 2px; }
+.cg-model-meteor:nth-child(8) { --cg-meteor-y: 15px; --cg-meteor-delay: -1.14s; --cg-meteor-dur: 2s; --cg-meteor-len: 38px; --cg-meteor-thick: 2px; }
+.cg-model-meteor:nth-child(9) { --cg-meteor-y: 19px; --cg-meteor-delay: -0.68s; --cg-meteor-dur: 1.8s; --cg-meteor-len: 22px; --cg-meteor-thick: 3px; }
+.cg-model-meteor:nth-child(10) { --cg-meteor-y: 5px; --cg-meteor-delay: -1.44s; --cg-meteor-dur: 2.2s; --cg-meteor-len: 12px; --cg-meteor-thick: 2px; }
+.cg-model-meteor:nth-child(11) { --cg-meteor-y: 9px; --cg-meteor-delay: -0.22s; --cg-meteor-dur: 2.45s; --cg-meteor-len: 18px; --cg-meteor-thick: 2px; }
+@keyframes cg-model-meteor {
+  0% { transform: translateX(-44px); opacity: 0; }
+  10% { opacity: 1; }
+  72% { opacity: .9; }
+  100% { transform: translateX(var(--cg-meteor-travel)); opacity: 0; }
+}
+/* A wide glare sweeps the track once every few seconds, so the field reads as moving
+   even between meteors. Carried by ::after, which the star field does not need. */
+.cg-model-slider-shell[data-ultra="true"]::after {
+  content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(105deg, #ffffff00 44%, #ffffffa8 50%, #d9c8ff8c 56%, #ffffff00 62%);
+  background-size: 220% 100%; mix-blend-mode: screen;
+  animation: cg-model-glare 3.4s ease-in-out infinite;
+}
+@keyframes cg-model-glare {
+  0% { background-position: 150% 0; opacity: 0; }
+  18% { opacity: .9; }
+  70% { opacity: .9; }
+  100% { background-position: -60% 0; opacity: 0; }
+}
+/* Star field rides the meteor layer's own pseudo-element-free element list, so the
+   twinkle is drawn by a dedicated overlay instead of competing with the glare. */
+.cg-model-meteors::before {
+  content: ''; position: absolute; inset: 3px 8px; border-radius: inherit;
+  background-image:
+    radial-gradient(1.5px 1.5px at 8% 30%, #ffffffdd, transparent),
+    radial-gradient(1.2px 1.2px at 20% 68%, #f2ebffcc, transparent),
+    radial-gradient(1.2px 1.2px at 28% 72%, #e5d9ffcc, transparent),
+    radial-gradient(1.8px 1.8px at 39% 22%, #ffffffcc, transparent),
+    radial-gradient(1.2px 1.2px at 47% 26%, #ffffffcc, transparent),
+    radial-gradient(1.1px 1.1px at 55% 74%, #cbb4ffcc, transparent),
+    radial-gradient(1.2px 1.2px at 66% 66%, #d9c8ffee, transparent),
+    radial-gradient(1.4px 1.4px at 74% 34%, #ffffffdd, transparent),
+    radial-gradient(1.5px 1.5px at 84% 38%, #ffffffdd, transparent),
+    radial-gradient(1.1px 1.1px at 93% 74%, #cbb4ffcc, transparent);
+  animation: cg-model-twinkle 2.2s ease-in-out infinite alternate;
+}
+@keyframes cg-model-twinkle { from { opacity: .3; } to { opacity: 1; } }
+.cg-model-slider-shell[data-ultra="true"] .cg-model-thumb {
+  border-color: #d3b6ff;
+  box-shadow: 0 0 6px #a066ff99, 0 0 16px #8b5cf68c, 0 0 0 1px #ffffff99 inset;
+}
+.cg-model-slider-shell[data-ultra="true"][data-max="true"] .cg-model-thumb {
+  animation: cg-model-thumb-pulse 2.4s ease-in-out infinite;
+}
+@keyframes cg-model-thumb-pulse {
+  0%, 100% { box-shadow: 0 0 6px #a066ff80, 0 0 14px #8b5cf666, 0 0 0 1px #ffffff99 inset; }
+  50% { box-shadow: 0 0 10px #b98cffff, 0 0 26px #8b5cf6aa, 0 0 0 1px #ffffffcc inset; }
+}
+.cg-model-popover[data-ultra="true"] .cg-model-slider-shell::before { box-shadow: inset 0 0 0 1px #bb74ff3d; }
+/* The appended Ultra position is drawn darker: it is a mode, not a real tier. */
+.cg-model-slider-dots span[data-ultra="true"] { background: #9b50ff; box-shadow: 0 0 5px #9b50ff99; }
+@media (prefers-reduced-motion: reduce) {
+  .cg-model-meteor, .cg-model-meteors::before,
+  .cg-model-slider-shell[data-ultra="true"]::after,
+  .cg-model-slider-shell[data-ultra="true"][data-max="true"] .cg-model-thumb { animation: none; }
+  .cg-model-meteor { opacity: .45; }
+  .cg-model-slider-shell[data-ultra="true"]::after { opacity: .35; background-position: 50% 0; }
+  /* The drifting deep purple parks in the middle instead of moving, and the bolt's sparkles
+     hold a steady glow. */
+  .cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill::after { animation: none; transform: translateX(30%); }
+  .cg-bolt-star { animation: none; opacity: .85; transform: none; }
+  .cg-model-zap, .cg-model-zap-glyph { transition: none; }
+}
+
+/* ---- Motion: the panels and rows cross over instead of snapping --------------------------------
+   The house curve is cubic-bezier(.22,.8,.28,1) at 140-180ms: quick enough to feel like a response
+   rather than a wait, and eased so nothing starts or stops abruptly. Everything here is decoration —
+   the reduced-motion block at the end switches all of it off. */
+.cg-model-pane { animation: cg-soft-in 170ms cubic-bezier(.22, .8, .28, 1); }
+.cg-model-editor { display: flex; flex: 1 1 auto; min-width: 0; align-items: flex-start; gap: 2px; animation: cg-soft-in 140ms cubic-bezier(.22, .8, .28, 1); }
+.cg-model-viewer { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 2px; animation: cg-soft-in 140ms cubic-bezier(.22, .8, .28, 1); }
+.cg-menu, .cg-task-menu { animation: cg-soft-in 130ms cubic-bezier(.22, .8, .28, 1); transform-origin: top left; }
+@keyframes cg-soft-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.cg-button, .cg-model-option, .cg-model-rename, .cg-model-alias-save, .cg-model-alias-cancel,
+.cg-model-summary, .cg-model-zap, .cg-model-reset, .cg-model-choice, .cg-rail-item, .cg-task-menu .cg-button {
+  transition: background-color 140ms cubic-bezier(.22, .8, .28, 1), color 140ms cubic-bezier(.22, .8, .28, 1),
+    opacity 140ms cubic-bezier(.22, .8, .28, 1), border-color 140ms cubic-bezier(.22, .8, .28, 1);
+}
+/* The rail buttons also carry the hover scale, so it needs its own duration in the same list. */
+.cg-rail-item { transition: background-color 140ms cubic-bezier(.22, .8, .28, 1), color 140ms cubic-bezier(.22, .8, .28, 1),
+  opacity 140ms cubic-bezier(.22, .8, .28, 1), transform 150ms cubic-bezier(.22, .8, .28, 1); }
+.cg-task-row .cg-pinned-row { transition: padding-right 170ms cubic-bezier(.22, .8, .28, 1), background-color 140ms cubic-bezier(.22, .8, .28, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .cg-model-pane, .cg-model-editor, .cg-model-viewer, .cg-menu, .cg-task-menu { animation: none; }
+  .cg-button, .cg-model-option, .cg-model-rename, .cg-model-alias-save, .cg-model-alias-cancel,
+  .cg-model-summary, .cg-model-zap, .cg-model-reset, .cg-model-choice, .cg-rail-item,
+  .cg-task-menu .cg-button, .cg-task-row .cg-pinned-row { transition: none; }
+}
+/* The host's own menus (the sidebar's chat menu, the runtime picker and friends) are matched
+   structurally instead of by build-hashed class name: ARIA roles plus a substring on the class
+   covers what this app renders without pinning a hash that the next DSH build would change. */
+html[data-chatgpt-ui] [role="menu"], html[data-chatgpt-ui] [role="listbox"],
+html[data-chatgpt-ui] [class*="_menu_"], html[data-chatgpt-ui] [class*="_popover_"],
+html[data-chatgpt-ui] [class*="_dropdown_"], html[data-chatgpt-ui] [class*="_popup_"],
+html[data-chatgpt-ui] [class*="_contextMenu"] {
+  animation: cg-soft-in 140ms cubic-bezier(.22, .8, .28, 1);
+  transform-origin: top left;
+}
+html[data-chatgpt-ui] [role="menuitem"], html[data-chatgpt-ui] [role="option"],
+html[data-chatgpt-ui] [class*="_menu_"] button, html[data-chatgpt-ui] [class*="_menu_"] a {
+  transition: background-color 140ms cubic-bezier(.22, .8, .28, 1), color 140ms cubic-bezier(.22, .8, .28, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-chatgpt-ui] [role="menu"], html[data-chatgpt-ui] [role="listbox"],
+  html[data-chatgpt-ui] [class*="_menu_"], html[data-chatgpt-ui] [class*="_popover_"],
+  html[data-chatgpt-ui] [class*="_dropdown_"], html[data-chatgpt-ui] [class*="_popup_"],
+  html[data-chatgpt-ui] [class*="_contextMenu"] { animation: none; }
+}
+
+/* The sidebar's hover card (title plus an excerpt of the chat) lives in its own CSS module, found
+   in the app's stylesheet as `_preview_38jqx_52` / `_card_38jqx_9` — the same module id, so the
+   card and its preview text belong together. Matched by those substrings rather than by the hash,
+   and the tooltip family is included for the same reason. */
+html[data-chatgpt-ui] [class*="_preview"], html[data-chatgpt-ui] [class*="_card_"],
+html[data-chatgpt-ui] [class*="_tooltip_"], html[data-chatgpt-ui] [role="tooltip"] {
+  animation: cg-soft-in 160ms cubic-bezier(.22, .8, .28, 1);
+  transform-origin: top left;
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-chatgpt-ui] [class*="_preview"], html[data-chatgpt-ui] [class*="_card_"],
+  html[data-chatgpt-ui] [class*="_tooltip_"], html[data-chatgpt-ui] [role="tooltip"] { animation: none; }
+}
+
+/* The right rail's own pieces (the turn rail, its labels, the thumb on the control track, the
+   selection rail, the request-boundary control) are matched by the *name* half of their hashed
+   class — `38jqx`-style hashes change with every build, the names do not. They get the same 180ms
+   curve as the rest of this UI, so a marker slides between turns instead of jumping; that is the
+   treatment the chat list's hover card already got. */
+html[data-chatgpt-ui] [class*="turnRail"], html[data-chatgpt-ui] [class*="turnLabel"],
+html[data-chatgpt-ui] [class*="controlThumb"], html[data-chatgpt-ui] [class*="controlTrack"],
+html[data-chatgpt-ui] [class*="selectionRail"], html[data-chatgpt-ui] [class*="requestBoundaryControl"],
+html[data-chatgpt-ui] [class*="requestDetailsDot"] {
+  transition: transform 180ms cubic-bezier(.22, .8, .28, 1), top 180ms cubic-bezier(.22, .8, .28, 1),
+    left 180ms cubic-bezier(.22, .8, .28, 1), height 170ms cubic-bezier(.22, .8, .28, 1),
+    opacity 150ms cubic-bezier(.22, .8, .28, 1), background-color 150ms cubic-bezier(.22, .8, .28, 1),
+    color 150ms cubic-bezier(.22, .8, .28, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-chatgpt-ui] [class*="turnRail"], html[data-chatgpt-ui] [class*="turnLabel"],
+  html[data-chatgpt-ui] [class*="controlThumb"], html[data-chatgpt-ui] [class*="controlTrack"],
+  html[data-chatgpt-ui] [class*="selectionRail"], html[data-chatgpt-ui] [class*="requestBoundaryControl"],
+  html[data-chatgpt-ui] [class*="requestDetailsDot"] { transition: none; }
+}
+
+/* The dashes on the right are the trajectory package's rail (`hash_turnRail`, `hash_turnLabel`,
+   `hash_turnLabelActive` …). The rule below reaches *everything inside* the rail plus its
+   pseudo-elements, because the mark that looks like a moving box may well be drawn by one.
+   `!important` is deliberate here and only here: the third party sets its own `transition` on some
+   of these elements (0.12s), and a same-specificity override would lose the cascade coin toss. */
+html[data-chatgpt-ui] [class*="turnRail"],
+html[data-chatgpt-ui] [class*="turnRail"] *,
+html[data-chatgpt-ui] [class*="turnRail"]::before,
+html[data-chatgpt-ui] [class*="turnRail"]::after,
+html[data-chatgpt-ui] [class*="turnRail"] *::before,
+html[data-chatgpt-ui] [class*="turnRail"] *::after,
+html[data-chatgpt-ui] [class*="turnLabel"] {
+  transition: transform 190ms cubic-bezier(.22, .8, .28, 1) !important,
+    top 190ms cubic-bezier(.22, .8, .28, 1) !important,
+    left 190ms cubic-bezier(.22, .8, .28, 1) !important,
+    bottom 190ms cubic-bezier(.22, .8, .28, 1) !important,
+    height 180ms cubic-bezier(.22, .8, .28, 1) !important,
+    width 180ms cubic-bezier(.22, .8, .28, 1) !important,
+    opacity 150ms cubic-bezier(.22, .8, .28, 1) !important,
+    background-color 150ms cubic-bezier(.22, .8, .28, 1) !important,
+    box-shadow 150ms cubic-bezier(.22, .8, .28, 1) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-chatgpt-ui] [class*="turnRail"],
+  html[data-chatgpt-ui] [class*="turnRail"] *,
+  html[data-chatgpt-ui] [class*="turnRail"]::before,
+  html[data-chatgpt-ui] [class*="turnRail"]::after,
+  html[data-chatgpt-ui] [class*="turnRail"] *::before,
+  html[data-chatgpt-ui] [class*="turnRail"] *::after,
+  html[data-chatgpt-ui] [class*="turnLabel"] { transition: none !important; }
+}
+
+/* New-chat hero mark, the settings picker that chooses it, and the Codex mark's click animation. */
+.cg-hero-mark { display: block; color: inherit; }
+/* Lifted clear of the slot's own box, and the lift is repeated in every keyframe of the click
+   animation: that animation writes `transform`, so a static translate here would be overwritten the
+   moment the mark is clicked and the icon would drop back down mid-animation. The mark is also not
+   focusable (see the component), so a click cannot draw a focus ring around it. */
+.cg-hero-mark-codex { cursor: pointer; transform: translateY(-9px); outline: none; user-select: none; -webkit-user-select: none; }
+.cg-hero-mark-image { object-fit: contain; border-radius: 8px; }
+/* Click animation: the mark tips over, the chevron and the dash slide, then everything settles. */
+@keyframes cg-codex-pop {
+  0% { transform: translateY(-9px) rotate(0deg) scale(1); }
+  30% { transform: translateY(-9px) rotate(-7deg) scale(1.05); }
+  62% { transform: translateY(-9px) rotate(5deg) scale(1.02); }
+  100% { transform: translateY(-9px) rotate(0deg) scale(1); }
+}
+@keyframes cg-codex-chevron {
+  0%, 100% { transform: translateX(0); }
+  35% { transform: translateX(3px); }
+  70% { transform: translateX(-1px); }
+}
+@keyframes cg-codex-dash {
+  0%, 100% { transform: translateX(0); }
+  40% { transform: translateX(-4px); }
+}
+.cg-hero-mark-pulse { animation: cg-codex-pop 620ms cubic-bezier(.22, .8, .28, 1); transform-origin: 50% 50%; }
+.cg-hero-mark-pulse .cg-hero-mark-codex-chevron { animation: cg-codex-chevron 620ms cubic-bezier(.22, .8, .28, 1); }
+.cg-hero-mark-pulse .cg-hero-mark-codex-dash { animation: cg-codex-dash 620ms cubic-bezier(.22, .8, .28, 1); }
+
+.cg-mark-picker { position: fixed; left: 56px; bottom: 64px; z-index: 500; width: min(268px, calc(100vw - 80px)); box-sizing: border-box; padding: 12px; border-radius: 14px; background: var(--cg-popover, #ffffff); color: var(--cg-text, #202123); box-shadow: 0 10px 34px #0000002e, 0 0 0 1px var(--cg-border, #00000014); animation: cg-soft-in 160ms cubic-bezier(.22, .8, .28, 1); }
+.cg-mark-title { margin: 2px 4px 8px; font-size: 13px; font-weight: 600; }
+.cg-mark-option { width: 100%; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 10px; font-size: 13px; }
+.cg-mark-option:hover { background: var(--cg-hover, #f2f2f2); }
+.cg-mark-option[aria-checked="true"] { color: var(--cg-accent, #4d6bfe); }
+.cg-mark-file { display: block; width: 100%; margin: 8px 0 6px; font-size: 12px; color: var(--cg-muted, #6b6b6b); }
+.cg-mark-file::file-selector-button { margin-right: 8px; padding: 4px 10px; border: 0; border-radius: 8px; background: var(--cg-hover, #f2f2f2); color: inherit; font: inherit; cursor: pointer; }
+.cg-mark-hint { margin: 4px 4px 0; font-size: 11.5px; line-height: 16px; color: var(--cg-muted, #6b6b6b); }
+.cg-mark-error { margin: 6px 4px 0; font-size: 11.5px; line-height: 16px; color: #c0392b; }
+.cg-mark-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+.cg-mark-close { padding: 5px 12px; border-radius: 9px; font-size: 12.5px; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-mark-picker { background: #2b2b2b; color: #ececec; box-shadow: 0 10px 34px #00000073, 0 0 0 1px #ffffff1a; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-mark-option:hover, html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-mark-file::file-selector-button { background: #3a3a3a; }
+@media (prefers-reduced-motion: reduce) {
+  .cg-hero-mark-pulse, .cg-hero-mark-pulse .cg-hero-mark-codex-chevron, .cg-hero-mark-pulse .cg-hero-mark-codex-dash { animation: none; }
+  .cg-mark-picker { animation: none; }
+}
+
+/* The model-name sync state: one muted line at the foot of the settings menu. It exists because the
+   failure mode of this feature was invisible — a push that reached nothing looked exactly like success
+   — and it lives here, not under the reasoning slider, which is a place the eye rests. */
+.cg-account-sync { margin: 8px 4px 2px; font-size: 11px; line-height: 15px; color: var(--cg-muted, #6b6b6b); }
+.cg-account-sync[data-phase="failed"] { color: #c0392b; }
+.cg-account-sync[data-phase="ok"] { color: #2e7d32; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-account-sync[data-phase="ok"] { color: #6cc48a; }
+.cg-model-sync-warn { color: #c0392b; }
+.cg-model-sync-warn { color: #c0392b; }
+
+/* ---------------------------------------------------------------------------------------------
+   思考中的提示：藏掉宿主的鲸鱼尾与闪烁文字，改成一句淡灰的「正在思考」。
+   宿主的 RunningStatus 渲染 `[data-chat-running]`：一条鲸鱼尾 + 一段带动画渐变的文字（蓝色）。
+   这里把尾巴与宿主文字藏起来（文字仍在 DOM 里，脚本从它读出行进时间，见 client.js 的
+   startRunningStatusStyle），只把措辞与颜色换成自己的——不加图标、不保留宿主的闪烁。
+   期间用时由脚本写进 `--cg-running-for`，不重写宿主的文本节点——宿主每秒重渲染一次，改动它的
+   文字会与它抢同一个节点。
+   --------------------------------------------------------------------------------------------- */
+html[data-chatgpt-ui] [data-chat-running] svg,
+html[data-chatgpt-ui] [data-chat-running] [class*="whale"],
+html[data-chatgpt-ui] [data-chat-running] [class*="Whale"] { display: none; }
+html[data-chatgpt-ui] [data-chat-running] [class*="runningText"] {
+  font-size: 0;
+  /* The host animates a gradient through this element with `background-clip: text`; neither the
+     gradient nor the transparent fill may leak into the redrawn label. */
+  background: none; -webkit-text-fill-color: #8c8c8c; color: #8c8c8c;
+}
+html[data-chatgpt-ui] [data-chat-running] [class*="runningText"]::after {
+  content: '正在思考' var(--cg-running-for, '');
+  font-size: 12.5px; letter-spacing: .2px; white-space: nowrap;
+  color: #8c8c8c; -webkit-text-fill-color: #8c8c8c;
+}
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) [data-chat-running] [class*="runningText"],
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) [data-chat-running] [class*="runningText"]::after {
+  color: #9a9a9a; -webkit-text-fill-color: #9a9a9a;
+}
+.cg-running-hook { display: none; }
+/* Zero the block's own top margin. The host applies the flow gap through a sibling rule
+   (`.…_flowItem + .…_flowItem { margin-top: var(--dsh-chat-flow-gap) }`, 12px or 16px) and carries that
+   variable on the running block itself, so overriding the *variable* here would change nothing above it;
+   `margin-top: 0` on the block is what actually wins, because this selector is more specific than that
+   rule. What this cannot fix: if the space above the indicator looks far larger than 12–16px, it is not
+   this gap — it is the height of the assistant message that has not been written yet. */
+html[data-chatgpt-ui] [data-chat-running] { margin-top: 0; padding-top: 0; }
+html[data-chatgpt-ui] [data-chat-running] [class*="runningDivider"] { margin: 0; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-chatgpt-ui] [data-chat-running] [class*="runningText"]::after { animation: none; }
+}
+
+/* ---------------------------------------------------------------------------------------------
+   提供商参考清单（模型面板标题旁那个按钮打开的第二页）。
+   用原生 <details>/<summary> 做折叠：展开状态由浏览器维护，不需要插件再加一个 state——面板里的
+   每一个 useState 都被测试垫片的槽位表盯着，能不加就不加。
+   --------------------------------------------------------------------------------------------- */
+html[data-chatgpt-ui] .cg-model-catalog-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+html[data-chatgpt-ui] .cg-model-providers-button {
+  flex: none; height: 24px; padding: 0 10px; border: 1px solid var(--cg-line, #e8e8e8); border-radius: 999px;
+  background: var(--cg-page, #fff); color: var(--cg-muted, #6b6b6b); font-size: 12px; line-height: 22px; cursor: pointer;
+}
+html[data-chatgpt-ui] .cg-model-providers-button:hover { background: var(--cg-hover, #f2f2f2); color: var(--cg-text, #1a1a1a); }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-providers-button { border-color: #383838; background: #292929; color: #a8a8a8; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-providers-button:hover { background: #333; color: #ececec; }
+html[data-chatgpt-ui] .cg-model-provider-note { margin: 6px 2px 8px; color: var(--cg-muted, #6b6b6b); font-size: 11px; line-height: 15px; }
+html[data-chatgpt-ui] .cg-model-providers { max-height: 320px; overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+html[data-chatgpt-ui] .cg-model-provider-region { margin: 8px 2px 4px; color: var(--cg-muted, #6b6b6b); font-size: 11px; font-weight: 600; letter-spacing: .4px; }
+html[data-chatgpt-ui] .cg-model-provider { border-bottom: 1px solid var(--cg-line, #f0f0f0); }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-provider { border-bottom-color: #2f2f2f; }
+html[data-chatgpt-ui] .cg-model-provider-name {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 7px 6px; color: var(--cg-text, #1a1a1a); font-size: 13px; line-height: 18px; cursor: pointer; list-style: none;
+}
+html[data-chatgpt-ui] .cg-model-provider-name::-webkit-details-marker { display: none; }
+html[data-chatgpt-ui] .cg-model-provider-name:hover { background: var(--cg-hover, #f5f5f5); }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-provider-name:hover { background: #2f2f2f; }
+html[data-chatgpt-ui] .cg-model-provider-name::before { content: '›'; flex: none; width: 10px; color: var(--cg-muted, #8a8a8a); transition: transform 150ms cubic-bezier(.22,.8,.28,1); }
+html[data-chatgpt-ui] .cg-model-provider[open] > .cg-model-provider-name::before { transform: rotate(90deg); }
+html[data-chatgpt-ui] .cg-model-provider-name > span:first-of-type { flex: 1; min-width: 0; }
+html[data-chatgpt-ui] .cg-model-provider-count { flex: none; color: var(--cg-muted, #9a9a9a); font-size: 11px; font-weight: 400; }
+html[data-chatgpt-ui] .cg-model-provider-models { margin: 0 0 6px; padding: 0 0 0 18px; color: var(--cg-muted, #5f5f5f); font-size: 12px; line-height: 18px; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-provider-models { color: #a0a0a0; }
+html[data-chatgpt-ui] .cg-model-provider-site { display: inline-block; margin: 0 0 8px 18px; color: var(--cg-muted, #6b6b6b); font-size: 11px; text-decoration: none; }
+html[data-chatgpt-ui] .cg-model-provider-site:hover { text-decoration: underline; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-chatgpt-ui] .cg-model-provider-name::before { transition: none; }
+}
