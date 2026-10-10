@@ -540,14 +540,16 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-shell::before {
 /* Full-width track and an independent thumb with two-pixel end overlap. */
 .cg-model-slider-shell::before { inset: 0; }
 .cg-model-slider-fill { left: 0; }
-.cg-model-thumb { position: absolute; top: -2px; transform: translateX(-50%); box-sizing: border-box; width: 28px; height: 28px; border: 1px solid #e0e0e0; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px #00000004; pointer-events: none; z-index: 2; }
+.cg-model-thumb { position: absolute; top: 0; transform: translateX(-50%); box-sizing: border-box; width: 24px; height: 24px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #00000026; pointer-events: none; z-index: 2; }
 .cg-model-slider::-webkit-slider-thumb { background: transparent; border-color: transparent; box-shadow: none; }
 .cg-model-slider::-moz-range-thumb { background: transparent; border-color: transparent; box-shadow: none; }
 
 /* Reference: pill track and a clean maximum-effort gradient. */
 .cg-model-slider-shell, .cg-model-slider-shell::before, .cg-model-slider-fill { border-radius: 12px; }
 .cg-model-slider-shell[data-max="true"] .cg-model-slider-dots { visibility: hidden; }
-.cg-model-thumb { border-radius: 50%; border-color: #e3e3e3; box-shadow: none; }
+/* The reference knob is a plain white circle: no outline, just a soft shadow. The plugin already drew a
+   circle, but with a 1px grey border that read as a framed square at this size. */
+.cg-model-thumb { border: 0; border-radius: 50%; box-shadow: 0 1px 3px #00000026; }
 .cg-model-popover[data-ultra="true"] .cg-model-slider-fill { background: linear-gradient(95deg, #5055f5 0%, #bb74ff 58%, #793af5 100%); }
 
 /* Depth ramp. The fill deepens with the tier instead of only changing at Ultra: six stops
