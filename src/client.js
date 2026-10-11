@@ -1143,7 +1143,7 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
               h('div', { className: 'cg-account-separator' }),
               h(Button, { icon: 'files', label: '新对话图标', role: 'menuitem', 'data-mark-trigger': true, onClick: () => { setSettingsMenu(false); setHeroMarkOpen(true); }, children: '新对话图标' }),
               h(Button, { icon: 'at', label: '插件', role: 'menuitem', onClick: () => { setSettingsMenu(false); go('plugins'); }, children: '插件' }),
-              h(Button, { icon: 'help', label: '帮助', role: 'menuitem', onClick: () => { setSettingsMenu(false); openExternal('https://github.com/Loliyer520/dsh-codex-ui#readme'); }, children: ['帮助', h('span', { key: 'arrow', className: 'cg-account-hint' }, h(Icon, { name: 'chevron', size: 12 }))] }),
+              h(Button, { icon: 'help', label: '帮助', role: 'menuitem', onClick: () => { setSettingsMenu(false); openExternal('https://github.com/jiangshen275-beep/DSH-Codex-ui-2-#readme'); }, children: ['帮助', h('span', { key: 'arrow', className: 'cg-account-hint' }, h(Icon, { name: 'chevron', size: 12 }))] }),
               // The model-name sync state lives here, not in the effort panel: it is a diagnostic, and
               // the reasoning control is a place the eye rests. Nothing about it is needed to pick an
               // effort level, so it stays out of the way until the settings menu is opened.

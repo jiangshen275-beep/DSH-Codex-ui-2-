@@ -32,6 +32,8 @@ dsh plugin --profile <profile> add 'C:/path/dsh-codex-ui-1.0.0.tgz'
 dsh plugin --profile <profile> add dsh-codex-ui@1.0.0
 ```
 
+> ⚠️ **这个包目前还没有发布到 npm**（公共 registry 上会返回 404）——现在执行下面这条会失败，首次安装请用上面的 A 或 C 方式。若你打算发布到 npm，这条命令在发布满 24 小时后即可用。
+
 DSH 插件页只安装**发布满 24 小时**的版本，首次安装请带上版本号。
 
 **C. 仓库 / 本地目录**

@@ -63,6 +63,18 @@
     }
   },
   "license": "MIT",
+  "author": "jiangshen275-beep",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "codex",
+    "ui-plugin",
+    "reasoning-effort",
+    "subagents"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "icon": "./assets/codex.png",
   "repository": {
     "type": "git",
