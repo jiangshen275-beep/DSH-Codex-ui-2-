@@ -2,17 +2,17 @@
 
 # dsh-codex-ui
 
-DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex-ui` 的衍生版），适配 **0.2.0-rc.2 Web**；除界面外，还带一套会真正派子代理的编排契约。
+DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex-ui` 的衍生版），适配 **0.2.0-rc.2 Web**（peerDependencies 声明）；除界面外，还带一套通过系统提示词注入的编排契约——派发动作由模型按契约执行，插件本身不调用子代理工具。
 
 > **About this project**: a derivative of [Loliyer520/dsh-codex-ui](https://github.com/Loliyer520/dsh-codex-ui) (MIT), developed further here — three orchestration tiers, Ultra tier, enforced Chinese, session rename, archived-session deletion, subagent/branch grouping, plus a batch of fixes. **Not affiliated with or endorsed by OpenAI**; the bundled Codex icon and OpenAI Sans font belong to OpenAI — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-- **侧栏**：紧凑会话列表、项目与最近会话分组、置顶、悬浮详情卡、重命名、归档与**永久删除**、子代理 / 分支分组。
-- **模型面板**：原生模型与推理强度选择、模型显示名自定义、**编排模式三档菜单**（标准 / 快速 / 超快）。
-- **提示词**：DeepSeek 模式保留原版系统提示词；Codex 模式追加"严谨、理性、严肃、简短"的回复规则；强制中文，模型身份段落同时约束思考过程。
-- **编排契约**：委派是默认动作——三条窄豁免 + 发答前自检；每轮 step 1–3 各注入一条带轮次号的短提醒；超快模式下每个子代理再开两个孙代理。
-- **界面与其它**：浅色 / 深色 / 窄窗口适配；超快模式四档暖色递深带、努力滑条旋钮 24×24 正圆；字体与图标随包分发；设置菜单显示官方 DeepSeek API 余额（查询缓存 30 秒，密钥不出后端）。
+- **侧栏**：紧凑会话列表、项目与最近会话分组、置顶（调用宿主 workspace 接口）、悬浮预览卡、重命名、归档（宿主能力）与**永久删除**（仅限已归档会话）、子代理 / 分支分组。
+- **模型面板**：原生模型与推理强度档位（列表来自宿主）、模型显示名自定义（同时写入"模型身份"提示词段落）、**编排模式三档菜单**（标准 / 快速 / 超快）、滑条末追加虚拟 **Ultra 格**并注入"最严验收"契约、开启编排时披露 token 成本倍率（1.5× / 2.5×）。
+- **提示词**：DeepSeek 模式不追加本插件的风格段（宿主原版系统提示词不受影响，中文策略与模型身份段仍生效）；Codex 模式追加"严谨、理性、严肃、简短"的回复规则；强制中文，模型身份段落同时约束思考过程；新对话页有回复风格页签与品牌图标。
+- **编排契约**：快速 / 超快已开启的会话里，委派是默认动作——三条窄豁免 + 发答前自检；每轮 step 1–3 各注入一条带轮次号的短提醒（step 4 起不再注入）；超快模式下每个**一级**子代理再开两个孙代理，**二级即止**。
+- **界面与其它**：浅色 / 深色 / 窄窗口适配；超快模式滑条四段暖色递深（minimal·low / high / xhigh·max / ultra 渐变）；努力滑条旋钮 24×24 正圆（常态带投影，超快 + Ultra 态加描边与发光）；字体与图标随包分发（字体以 base64 内联进 `lib/client.js`）；设置菜单显示官方 DeepSeek API 余额（服务端缓存 30 秒，只有校验过的余额字段回到前端），并带刷新 / 控制台 / 设置 / 插件 / 帮助入口。
 
-**本版要点（1.0.0）**：首个正式版，产物 `dsh-codex-ui-1.0.0.tgz`；测试 79 条 / 78 通过 / 1 跳过 / 0 失败；界面类改动刷新页面即可，提示词契约类需重启 DSH。
+**本版要点（1.0.0）**：首个 1.0 正式版，产物 `dsh-codex-ui-1.0.0.tgz`（在 Releases 里下载，不入库）；测试 79 条 / 78 通过 / 1 跳过（本机未安装 0.2.0-rc.2 的运行时依赖，见 `tests/prompt-modes.test.mjs:23`）/ 0 失败；界面类改动刷新页面即可，提示词契约类需重启 DSH。
 
 ## 安装
 
