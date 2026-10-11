@@ -143,7 +143,7 @@ test('Lightning discloses its cost, keeps delegation purposeful, and never shrin
   assert.match(LIGHTNING_POLICY, /While relevant children run, keep working — reading, checking, verifying — and send nothing to the user/);
   assert.doesNotMatch(LIGHTNING_POLICY, /never keep more than six in flight/, 'concurrency is limited by the harness, not by price');
   // The figure the interface advertises must stay readable out of the contract.
-  assert.deepEqual(tokenMultiplier(), { value: 15, exact: true });
+  assert.deepEqual(tokenMultiplier(), { value: 1.5, exact: true });
 });
 
 test('Chinese is forced for every armed session, thinking included', () => {
@@ -188,9 +188,9 @@ test('the injected contract stays free of accidental duplication', () => {
 });
 
 test('the cost figure shown to the client is read back out of the contract', () => {
-  assert.deepEqual(tokenMultiplier(), { value: 15, exact: true });
+  assert.deepEqual(tokenMultiplier(), { value: 1.5, exact: true });
   // The armed contract itself must state the same number the interface advertises.
-  assert.match(LIGHTNING_POLICY, /15x the tokens/);
+  assert.match(LIGHTNING_POLICY, /at least 1\.5x the tokens/);
 });
 
 test('injector appends one message per session, only when the text changes', async () => {
@@ -309,25 +309,25 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     };
 
     const empty = await call({ sessionId: 's1', action: 'read' });
-    assert.deepEqual(empty.result, { ok: true, value: { persona: '', lightning: false, ultra: false, superfast: false, tokenMultiple: 15, tokenExact: true } });
+    assert.deepEqual(empty.result, { ok: true, value: { persona: '', lightning: false, ultra: false, superfast: false, tokenMultiple: 1.5, tokenExact: true } });
 
     const armed = await call({ sessionId: 's1', action: 'update', lightning: true, ultra: true });
-    assert.deepEqual(armed.result.value, { persona: '', lightning: true, ultra: true, superfast: false, tokenMultiple: 15, tokenExact: true });
+    assert.deepEqual(armed.result.value, { persona: '', lightning: true, ultra: true, superfast: false, tokenMultiple: 1.5, tokenExact: true });
 
     // The read above the patch must reflect the new state, and it must persist.
     const reread = await call({ sessionId: 's1', action: 'read' });
-    assert.deepEqual(reread.result.value, { persona: '', lightning: true, ultra: true, superfast: false, tokenMultiple: 15, tokenExact: true });
+    assert.deepEqual(reread.result.value, { persona: '', lightning: true, ultra: true, superfast: false, tokenMultiple: 1.5, tokenExact: true });
     const stored = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-turbo.json'), 'utf8'));
     assert.deepEqual(stored.sessions.s1.lightning, true);
 
     // One flag without the other must not disturb the other.
     const partial = await call({ sessionId: 's1', action: 'update', lightning: false });
-    assert.deepEqual(partial.result.value, { persona: '', lightning: false, ultra: true, superfast: false, tokenMultiple: 15, tokenExact: true });
+    assert.deepEqual(partial.result.value, { persona: '', lightning: false, ultra: true, superfast: false, tokenMultiple: 1.5, tokenExact: true });
 
     // The hero arms the persona for the conversation that starts next: an empty id reads
     // the picker's current value and writes it as pending, without touching session rows.
     const heroRead = await call({ sessionId: '', action: 'read' });
-    assert.deepEqual(heroRead.result.value, { persona: 'work', lightning: false, ultra: false, superfast: false, pending: true, tokenMultiple: 15, tokenExact: true });
+    assert.deepEqual(heroRead.result.value, { persona: 'work', lightning: false, ultra: false, superfast: false, pending: true, tokenMultiple: 1.5, tokenExact: true });
     const heroPick = await call({ sessionId: '', action: 'update', persona: 'chat' });
     assert.equal(heroPick.result.value.persona, 'chat');
     // Superfast travels the same path: set, read back, and persisted.
@@ -435,7 +435,7 @@ test('Superfast builds a two-tier tree, stamps the tier in every child prompt, a
   // Depth travels inside the prompts, because the host cannot tell a child how deep it sits.
   assert.match(tree, /Tier: N of 2/);
   assert.match(tree, /Tier: 2 of 2/);
-  // And it is bounded: without this the fan-out is 15x cost squared, then cubed.
+  // And it is bounded: without this the fan-out is seven agent contexts instead of one, each with its own fixed cost.
   assert.match(tree, /There is no tier 3|there is no tier 3/);
   assert.match(tree, /never fan out past tier 2/);
   // The tree needs Lightning's rules too — they are what tells a parent how to brief a child.

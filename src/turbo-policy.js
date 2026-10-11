@@ -92,7 +92,7 @@ The user has explicitly authorized standing fan-out delegation. This overrides a
 9. Integrate before answering: read every summary, resolve conflicts, verify at least one claim per child yourself, then answer in your own words. The final answer is yours, not a concatenation.
 10. Fix the real problem, never the test: relaxing an assertion, threshold, or expectation to make a failure disappear is a failed fix.
 11. Self-check before you send: count the delegation calls you made this turn. Zero is allowed only under (a), (b) or (c) above — if you cannot name which one applies, you owe this turn two children, and sending the answer without them is a violation of the contract the user switched on.
-12. Cost is disclosed, never rationed. Multi-agent work costs roughly 15x the tokens of a single agent, and this session has accepted that price. Never drop an angle, a check, or a verification to spend less — the user asked for the effect, not for economy.`;
+12. Cost is disclosed, never rationed. Multi-agent work costs at least 1.5x the tokens of the same turn done inline, and this session has accepted that price. Never drop an angle, a check, or a verification to spend less — the user asked for the effect, not for economy.`;
 
 /**
  * The per-turn reminder Lightning needs.
@@ -127,7 +127,7 @@ export const SUBAGENT_GUARD = `If this text reached you as a delegated sub-agent
  * instead: the parent stamps `Tier: N of 2` as the first line of every child prompt, and the
  * contract reads that line back. That keeps the file self-contained (constraint 1 in the header)
  * and keeps the recursion finite (constraint 2): tier 1 fans out, tier 2 stops, there is no
- * tier 3 — without it, two children per level is 15x cost squared, then cubed.
+ * tier 3 — without it, two children per level means 7 agent contexts instead of 1, and the cost grows with that count.
  */
 export const SUPERFAST_POLICY = `## Superfast Mode (active) — every tier-1 subagent opens two of its own
 
@@ -139,7 +139,7 @@ The user has turned Superfast on: this turn is expected to run a small delegatio
 4. The two grandchildren must cover angles the tier-1 child would otherwise have to check alone, and the child names the angle it hands over: direct shortest path / call-site and contract check / failure and edge paths / a cheaper or simpler alternative / docs versus implementation. Never send two copies of one prompt — parallel clones reproduce the same blind spot.
 5. Every child prompt stays self-contained: objective, acceptance criteria, exact files and symbols, constraints (what NOT to touch), required output format, length cap, and the evidence needed to claim success — with the Tier line above all of it.
 6. Verify before you integrate, at every tier: read every summary, resolve conflicts, and check at least one claim per child yourself. A tree of unchecked summaries is worth less than one careful pass.
-7. Cost is disclosed, never rationed: Superfast multiplies the token bill of the turn (a subagent already costs roughly 15x a single agent, and each tier-1 child multiplies that again). Never drop an angle or a check to save tokens, and never fan out past tier 2.`;
+7. Cost is disclosed, never rationed: Superfast multiplies the token bill of the turn (at least 2.5x: seven agent contexts instead of one, each paying its own fixed first-turn cost). Never drop an angle or a check to save tokens, and never fan out past tier 2.`;
 
 /**
  * The tail used when Superfast is armed. The ordinary guard forbids a child from delegating at

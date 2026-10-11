@@ -102,7 +102,7 @@ function registerModelUI(ctx) {
     const [turboReady, setTurboReady] = React.useState(false);
     // Token multiplier the armed contract states, as reported by the Host. Defaults to
     // the contract's own figure so the label is never blank before the first read.
-    const [budget, setBudget] = React.useState({ value: 15, exact: false });
+    const [budget, setBudget] = React.useState({ value: 1.5, exact: true });
     const rootRef = React.useRef(null);
     const triggerRef = React.useRef(null);
     const popupRef = React.useRef(null);
@@ -251,11 +251,12 @@ function registerModelUI(ctx) {
     // with a level id the CSS does not know still deepens instead of staying flat.
     const effortTone = shownUltra ? 'ultra' : (effectiveIndex >= 0 ? steps[shownIndex]?.id ?? 'off' : 'off');
     const effortDepth = maxIndex > 0 ? Math.round(shownIndex / maxIndex * 4) : 0;
-    // "at least 15x the tokens": the contract's own budget figure, not a second guess.
+    // The budget figure is measured, not guessed: one delegation costs a delegated turn about 1.5x a plain turn, and a
+// superfast turn about 3x — see CHANGELOG 1.0.1 for the ledger numbers behind those two ratios.
     // The tree runs one extra tier (each tier-1 child opens two grandchildren), so it costs several flat
   // rounds at once. The figure is the Host's own per-round multiple, not a second measurement: the UI must
   // not invent a number it cannot source.
-  const treeTokenLabel = `每层 ${budget.value}×token消耗`;
+  const treeTokenLabel = `每层再开 2 个，至少 2.5× token`;
   const tokenLabel = `${budget.exact ? '至少 ' : '约 '}${budget.value}× token`;
     const modelName = chosen ? aliasOf(chosen.group.id, chosen.model) : state.current?.model || '选择模型';
     const busy = locked || state.pending !== null;
@@ -588,12 +589,12 @@ function registerModelUI(ctx) {
             h('button', { className: 'cg-model-mode', type: 'button', role: 'menuitemradio', 'aria-checked': lightning, 'data-on': lightning, 'data-mode': 'fast', disabled: busy || !sessionId, onClick: () => chooseMode('fast') },
               h('span', { className: 'cg-model-mode-text' },
                 h('strong', null, '快速'),
-                h('span', null, `${tokenLabel} 用量更多`)),
+                h('span', null, '至少 1.5× 消耗 甚至更多')),
               h('span', { className: 'cg-model-mode-check', 'aria-hidden': true }, lightning && h(Icon, { name: 'check', size: 14 }))),
             h('button', { className: 'cg-model-mode', type: 'button', role: 'menuitemradio', 'aria-checked': superfast, 'data-on': superfast, 'data-mode': 'tree', disabled: busy || !sessionId, onClick: () => chooseMode('tree') },
               h('span', { className: 'cg-model-mode-text' },
                 h('strong', null, '超快'),
-                h('span', null, `${treeTokenLabel} 更快更好的回答`)),
+                h('span', null, '至少 2.5× token 消耗 甚至更多')),
               h('span', { className: 'cg-model-mode-check', 'aria-hidden': true }, superfast && h(Icon, { name: 'check', size: 14 })))))
         : pane === 'effort' ? h('div', { className: 'cg-model-pane', key: 'effort' },
           h('div', { className: 'cg-model-top' },
