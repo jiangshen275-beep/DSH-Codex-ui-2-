@@ -1315,3 +1315,14 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="t
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="high"] .cg-model-summary strong,
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="high"] { color: #e0b766; }
 
+
+/* Lightning (fast) mode: the effort box's edge glows in the tier's own colour. The tier colours already live on the
+   shell as --cg-e1..--cg-e5 (theme-scoped), so light and dark come for free; superfast keeps its own gold rings, which
+   is why it is excluded here. Static shadow on purpose — no animation, so no reduced-motion clause is needed. */
+.cg-model-root[data-lightning="true"]:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="minimal"],
+.cg-model-root[data-lightning="true"]:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="low"] { box-shadow: 0 0 12px 0 var(--cg-e2), 0 0 3px 0 var(--cg-e2); }
+.cg-model-root[data-lightning="true"]:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="high"] { box-shadow: 0 0 12px 0 var(--cg-e4), 0 0 3px 0 var(--cg-e4); }
+.cg-model-root[data-lightning="true"]:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="max"],
+.cg-model-root[data-lightning="true"]:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="xhigh"] { box-shadow: 0 0 12px 0 var(--cg-e5), 0 0 3px 0 var(--cg-e5); }
+.cg-model-root[data-lightning="true"]:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="ultra"],
+.cg-model-root[data-lightning="true"]:not([data-superfast="true"]) .cg-model-slider-shell[data-max="true"] { box-shadow: 0 0 14px 0 #bb74ff, 0 0 4px 0 #bb74ff; }
