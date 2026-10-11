@@ -134,7 +134,7 @@
 - **改法 ②（几何一个像素都不动）**：定位仍然以 `offsetParent ?? parentElement` 为基准、右对齐 + 垂直居中，也就是 0.9.4 的那条式子**原样保留**——0.9.4 在你机器上位置是对的，所以这一版不挪动任何像素；对齐规则唯一的变化是把 `Math.round` 的作用域写清楚，等价式在测试里逐值验证。
 - **改法 ③（判定逻辑可测）**：定位规则抽成纯函数 `pickerOffsetIn` / `placePickerInSlot` / `watchPickerPlacement`，并从产物导出让测试直接驱动——0.9.4 的 CHANGELOG 声称 `menuPlacement` "有测试"，实际并没有，这次补上（顺带修掉它对 `null` 矩形会误判为"向下翻转"的缺陷）。
 - **改法 ④（宿主兼容）**：11 处插槽注册统一走 `mountSlot`，`ctx.slots.inject` / `ctx.theme.overrideTokens` / `ctx.layout.selectPanel` / `ctx.remote.agentPresets.*` 缺失时只跳过对应功能并 `console.warn`，不再让整个客户端插件激活失败。
-- **未解决、已知**：样式表有 ≈60 处 `:has()`（`html[data-chatgpt-ui]:has([data-ds-dark-theme])`），Chrome/Edge < 105、Safari < 15.4、Firefox < 121 会整条丢弃，表现为主题色部分失效。这需要把主题判定改为属性选择器才能根除，尚未做。
+- **未解决、已知**：样式表有 88 处 `:has()`（`html[data-chatgpt-ui]:has([data-ds-dark-theme])`），Chrome/Edge < 105、Safari < 15.4、Firefox < 121 会整条丢弃，表现为主题色部分失效。这需要把主题判定改为属性选择器才能根除，尚未做。
 - 测试 78 条：**77 通过 / 1 跳过**（跳过的那条需要本机装 DSH 运行时）；其中 6 条是本次新增的定位规则用例。源码侧与**解包后的包内**各跑一遍，同号。
 - 未核实：本机无人眼确认，也**没有**收到报告机器上的验证结果——`data-placement="slot"` 是"已就位"的现场证据（元素上带这个属性即为测量成功），请让报告机器刷新后回一句结果。
 
