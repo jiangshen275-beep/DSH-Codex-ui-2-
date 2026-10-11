@@ -1315,26 +1315,29 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="t
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="high"] .cg-model-summary strong,
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="high"] { color: #e0b766; }
 
-/* Orchestration on: the effort box’s edge glows. Colour comes from --cg-glow, which defaults to the tier’s
-   own --cg-e* value and switches to the superfast gold palette when superfast is armed. A crisp 1px ring plus a
-   soft 18px halo (the halo alone washed out in the light theme). Static on purpose — no reduced-motion clause. */
-.cg-model-root[data-lightning="true"] .cg-model-slider-shell,
-.cg-model-root[data-superfast="true"] .cg-model-slider-shell { box-shadow: 0 0 0 1px var(--cg-glow), 0 0 18px 2px var(--cg-glow); }
+/* Orchestration on: the whole effort panel glows in its tier colour — border plus halo, not just the track.
+   Colour comes from --cg-glow (tier colour by default, gold under superfast). The neutral drop shadow is kept in
+   the same declaration because a later box-shadow would otherwise replace it. Static on purpose. */
+.cg-model-root[data-lightning="true"] .cg-model-popover,
+.cg-model-root[data-superfast="true"] .cg-model-popover {
+  border-color: var(--cg-glow);
+  box-shadow: 0 6px 14px #0000000c, 0 0 0 1px var(--cg-glow), 0 0 22px 4px var(--cg-glow);
+}
 
-.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="minimal"] { --cg-glow: var(--cg-e2); }
-.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="low"] { --cg-glow: var(--cg-e2); }
-.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="medium"] { --cg-glow: var(--cg-e3); }
-.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="high"] { --cg-glow: var(--cg-e4); }
-.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="xhigh"] { --cg-glow: var(--cg-e5); }
-.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="max"] { --cg-glow: var(--cg-e5); }
-.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="ultra"],
-.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-max="true"] { --cg-glow: #bb74ff; }
+.cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="minimal"] { --cg-glow: var(--cg-e2); }
+.cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="low"] { --cg-glow: var(--cg-e2); }
+.cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="medium"] { --cg-glow: var(--cg-e3); }
+.cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="high"] { --cg-glow: var(--cg-e4); }
+.cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="xhigh"] { --cg-glow: var(--cg-e5); }
+.cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="max"] { --cg-glow: var(--cg-e5); }
+.cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="ultra"],
+.cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-max="true"] { --cg-glow: #bb74ff; }
 
-.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="minimal"] { --cg-glow: #e0b766; }
-.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="low"] { --cg-glow: #e0b766; }
-.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="medium"] { --cg-glow: #dfb662; }
-.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="high"] { --cg-glow: #dfb662; }
-.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="xhigh"] { --cg-glow: #d9a534; }
-.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="max"] { --cg-glow: #d9a534; }
-.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="ultra"],
-.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-max="true"] { --cg-glow: #f7c948; }
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="minimal"] { --cg-glow: #e0b766; }
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="low"] { --cg-glow: #e0b766; }
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="medium"] { --cg-glow: #dfb662; }
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="high"] { --cg-glow: #dfb662; }
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="xhigh"] { --cg-glow: #d9a534; }
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="max"] { --cg-glow: #d9a534; }
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="ultra"],
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-max="true"] { --cg-glow: #f7c948; }
