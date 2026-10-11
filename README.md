@@ -4,6 +4,8 @@
 
 DeepSeek Harness 的 Codex 风格 UI 插件，适配 **0.2.0-rc.2 Web**。
 
+> **About this project**: a derivative of [Loliyer520/dsh-codex-ui](https://github.com/Loliyer520/dsh-codex-ui) (MIT), developed further here — Ultra tier and Lightning orchestration prompt contracts, enforced Chinese, session rename, archived-session deletion, subagent/branch grouping, plus a batch of fixes. **Not affiliated with or endorsed by OpenAI**; the bundled Codex icon and OpenAI Sans font belong to OpenAI — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
 - 紧凑会话侧栏、项目分组、置顶与最近会话、悬浮详情。
 - 原生模型与推理强度选择、权限管理、附件、文件和插件入口。
 - DeepSeek 模式保留原版系统提示词；Codex 模式追加严谨、理性、严肃、简短的回复规则。
@@ -35,7 +37,7 @@ DSH 插件页只安装**发布满 24 小时**的版本，首次安装请带上�
 下载或克隆仓库后，可交给启动脚本，也可直接指向目录：
 
 ```powershell
-git clone https://github.com/Loliyer520/dsh-codex-ui.git
+git clone https://github.com/jiangshen275-beep/DSH-Codex-ui-2-.git
 cd dsh-codex-ui
 .\start-ui.ps1
 ```

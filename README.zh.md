@@ -55,7 +55,7 @@ DSH 插件页只会安装**发布满 24 小时**的版本，因此首次安装�
 下载或克隆仓库后，可以交给启动脚本，也可以直接指向目录：
 
 ```powershell
-git clone https://github.com/Loliyer520/dsh-codex-ui.git
+git clone https://github.com/jiangshen275-beep/DSH-Codex-ui-2-.git
 cd dsh-codex-ui
 .\start-ui.ps1
 ```
