@@ -6,7 +6,7 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 
 ![界面预览：新对话页](assets/screenshot-1.0.0.png)
 
-*界面预览：新对话页——左侧是插件重绘的侧栏，右侧顶部是聊天 / 工作两个页签。*
+*界面预览：新对话页——左侧是插件重绘的侧栏；会话区顶部居中是聊天 / 工作两个页签（截图时选中「工作」，即默认值）。*
 
 > **About this project**: a derivative of [Loliyer520/dsh-codex-ui](https://github.com/Loliyer520/dsh-codex-ui) (MIT), developed further here — three orchestration tiers, Ultra tier, enforced Chinese, session rename, archived-session deletion, subagent/branch grouping, plus a batch of fixes. **Not affiliated with or endorsed by OpenAI**; the bundled Codex icon and OpenAI Sans font belong to OpenAI — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
