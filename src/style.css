@@ -374,8 +374,10 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-ultra-notice { color: 
 .cg-model-reset svg { width: 16px; height: 16px; }
 .cg-model-choice { display: flex; justify-content: center; align-items: center; gap: 2px; width: 100%; height: 20px; padding: 0; margin: 0 0 10px; border: 0; background: none; color: #888; font-size: 12px; cursor: pointer; }
 .cg-model-choice svg { width: 11px; height: 11px; }
-.cg-model-slider-shell { position: relative; height: 24px; margin: 0; border-radius: 20px; background: #e8e6e8; box-shadow: inset 0 0 0 1px #00000004; }
-.cg-model-slider-fill { position: absolute; left: 0; top: 0; height: 24px; border-radius: 20px; pointer-events: none; background: var(--cg-effort-color); }
+.cg-model-slider-shell { position: relative; height: 28px; margin: 0; border-radius: 20px; background: #e8e6e8; box-shadow: inset 0 0 0 1px #00000004; }
+/* The pill is deliberately thinner than the shell: the knob (26px) has to overhang it, or a circle and a
+   24px track of the same height read as one flush shape rather than a circle on a track. */
+.cg-model-slider-fill { position: absolute; left: 0; top: 4px; height: 20px; border-radius: 10px; pointer-events: none; background: var(--cg-effort-color); }
 .cg-model-popover[data-ultra="true"] .cg-model-slider-fill { background: linear-gradient(95deg,#5055f5,#bb74ff); }
 .cg-model-slider-dots { position: absolute; inset: 0 12px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
 .cg-model-slider-dots span { width: 4px; height: 4px; border-radius: 50%; background: #b7b4b7; }
@@ -389,7 +391,7 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-ultra-notice { color: 
    takes arrow keys. Every white box this plugin owns is circular by construction (`.cg-model-thumb` is
    28x28 with `border-radius: 50%`), so the square was never ours to round.
    The focus ring moves to the shell, since an invisible input cannot show one. */
-.cg-model-slider { appearance: none; -webkit-appearance: none; box-sizing: border-box; position: relative; width: 100%; height: 24px; margin: 0; background: transparent; cursor: pointer; display: block; border: 0; padding: 0; opacity: 0; }
+.cg-model-slider { appearance: none; -webkit-appearance: none; box-sizing: border-box; position: relative; width: 100%; height: 28px; margin: 0; background: transparent; cursor: pointer; display: block; border: 0; padding: 0; opacity: 0; }
 .cg-model-slider-shell:has(.cg-model-slider:focus-visible) { outline: 2px solid #3982fa; outline-offset: 4px; }
 /* The plugin draws its own knob (`.cg-model-thumb`), so the input's own thumb is made *invisible*
    rather than styled. Reason, observed: with `appearance: none` only declared unprefixed, some WebKit
@@ -397,8 +399,8 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-ultra-notice { color: 
    painting a small white rounded square on top of our round knob — the "white square" the owner asked
    about. `border-radius` could never have fixed that, because the square was not our element. The
    knob itself is still rendered whenever the slider is, so nothing becomes invisible by accident. */
-.cg-model-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 28px; height: 28px; border: 0; border-radius: 50%; background: transparent; box-shadow: none; }
-.cg-model-slider::-moz-range-thumb { width: 26px; height: 26px; border: 0; border-radius: 50%; background: transparent; box-shadow: none; }
+.cg-model-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 24px; height: 24px; border: 0; border-radius: 50%; background: transparent; box-shadow: none; }
+.cg-model-slider::-moz-range-thumb { width: 24px; height: 24px; border: 0; border-radius: 50%; background: transparent; box-shadow: none; }
 .cg-model-slider:disabled { cursor: default; opacity: .6; }
 .cg-model-catalog { display: flex; flex-direction: column; max-height: 260px; overflow: auto; gap: 3px; padding: 2px 0 0; }
 .cg-model-provider { color: var(--cg-muted); font-size: 11px; padding: 6px 4px; }
@@ -525,9 +527,9 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-task-actions .cg-pin-on { co
 .cg-model-slider-shell { margin-bottom: 2px; }
 
 /* Neutralize native/global range tracks; the shell draws the sole visible track. */
-.cg-model-slider::-webkit-slider-runnable-track { appearance: none; height: 24px; border: 0; border-radius: 20px; background: transparent !important; box-shadow: none !important; }
+.cg-model-slider::-webkit-slider-runnable-track { appearance: none; height: 28px; border: 0; border-radius: 20px; background: transparent !important; box-shadow: none !important; }
 .cg-model-slider::-webkit-slider-thumb { margin-top: -2px; }
-.cg-model-slider::-moz-range-track { height: 24px; border: 0; background: transparent !important; box-shadow: none !important; }
+.cg-model-slider::-moz-range-track { height: 28px; border: 0; background: transparent !important; box-shadow: none !important; }
 .cg-model-slider::-moz-range-progress { background: transparent !important; border: 0; box-shadow: none !important; }
 .cg-model-slider { background: transparent !important; box-shadow: none !important; outline: none; }
 
@@ -538,14 +540,33 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-task-actions .cg-pin-on { co
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-shell::before { background: #494649; }
 
 /* Full-width track and an independent thumb with two-pixel end overlap. */
-.cg-model-slider-shell::before { inset: 0; }
+.cg-model-slider-shell::before { inset: 4px 0; }
 .cg-model-slider-fill { left: 0; }
-.cg-model-thumb { position: absolute; top: 0; transform: translateX(-50%); box-sizing: border-box; width: 24px; height: 24px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #00000026; pointer-events: none; z-index: 2; }
+/* The knob, taken from the reference plugin the owner pointed at (lemonorangeapple/dsh-effort-switcher):
+   30px over a thinner track so it overhangs ✓ `corner-shape: round` for a true circle ✓ a centred box
+   offset (`margin-left`) instead of `translateX(-50%)` — a percentage plus a half-transform lands the edges
+   on fractional device pixels at this display's 1.25 ratio — and no border and no shadow at all. */
+.cg-model-thumb { position: absolute; top: 2px; margin-left: -12px; box-sizing: border-box; width: 24px; height: 24px; border: 0; border-radius: 50%; corner-shape: round; background: #fff; box-shadow: none; pointer-events: none; z-index: 3; }
+/* The knob grows only while the pointer is over it, and never larger than this.
+   It carries `pointer-events: none`, so the "over" state is decided geometrically in the component (the
+   knob cannot be hit-tested without swallowing the press that the native range needs to start a drag).
+   There used to be a second, larger step while the track was `:active` — that is the step the owner saw as
+   the knob growing and being cut off when they dragged it to either end, so it is gone: dragging keeps the
+   same 1.08 as hovering, and the ends look like a click-selected tier. */
+.cg-model-thumb { transform-origin: 50% 50%; }
+.cg-model-thumb[data-over="true"] { transform: scale(1.08); }
+/* While the pointer is pressed the knob goes back to its resting size. Hovering and dragging are the same
+   pointer-on-knob situation, so without this the drag inherits the hover growth: at either end of the travel
+   (centre 12px from the edge) a 1.08 knob overhangs the track by about a pixel, and that is the "it grows
+   and sticks to the edge when I drag it" the owner photographed. Dragging now looks exactly like a tier
+   that was selected by a click. */
+.cg-model-slider-shell:active .cg-model-thumb { transform: none; }
 .cg-model-slider::-webkit-slider-thumb { background: transparent; border-color: transparent; box-shadow: none; }
 .cg-model-slider::-moz-range-thumb { background: transparent; border-color: transparent; box-shadow: none; }
 
 /* Reference: pill track and a clean maximum-effort gradient. */
-.cg-model-slider-shell, .cg-model-slider-shell::before, .cg-model-slider-fill { border-radius: 12px; }
+.cg-model-slider-shell { border-radius: 14px; }
+.cg-model-slider-shell::before, .cg-model-slider-fill { border-radius: 10px; }
 .cg-model-slider-shell[data-max="true"] .cg-model-slider-dots { visibility: hidden; }
 /* The reference knob is a plain white circle: no outline, just a soft shadow. The plugin already drew a
    circle, but with a 1px grey border that read as a framed square at this size. */
@@ -631,7 +652,7 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-shell {
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-dots span { background: #8b8992; }
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-dots span[data-on="true"] { background: #fff; box-shadow: 0 0 0 1px #00000052; }
 
-.cg-model-thumb { transition: left 100ms ease-out; }
+.cg-model-thumb { transition: left 100ms ease-out, transform 150ms cubic-bezier(.22,.8,.28,1); }
 /* The transient Ultra cost notice is longer than any tier name, so it gets its own fit
    instead of stretching the summary pill. */
 .cg-model-summary strong[data-notice="true"], .cg-model-trigger-effort[data-notice="true"] { font-size: 11px; letter-spacing: .2px; white-space: nowrap; }
@@ -796,7 +817,7 @@ html[data-chatgpt-ui] .wSkVaW_header:not(.wSkVaW_headerBlank) { min-height: 50px
 .cg-model-zap:hover:not(:disabled) { background: #f1f1f3; color: #6f6f73; }
 .cg-model-zap:focus-visible { outline: 2px solid #3982fa; outline-offset: 1px; }
 .cg-model-zap:disabled { cursor: default; opacity: .45; }
-.cg-model-zap-glyph { display: block; width: 18px; height: 18px; flex: none; transition: filter 160ms ease; }
+.cg-model-zap-glyph { flex: none; transition: filter 160ms ease; }
 .cg-model-zap[data-on="true"] { color: #8a4ff0; }
 .cg-model-zap[data-on="true"] .cg-model-zap-glyph { filter: drop-shadow(0 0 5px #8a4ff08c); }
 .cg-model-zap[data-on="true"]:hover { background: #f3ebff; }
@@ -826,8 +847,13 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-trigger-bolt { color: 
    here let every streak die less than a third of the way along the rail. An extra sweep
    runs along the track edge at maximum, and everything collapses to a static sheen under
    reduced motion. */
-.cg-model-slider-shell { --cg-meteor-travel: 420px; overflow: hidden; }
-.cg-model-meteors { position: absolute; inset: 0; z-index: 1; border-radius: inherit; pointer-events: none; }
+/* No `overflow: hidden` on the shell any more. It used to clip the meteors, but it also clipped the knob:
+   while dragging, the knob grows to 1.14× and at either end of the travel it stuck out past the shell and
+   was sliced — which is what the owner sees as "pulling it to the end does not line up". The clip now lives
+   on the meteor layer alone (`.cg-model-meteors`), which is what the reference plugin does: its groove
+   clips, its knob is a sibling and may overhang. */
+.cg-model-slider-shell { --cg-meteor-travel: 420px; }
+.cg-model-meteors { position: absolute; inset: 4px 0; overflow: hidden; z-index: 1; border-radius: inherit; pointer-events: none; }
 .cg-model-meteor {
   position: absolute; top: var(--cg-meteor-y); left: 0; display: block;
   width: var(--cg-meteor-len); height: var(--cg-meteor-thick);
@@ -847,11 +873,11 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-trigger-bolt { color: 
 .cg-model-meteor:nth-child(2) { --cg-meteor-y: 8px; --cg-meteor-delay: -0.5s; --cg-meteor-dur: 1.9s; --cg-meteor-len: 34px; --cg-meteor-thick: 2px; }
 .cg-model-meteor:nth-child(3) { --cg-meteor-y: 13px; --cg-meteor-delay: -0.88s; --cg-meteor-dur: 2.1s; --cg-meteor-len: 20px; --cg-meteor-thick: 3px; }
 .cg-model-meteor:nth-child(4) { --cg-meteor-y: 18px; --cg-meteor-delay: -1.26s; --cg-meteor-dur: 1.7s; --cg-meteor-len: 30px; --cg-meteor-thick: 2px; }
-.cg-model-meteor:nth-child(5) { --cg-meteor-y: 21px; --cg-meteor-delay: -1.62s; --cg-meteor-dur: 2.3s; --cg-meteor-len: 42px; --cg-meteor-thick: 2px; }
+.cg-model-meteor:nth-child(5) { --cg-meteor-y: 17px; --cg-meteor-delay: -1.62s; --cg-meteor-dur: 2.3s; --cg-meteor-len: 42px; --cg-meteor-thick: 2px; }
 .cg-model-meteor:nth-child(6) { --cg-meteor-y: 6px; --cg-meteor-delay: -1.98s; --cg-meteor-dur: 2.6s; --cg-meteor-len: 16px; --cg-meteor-thick: 2px; }
 .cg-model-meteor:nth-child(7) { --cg-meteor-y: 11px; --cg-meteor-delay: -0.3s; --cg-meteor-dur: 1.6s; --cg-meteor-len: 14px; --cg-meteor-thick: 2px; }
 .cg-model-meteor:nth-child(8) { --cg-meteor-y: 15px; --cg-meteor-delay: -1.14s; --cg-meteor-dur: 2s; --cg-meteor-len: 38px; --cg-meteor-thick: 2px; }
-.cg-model-meteor:nth-child(9) { --cg-meteor-y: 19px; --cg-meteor-delay: -0.68s; --cg-meteor-dur: 1.8s; --cg-meteor-len: 22px; --cg-meteor-thick: 3px; }
+.cg-model-meteor:nth-child(9) { --cg-meteor-y: 15px; --cg-meteor-delay: -0.68s; --cg-meteor-dur: 1.8s; --cg-meteor-len: 22px; --cg-meteor-thick: 3px; }
 .cg-model-meteor:nth-child(10) { --cg-meteor-y: 5px; --cg-meteor-delay: -1.44s; --cg-meteor-dur: 2.2s; --cg-meteor-len: 12px; --cg-meteor-thick: 2px; }
 .cg-model-meteor:nth-child(11) { --cg-meteor-y: 9px; --cg-meteor-delay: -0.22s; --cg-meteor-dur: 2.45s; --cg-meteor-len: 18px; --cg-meteor-thick: 2px; }
 @keyframes cg-model-meteor {
@@ -1162,3 +1188,130 @@ html[data-chatgpt-ui] .cg-model-provider-site:hover { text-decoration: underline
 @media (prefers-reduced-motion: reduce) {
   html[data-chatgpt-ui] .cg-model-provider-name::before { transition: none; }
 }
+/* The two modes opened by the zap button. They reuse the popover's geometry and the menu idiom already used
+   by the agent picker (`role="menuitemradio"` + `aria-checked`), so the panel needs no new interaction
+   machinery: Escape and outside-click already close the popover. */
+.cg-model-modes { display: flex; flex-direction: column; gap: 4px; padding: 4px 2px 2px; }
+.cg-model-mode { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 10px 12px; border: 1px solid transparent; border-radius: 12px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease; }
+.cg-model-mode:hover:not(:disabled), .cg-model-mode:focus-visible { background: #0000000a; border-color: #00000012; }
+.cg-model-mode[data-on="true"] { border-color: #7b5cf04d; background: #7b5cf014; }
+.cg-model-mode:disabled { opacity: 0.5; cursor: default; }
+.cg-model-mode-check { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; color: var(--cg-effort-color); }
+.cg-model-mode-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cg-model-mode-text > strong { font-size: 14px; font-weight: 600; letter-spacing: 0.1px; }
+.cg-model-mode-text > span { font-size: 12px; opacity: 0.6; }
+
+.cg-model-trigger-bolt[data-tree="true"] { width: 20px; }
+@media (prefers-reduced-motion: reduce) { .cg-model-mode { transition: none; } }
+.cg-model-popover[data-superfast="true"] { --cg-effort-color: #e8a317; }
+/* The tier name on the collapsed trigger is set by an explicit purple rule, so inheriting the mode colour is not
+   enough for it; at the time of writing it was the last purple left on screen while 超快 was on. The root holds
+   both the trigger and the popover, which is why the mode rides there as well. */
+.cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-ultra="true"] { color: #e8a317; }
+.cg-model-popover[data-superfast="true"] .cg-model-slider-fill { background: linear-gradient(90deg, #9dc4ff 0%, #bcd8ff 18%, #e8e2ff 38%, #ffe6a8 62%, #f7c948 82%, #e8a317 100%); }
+.cg-model-popover[data-superfast="true"] .cg-model-slider-shell::before { box-shadow: inset 0 0 0 1px #f7c9483d; }
+.cg-model-popover[data-superfast="true"] .cg-model-slider-shell .cg-model-meteors { display: block; }
+.cg-model-popover[data-superfast="true"] .cg-model-meteor { background: linear-gradient(90deg, #ffffff00, #9dc4ff5c 32%, #ffe6a8dd 70%, #ffffff); filter: drop-shadow(0 0 3px #f7c948cc); }
+.cg-model-popover[data-superfast="true"] .cg-model-meteors::before { background-image:
+    radial-gradient(1.5px 1.5px at 8% 30%, #ffffffdd, transparent),
+    radial-gradient(1.2px 1.2px at 20% 68%, #cfe3ffcc, transparent),
+    radial-gradient(1.2px 1.2px at 28% 72%, #ffe6a8cc, transparent),
+    radial-gradient(1.8px 1.8px at 39% 22%, #ffffffcc, transparent),
+    radial-gradient(1.2px 1.2px at 47% 26%, #ffffffcc, transparent),
+    radial-gradient(1.1px 1.1px at 55% 74%, #f7c948cc, transparent),
+    radial-gradient(1.2px 1.2px at 66% 66%, #ffe6a8ee, transparent),
+    radial-gradient(1.4px 1.4px at 74% 34%, #ffffffdd, transparent),
+    radial-gradient(1.5px 1.5px at 84% 38%, #ffffffdd, transparent),
+    radial-gradient(1.1px 1.1px at 93% 74%, #f7c948cc, transparent); }
+.cg-model-popover[data-superfast="true"] .cg-model-slider-shell[data-effort] .cg-model-slider-fill::after { background: radial-gradient(ellipse 50% 50% at 50% 50%, #8a4d0de6 0%, #8a4d0d45 45%, #8a4d0d00 100%); }
+
+/* 超快's palette. Every rule is keyed on the root, which carries data-superfast for the trigger and the popover
+   alike. Selectors are one class deeper than the rules they must beat — the fill's depth buckets are (0,3,0) and
+   the tier-name rules are explicit colours, so neither can be reached by inheritance. Ultra keeps its own purple
+   ramp, untouched, because these only apply while 超快 is the chosen mode. */
+.cg-model-root[data-superfast="true"] .cg-model-popover { --cg-effort-color: #e8a317; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell .cg-model-slider-fill { background: linear-gradient(90deg, #9dc4ff 0%, #bcd8ff 18%, #e8e2ff 38%, #ffe6a8 62%, #f7c948 82%, #e8a317 100%); }
+.cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-ultra="true"] { color: #e8a317; }
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="max"] .cg-model-summary strong,
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="xhigh"] .cg-model-summary strong { color: #e8a317; }
+.cg-model-root[data-superfast="true"] .cg-model-ultra-notice { color: #e8a317; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-ultra-notice { color: #f7ad31; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell::before { box-shadow: inset 0 0 0 1px #f7c9483d; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-ultra="true"] .cg-model-slider-dots span[data-ultra="true"] { background: #e8a317; box-shadow: 0 0 5px #e8a31799; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-ultra="true"] .cg-model-thumb { border-color: #ffe8a8; box-shadow: 0 0 6px #e8a31799, 0 0 16px #c8860d8c, 0 0 0 1px #ffffff99 inset; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-max="true"][data-ultra="true"] .cg-model-thumb { animation: none; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell .cg-model-meteors { display: block; }
+.cg-model-root[data-superfast="true"] .cg-model-meteor { background: linear-gradient(90deg, #ffffff00, #9dc4ff5c 32%, #ffe6a8dd 70%, #ffffff); filter: drop-shadow(0 0 3px #f7c948cc); }
+.cg-model-root[data-superfast="true"] .cg-model-meteors::before { background-image:
+    radial-gradient(1.5px 1.5px at 8% 30%, #ffffffdd, transparent),
+    radial-gradient(1.2px 1.2px at 20% 68%, #cfe3ffcc, transparent),
+    radial-gradient(1.2px 1.2px at 28% 72%, #ffe6a8cc, transparent),
+    radial-gradient(1.8px 1.8px at 39% 22%, #ffffffcc, transparent),
+    radial-gradient(1.2px 1.2px at 47% 26%, #ffffffcc, transparent),
+    radial-gradient(1.1px 1.1px at 55% 74%, #f7c948cc, transparent),
+    radial-gradient(1.2px 1.2px at 66% 66%, #ffe6a8ee, transparent),
+    radial-gradient(1.4px 1.4px at 74% 34%, #ffffffdd, transparent),
+    radial-gradient(1.5px 1.5px at 84% 38%, #ffffffdd, transparent),
+    radial-gradient(1.1px 1.1px at 93% 74%, #f7c948cc, transparent); }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell .cg-model-slider-fill::after { background: radial-gradient(ellipse 50% 50% at 50% 50%, #8a4d0de6 0%, #8a4d0d45 45%, #8a4d0d00 100%); }
+/* The dark theme carries its own, deeper selectors for the tier names and the glyph colour, so the light-only
+   rules above are not enough: the owner's panel is dark, which is why the first attempt looked like a no-op. */
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover { --cg-effort-color: #f0b429; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-ultra="true"],
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="max"] .cg-model-summary strong,
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="xhigh"] .cg-model-summary strong { color: #f0b429; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-bolt { color: #f0b429; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-zap[data-on="true"] { color: #f0b429; }
+.cg-model-root[data-superfast="true"] .cg-model-zap[data-on="true"] .cg-model-zap-glyph { filter: drop-shadow(0 0 5px #f7c9488c); }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-ultra="true"] .cg-model-slider-dots span[data-ultra="true"] { background: #f0b429; box-shadow: 0 0 5px #f0b42999; }
+/* Longhand on purpose: the `background` shorthand resets `background-size`, and the glare is a 220%-wide layer
+   that sweeps by moving its position — with the size reset it could only pulse in place. */
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-ultra="true"]::after { background-size: 220% 100%; background-repeat: no-repeat; background-image: linear-gradient(105deg, #ffffff00 44%, #ffffffa8 50%, #ffe9b08c 56%, #ffffff00 62%); }
+
+.cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="max"],
+.cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="xhigh"],
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="max"],
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="xhigh"] { color: #f0b429; }
+/* 超快: one fill colour per tier. Medium is deliberately left on the blue→gold ramp, since the brief named only Low,
+   High, Max and Ultra. Light theme first, then the dark counterpart. */
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="low"] .cg-model-slider-fill { background: #e6cb97; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="minimal"] .cg-model-slider-fill { background: #e6cb97; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="high"] .cg-model-slider-fill { background: #dfb662; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="xhigh"] .cg-model-slider-fill { background: #d9a534; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="max"] .cg-model-slider-fill { background: #d9a534; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill { background: linear-gradient(90deg, #dfb662 0%, #dcae55 12%, #d9a534 42%, #e8b622 74%, #f7c948 100%); }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="low"] .cg-model-slider-fill { background: #e8d09f; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="minimal"] .cg-model-slider-fill { background: #e8d09f; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="high"] .cg-model-slider-fill { background: #e0b766; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="xhigh"] .cg-model-slider-fill { background: #d9a534; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="max"] .cg-model-slider-fill { background: #d9a534; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill { background: linear-gradient(90deg, #e0b766 0%, #ddb258 12%, #d9a534 42%, #eab820 74%, #f7c948 100%); }
+
+/* 超快 must not paint the empty tier. The superfast base fill rule is (0,4,0), one class deeper than the shared
+   transparent rules at (0,3,0), so without this the Off position showed a blue→gold bar. */
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="off"] .cg-model-slider-fill,
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="none"] .cg-model-slider-fill { background: transparent; }
+
+/* 超快: at Off / Low / High the tier name takes High's own fill colour, so label and bar match. Max and the top tier
+   are untouched — they keep the mode's gold. */
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="off"] .cg-model-summary strong,
+.cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="off"],
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="none"] .cg-model-summary strong,
+.cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="none"],
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="low"] .cg-model-summary strong,
+.cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="low"],
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="minimal"] .cg-model-summary strong,
+.cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="minimal"],
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="high"] .cg-model-summary strong,
+.cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="high"] { color: #dfb662; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="off"] .cg-model-summary strong,
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="off"],
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="none"] .cg-model-summary strong,
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="none"],
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="low"] .cg-model-summary strong,
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="low"],
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="minimal"] .cg-model-summary strong,
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="minimal"],
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="high"] .cg-model-summary strong,
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="high"] { color: #e0b766; }
+

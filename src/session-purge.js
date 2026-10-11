@@ -92,10 +92,12 @@ function archivedIds(root) {
 }
 
 /**
- * Remove one archived Session's log directory.
+ * Remove one archived Session's log directory, or — when its log is already gone — just the
+ * registry entry that still lists it.
  * @param options - the DSH home to search and the Session id to remove.
- * @returns the directory that was removed, and what index entries were forgotten with it.
- * @throws when the id is malformed, the Session is not archived, or no log directory holds it.
+ * @returns the directory that was removed (null when there was none left), and what index entries
+ *          were forgotten with it.
+ * @throws when the id is malformed or the Session is not archived.
  */
 export function purgeArchivedSession({ root, sessionId }) {
   if (typeof root !== 'string' || root.length === 0) throw new Error('DSH_HOME 不可用');
@@ -125,7 +127,10 @@ export function purgeArchivedSession({ root, sessionId }) {
     rmSync(dir, { recursive: true, force: true });
     return { sessionId, removed: dir, cleaned: forgetSession(root, sessionId) };
   }
-  throw new Error('找不到该会话的日志目录');
+  // No log directory holds it: the Session is already gone, so the registry entry that keeps it on
+  // the archive list is the only thing left to remove. Succeeding here is what lets such an id leave
+  // the list, instead of failing with "找不到该会话的日志目录" on every attempt.
+  return { sessionId, removed: null, cleaned: forgetSession(root, sessionId) };
 }
 
 /**
@@ -149,7 +154,7 @@ export function registerSessionPurge(ctx) {
       if (!payload || typeof payload.sessionId !== 'string') return fail('purge/invalid', '会话参数无效。');
       try {
         const value = purgeArchivedSession({ root: homeRoot(), sessionId: payload.sessionId });
-        try { ctx.logger?.info?.(`[dsh-codex-ui] removed archived Session log: ${value.removed}`); } catch { /* logging must not fail the removal */ }
+        try { ctx.logger?.info?.(`[dsh-codex-ui] purged archived Session ${payload.sessionId}: ${value.removed === null ? 'log already gone, registry entry removed' : `removed ${value.removed}`}`); } catch { /* logging must not fail the removal */ }
         return Response.json({ type: 'server-response', rpcId: envelope.rpcId, result: { ok: true, value } });
       } catch (error) {
         return fail('purge/refused', error?.message || String(error));

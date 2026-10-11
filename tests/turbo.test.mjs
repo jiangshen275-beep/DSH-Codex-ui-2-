@@ -15,16 +15,27 @@ function fakeCtx() {
   const routes = [];
   return {
     routes,
-    get listenerCount() { return listeners.size; },
+    get listenerCount() { let total = 0; for (const chain of listeners.values()) total += chain.length; return total; },
     logger: { warn() {} },
     on(name, handler) {
-      listeners.set(name, handler);
-      return () => listeners.delete(name);
+      const chain = listeners.get(name) ?? [];
+      chain.push(handler);
+      listeners.set(name, chain);
+      return () => {
+        const current = listeners.get(name) ?? [];
+        const index = current.indexOf(handler);
+        if (index >= 0) current.splice(index, 1);
+      };
     },
     fire(name, payload) {
-      const handler = listeners.get(name);
-      if (!handler) throw new Error(`no listener for ${name}`);
-      return handler(payload, () => Promise.resolve({ kind: 'enter', messages: [] }));
+      const chain = listeners.get(name) ?? [];
+      if (chain.length === 0) throw new Error(`no listener for ${name}`);
+      // The real bus is a waterfall: a handler's `next` resolves the rest of the chain, so a later
+      // listener sees what earlier ones appended.
+      const run = index => async () => (index >= chain.length
+        ? { kind: 'enter', messages: [] }
+        : chain[index](payload, run(index + 1)));
+      return run(0)();
     },
     inject(names, callback) {
       callback({ connection: { fetch: { register: route => { routes.push(route); return () => {}; } } } });
@@ -101,22 +112,33 @@ test('Ultra demands a wider read of the request, not just stricter reporting', (
 test('Lightning discloses its cost, keeps delegation purposeful, and never shrinks the work itself', () => {
   assert.match(LIGHTNING_POLICY, /Cost is disclosed, never rationed/);
   assert.match(LIGHTNING_POLICY, /Never drop an angle, a check, or a verification to spend less/);
-  // Purpose before volume: 22 children accumulated over eleven turns, every batch a ritual pair.
-  assert.match(LIGHTNING_POLICY, /Delegation is a tool, not a habit/);
-  assert.match(LIGHTNING_POLICY, /needs no children at all — answer it yourself, and never explain that decision in the reply/);
-  assert.match(LIGHTNING_POLICY, /never dispatch to re-confirm ground this conversation already covered/);
-  assert.match(LIGHTNING_POLICY, /Every child leaves a session behind/);
+  // Purpose before volume: 22 children accumulated over eleven turns, every batch a ritual pair. The
+  // anti-ritual rules survive that episode — what did not survive is the blanket exemption they came
+  // with, because it swung the behaviour to zero delegations across 539 tool calls in one armed session.
+  assert.match(LIGHTNING_POLICY, /Split by angle, never clone/);
+  assert.match(LIGHTNING_POLICY, /Parallel copies of one vague prompt reproduce the same blind spot/);
+  assert.match(LIGHTNING_POLICY, /Never dispatch to re-confirm ground this conversation already covered/);
   assert.match(LIGHTNING_POLICY, /One round, and few children in it/);
   assert.match(LIGHTNING_POLICY, /Never dispatch a second round in the same turn/);
+  // The mandate is now the default, with three narrow exemptions and no self-judged fourth.
+  assert.match(LIGHTNING_POLICY, /Delegation is the DEFAULT, not a judgement call/);
+  assert.match(LIGHTNING_POLICY, /\(a\) a single lookup you can settle with one command or one file read/);
+  assert.match(LIGHTNING_POLICY, /\(c\) a turn whose whole content is reporting something already verified earlier in THIS session/);
+  assert.match(LIGHTNING_POLICY, /Name the exemption in your own reasoning, not in the reply\. Nothing else qualifies/);
+  // "Continues earlier work" was the exemption that ate the mode; it must be named as a non-exemption.
+  assert.match(LIGHTNING_POLICY, /Long-running work is NOT an exemption/);
+  assert.match(LIGHTNING_POLICY, /treat that thought as the failure signal and dispatch the two children/);
+  assert.doesNotMatch(LIGHTNING_POLICY, /needs no children at all/, 'the blanket exemption must not return');
   // Reuse beats respawn: a continued child keeps its reading, a new one re-reads and leaves a session.
   assert.match(LIGHTNING_POLICY, /Reuse before you respawn/);
   assert.match(LIGHTNING_POLICY, /continue that child with a message instead of creating another one/);
   assert.match(LIGHTNING_POLICY, /a check that has to stand on its own still needs a new child/);
-  // Numbering stays 1..11 with no duplicates, because the model reads the numbers as structure.
+  // Numbering stays 1..12 with no duplicates, because the model reads the numbers as structure.
   const numbers = [...LIGHTNING_POLICY.matchAll(/^(\d+)\./gm)].map(match => Number(match[1]));
-  assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 'one numbering, no collisions');
-  // A lookup one command can settle is not a fan-out question.
-  assert.match(LIGHTNING_POLICY, /unless the question is a single lookup you can settle with one command or one file read/);
+  assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 'one numbering, no collisions');
+  // The self-check is what makes the mandate enforceable rather than advisory.
+  assert.match(LIGHTNING_POLICY, /Self-check before you send: count the delegation calls you made this turn/);
+  assert.match(LIGHTNING_POLICY, /if you cannot name which one applies, you owe this turn two children/);
   // Waiting on children is silent work, not a reason to speak.
   assert.match(LIGHTNING_POLICY, /While relevant children run, keep working — reading, checking, verifying — and send nothing to the user/);
   assert.doesNotMatch(LIGHTNING_POLICY, /never keep more than six in flight/, 'concurrency is limited by the harness, not by price');
@@ -149,10 +171,16 @@ test('Chinese is forced for every armed session, thinking included', () => {
 test('the injected contract stays free of accidental duplication', () => {
   // The cap is a duplication alarm, not a ration: the session deliberately trades tokens for
   // effect, so it sits well above what the rules need. It moves only when rules are added on
-  // purpose — 4000 -> 4400 for the invisible-machinery and length-follows-the-question rules.
+  // purpose — 4000 -> 4400 for the invisible-machinery and length-follows-the-question rules,
+  // and 10_000 -> 11_000 when the delegation mandate became the default (measured 10_223): the
+  // mandate plus its self-check are rules added on purpose, after an armed session produced zero
+  // delegations across 539 tool calls.
   assert.ok(ULTRA_POLICY.length < 4_400, `Ultra block is ${ULTRA_POLICY.length} chars`);
   const heaviest = policyText({ persona: 'chat', ultra: true, lightning: true });
-  assert.ok(heaviest.length < 10_000, `full block is ${heaviest.length} chars`);
+  assert.ok(heaviest.length < 11_000, `full block is ${heaviest.length} chars`);
+  // The superfast combination is the largest a session can carry; it had no cap before.
+  const largest = policyText({ persona: 'chat', ultra: true, lightning: true, superfast: true });
+  assert.ok(largest.length < 13_500, `superfast block is ${largest.length} chars`);
   // No rule text may be repeated verbatim between the two mode blocks.
   const sentences = heel => heel.split(/(?<=\.)\s+/).map(s => s.trim()).filter(s => s.length > 40);
   const overlap = sentences(ULTRA_POLICY).filter(line => sentences(LIGHTNING_POLICY).includes(line));
@@ -281,27 +309,28 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     };
 
     const empty = await call({ sessionId: 's1', action: 'read' });
-    assert.deepEqual(empty.result, { ok: true, value: { persona: '', lightning: false, ultra: false, tokenMultiple: 15, tokenExact: true } });
+    assert.deepEqual(empty.result, { ok: true, value: { persona: '', lightning: false, ultra: false, superfast: false, tokenMultiple: 15, tokenExact: true } });
 
     const armed = await call({ sessionId: 's1', action: 'update', lightning: true, ultra: true });
-    assert.deepEqual(armed.result.value, { persona: '', lightning: true, ultra: true, tokenMultiple: 15, tokenExact: true });
+    assert.deepEqual(armed.result.value, { persona: '', lightning: true, ultra: true, superfast: false, tokenMultiple: 15, tokenExact: true });
 
     // The read above the patch must reflect the new state, and it must persist.
     const reread = await call({ sessionId: 's1', action: 'read' });
-    assert.deepEqual(reread.result.value, { persona: '', lightning: true, ultra: true, tokenMultiple: 15, tokenExact: true });
+    assert.deepEqual(reread.result.value, { persona: '', lightning: true, ultra: true, superfast: false, tokenMultiple: 15, tokenExact: true });
     const stored = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-turbo.json'), 'utf8'));
     assert.deepEqual(stored.sessions.s1.lightning, true);
 
     // One flag without the other must not disturb the other.
     const partial = await call({ sessionId: 's1', action: 'update', lightning: false });
-    assert.deepEqual(partial.result.value, { persona: '', lightning: false, ultra: true, tokenMultiple: 15, tokenExact: true });
+    assert.deepEqual(partial.result.value, { persona: '', lightning: false, ultra: true, superfast: false, tokenMultiple: 15, tokenExact: true });
 
     // The hero arms the persona for the conversation that starts next: an empty id reads
     // the picker's current value and writes it as pending, without touching session rows.
     const heroRead = await call({ sessionId: '', action: 'read' });
-    assert.deepEqual(heroRead.result.value, { persona: 'work', lightning: false, ultra: false, pending: true, tokenMultiple: 15, tokenExact: true });
+    assert.deepEqual(heroRead.result.value, { persona: 'work', lightning: false, ultra: false, superfast: false, pending: true, tokenMultiple: 15, tokenExact: true });
     const heroPick = await call({ sessionId: '', action: 'update', persona: 'chat' });
     assert.equal(heroPick.result.value.persona, 'chat');
+    // Superfast travels the same path: set, read back, and persisted.
     // State writes are queued; await the chain rather than guessing at a delay.
     await turbo.settled();
     const afterPick = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-turbo.json'), 'utf8'));
@@ -328,8 +357,11 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     // A running conversation is out of reach for the persona pick — but the language contract
     // is forced on every session this plugin arms, so that block is what it receives.
     const running = await personaCtx.fire('agent/pre-step', step('s0', 2));
-    assert.equal(running.messages.length, 1, 'the forced language block still arrives');
-    const languageOnly = running.messages[0]?.content?.[0]?.text ?? '';
+    // The language block must arrive; an armed session also carries the per-turn Lightning reminder,
+    // so the count is no longer fixed — find the block by content instead of by index.
+    const texts = running.messages.map(message => message.content?.[0]?.text ?? '');
+    assert.ok(texts.length >= 1, 'the forced language block still arrives');
+    const languageOnly = texts.find(text => text.includes('Language (active)')) ?? '';
     assert.match(languageOnly, /Language \(active\) — Chinese throughout/);
     assert.match(languageOnly, /Reason in Chinese directly/);
     assert.doesNotMatch(languageOnly, /Persona \(active\)/, 'no persona may be stamped on a running conversation');
@@ -384,7 +416,7 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     await new Promise(resolve => setTimeout(resolve, 60));
     const pruned = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-turbo.json'), 'utf8'));
     assert.equal(Object.keys(pruned.sessions).length, 40, 'the file stays bounded');
-    assert.deepEqual(pruned.sessions['session-armed'], { lightning: true, ultra: true, at: pruned.sessions['session-armed'].at }, 'the armed row survives the storm');
+    assert.deepEqual(pruned.sessions['session-armed'], { lightning: true, ultra: true, superfast: false, at: pruned.sessions['session-armed'].at }, 'the armed row survives the storm');
     assert.equal(pruned.sessions.s1.ultra, true, 'and so does the armed row this test set up earlier');
     assert.equal('child-0' in pruned.sessions, false, 'the oldest persona-only rows are the ones that go');
     assert.equal(Object.entries(pruned.sessions).filter(([, value]) => !value.ultra && !value.lightning).length, 38, 'the rest of the bound is spent on persona-only rows');
@@ -392,5 +424,116 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     if (previous === undefined) delete process.env.DSH_HOME;
     else process.env.DSH_HOME = previous;
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('Superfast builds a two-tier tree, stamps the tier in every child prompt, and stops at tier 2', () => {
+  const tree = policyText({ persona: 'work', superfast: true });
+  // The tree is the point: a tier-1 child must open two of its own.
+  assert.match(tree, /## Superfast Mode/);
+  assert.match(tree, /open exactly two grandchildren before you report back/);
+  // Depth travels inside the prompts, because the host cannot tell a child how deep it sits.
+  assert.match(tree, /Tier: N of 2/);
+  assert.match(tree, /Tier: 2 of 2/);
+  // And it is bounded: without this the fan-out is 15x cost squared, then cubed.
+  assert.match(tree, /There is no tier 3|there is no tier 3/);
+  assert.match(tree, /never fan out past tier 2/);
+  // The tree needs Lightning's rules too — they are what tells a parent how to brief a child.
+  assert.match(tree, /## Lightning Mode/);
+  // The ordinary guard would forbid the very delegation the tree is built from, so it must be gone.
+  assert.doesNotMatch(tree, /Ignore every rule above about fan-out/);
+  assert.match(tree, /your prompt's first line decides whether you fan out/);
+});
+
+test('a plain Lightning session still ends with the guard that forbids child fan-out', () => {
+  const flat = policyText({ persona: 'work', lightning: true });
+  assert.doesNotMatch(flat, /## Superfast Mode/, 'Lightning alone must not promise a tree');
+  assert.match(flat, /Ignore every rule above about fan-out/);
+});
+
+test('the turbo endpoint arms and persists the superfast flag on its own', async () => {
+  // Its own home and context: an extra armed session row would change the eviction expectations
+  // of the big flag test above, and a test that shares state with another is not a test.
+  const home = mkdtempSync(join(tmpdir(), 'codex-ui-superfast-'));
+  const previous = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  try {
+    const ctx = fakeCtx();
+    const turbo = registerTurbo(ctx);
+    const call = async payload => (await ctx.routes.find(candidate => candidate.path === TURBO_PATH).fetch(new Request('http://local/api', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'client-request', rpcId: 'rt', method: TURBO_EVENT, payload }),
+    }))).json();
+    const before = await call({ sessionId: 'tree', action: 'read' });
+    assert.equal(before.result.value.superfast, false, 'a session starts with the tree off');
+    const armed = await call({ sessionId: 'tree', action: 'update', superfast: true });
+    assert.equal(armed.result.value.superfast, true);
+    assert.equal(armed.result.value.lightning, false, 'arming the tree must not flip the flat switch');
+    assert.equal((await call({ sessionId: 'tree', action: 'read' })).result.value.superfast, true);
+    await turbo.settled();
+    const stored = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-turbo.json'), 'utf8'));
+    assert.equal(stored.sessions.tree.superfast, true, 'the flag must survive a reload');
+    // A non-boolean is refused rather than coerced.
+    const bad = await call({ sessionId: 'tree', action: 'update', superfast: 'yes' });
+    assert.equal(bad.result.ok, false);
+    // And the hero's "next session" scope never carries it: the tree is armed per conversation.
+    const hero = await call({ sessionId: '', action: 'read' });
+    assert.equal(hero.result.value.superfast, false);
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previous;
+  }
+});
+
+test('Lightning re-asserts its mandate once per turn, and only for an armed session', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'codex-ui-nudge-'));
+  const previous = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  try {
+    const ctx = fakeCtx();
+    registerTurbo(ctx);
+    const route = ctx.routes.find(candidate => candidate.path === TURBO_PATH);
+    const call = async payload => (await route.fetch(new Request('http://local/api', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'client-request', rpcId: 'rn', method: TURBO_EVENT, payload }),
+    }))).json();
+    const stepOf = (id, turn, step = 1) => ({ agent: { id }, turn, step, signal: { aborted: false } });
+    const nudges = result => result.messages.map(m => m.content?.[0]?.text ?? '').filter(text => text.includes('Lightning is armed'));
+    const disarm = result => result.messages.map(m => m.content?.[0]?.text ?? '').filter(text => text.includes('Lightning is armed'));
+
+    // An unarmed session never sees it.
+    const cold = await ctx.fire('agent/pre-step', stepOf('s-cold', 3));
+    assert.deepEqual(disarm(cold), [], 'an unarmed session gets no reminder');
+
+    await call({ sessionId: 's-armed', action: 'update', lightning: true });
+    const first = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 1));
+    const firstNudges = nudges(first);
+    assert.equal(firstNudges.length, 1, 'the first step of a turn carries exactly one reminder');
+    assert.match(firstNudges[0], /turn 3/);
+    assert.match(firstNudges[0], /dispatch at least two subagents/);
+    // Steps 2 and 3 repeat it — the opener alone was measured to leave turns with zero delegations,
+    // because by the time the model is ready to answer the opener is several tool results behind it.
+    const second = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 2));
+    assert.equal(nudges(second).length, 1, 'step 2 restates the demand');
+    assert.match(nudges(second)[0], /step 2 of that turn/);
+    const third = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 3));
+    assert.equal(nudges(third).length, 1, 'step 3 restates it once more');
+    // And it stops there: a long turn is not nagged forever.
+    const fourth = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 4));
+    assert.deepEqual(nudges(fourth), [], 'the reminder is bounded to the first three steps');
+    const repeated = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 2));
+    assert.deepEqual(nudges(repeated), [], 'the same step is never nudged twice');
+    // The next turn gets its own, with its own number — that is what defeats the injector's
+    // "same text, skip" rule, which is why the one-shot contract stopped steering anything.
+    const nextTurn = await ctx.fire('agent/pre-step', stepOf('s-armed', 4, 1));
+    const nextNudges = nudges(nextTurn);
+    assert.equal(nextNudges.length, 1, 'each new turn re-asserts the mandate');
+    assert.match(nextNudges[0], /turn 4/);
+    assert.notEqual(nextNudges[0], firstNudges[0], 'never the same text twice');
+    // Disarming stops it again.
+    await call({ sessionId: 's-armed', action: 'update', lightning: false });
+    const afterOff = await ctx.fire('agent/pre-step', stepOf('s-armed', 5, 1));
+    assert.deepEqual(nudges(afterOff), [], 'turning the switch off stops the reminder');
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previous;
   }
 });

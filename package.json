@@ -1,6 +1,6 @@
 {
   "name": "dsh-codex-ui",
-  "version": "0.10.6",
+  "version": "1.0.0",
   "description": "Codex-style interface and prompt modes for DeepSeek Harness",
   "type": "module",
   "main": "./lib/index.js",
@@ -23,7 +23,7 @@
     "README.md",
     "README.zh.md",
     "start-ui.ps1",
-    "RESOURCE-REFERENCE.zh.md",
+    "RESOURCE-REFERENCE.zh.md","tests",
     "SYSTEM-PROMPT-PLAN.zh.md",
     "locale",
     "THIRD-PARTY-NOTICES.md"
@@ -66,10 +66,10 @@
   "icon": "./assets/codex.png",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Loliyer520/dsh-codex-ui.git"
+    "url": "git+https://github.com/jiangshen275-beep/DSH-Codex-ui-2-.git"
   },
-  "homepage": "https://github.com/Loliyer520/dsh-codex-ui",
+  "homepage": "https://github.com/jiangshen275-beep/DSH-Codex-ui-2-",
   "bugs": {
-    "url": "https://github.com/Loliyer520/dsh-codex-ui/issues"
+    "url": "https://github.com/jiangshen275-beep/DSH-Codex-ui-2-/issues"
   }
 }

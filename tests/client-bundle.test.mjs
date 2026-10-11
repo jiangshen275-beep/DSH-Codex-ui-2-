@@ -87,12 +87,12 @@ function loadBundle(react = createReactShim(), storage = null, windowExtras = nu
   return react;
 }
 
-/** useState order: open, pane, query, draftIndex, actionError, lightning, ultraFlag, turboReady, budget, ultraNotice, aliases, aliasEditor. Every mount must supply all twelve. */
-const CLOSED_DISARMED = [false, 'effort', '', null, null, false, false, true, { value: 15, exact: true }, false, {}, null];
-const CLOSED_ARMED = [false, 'effort', '', null, null, true, false, true, { value: 15, exact: true }, false, {}, null];
-const OPEN_AT_MAX = [true, 'effort', '', null, null, false, true, true, { value: 15, exact: true }, false, {}, null];
-const OPEN_ULTRA_LIGHTNING = [true, 'effort', '', null, null, true, true, true, { value: 15, exact: true }, false, {}, null];
-const OPEN_REAL_TIER = [true, 'effort', '', null, null, false, false, true, { value: 15, exact: true }, false, {}, null];
+/** useState order: open, pane, query, draftIndex, actionError, lightning, superfast, ultraFlag, turboReady, budget, ultraNotice, aliases, aliasEditor. Every mount must supply all thirteen. */
+const CLOSED_DISARMED = [false, 'effort', '', null, null, false, false, false, true, { value: 15, exact: true }, false, {}, null];
+const CLOSED_ARMED = [false, 'effort', '', null, null, true, false, false, true, { value: 15, exact: true }, false, {}, null];
+const OPEN_AT_MAX = [true, 'effort', '', null, null, false, false, true, true, { value: 15, exact: true }, false, {}, null];
+const OPEN_ULTRA_LIGHTNING = [true, 'effort', '', null, null, true, false, true, true, { value: 15, exact: true }, false, {}, null];
+const OPEN_REAL_TIER = [true, 'effort', '', null, null, false, false, false, true, { value: 15, exact: true }, false, {}, null];
 
 function modelStore(effort = 'high') {
   return {
@@ -133,7 +133,7 @@ function mountControl(states, store = modelStore(), refs = {}, options = {}) {
         // differently once the component has pushed a change.
         const answered = typeof options.read === 'function' ? options.read() : options.read;
         return payload.action === 'read'
-          ? { ok: true, value: answered ?? { lightning: false, ultra: false, tokenMultiple: 15, tokenExact: true } }
+          ? { ok: true, value: answered ?? { lightning: false, superfast: false, ultra: false, tokenMultiple: 15, tokenExact: true } }
           : { ok: true, value: {} };
       },
     },
@@ -234,10 +234,14 @@ test('open control renders the clickable switch, the Ultra track and the flags r
   const field = { style: { setProperty(name, value) { this[name] = value; } } };
   const open = mountControl(OPEN_ULTRA_LIGHTNING, modelStore(), { 7: shell, 8: field }).element;
   const switches = byClass(open, 'cg-model-zap');
-  assert.equal(switches.length, 1, 'the top-left bolt must be a real button');
+  assert.equal(switches.length, 1, 'the top-left bolt must be exactly one real button');
   assert.equal(switches[0].type, 'button');
   assert.equal(switches[0].props['data-on'], true, 'armed state must reach the DOM');
-  assert.equal(switches[0].props['aria-pressed'], true);
+  // The bolt is no longer a switch: it opens the two-option menu, so the pressed state moved to the
+  // options inside and the trigger announces the menu instead.
+  assert.equal(switches[0].props['aria-haspopup'], 'menu');
+  assert.equal(switches[0].props['aria-expanded'], false, 'the menu is closed until the bolt is clicked');
+  assert.equal(switches[0].props['data-mode'], 'fast', 'the armed flat mode is what the bolt reports');
   assert.equal(typeof switches[0].props.onClick, 'function', 'the switch must be clickable');
   assert.equal(switches[0].props.disabled, false);
 
@@ -257,15 +261,16 @@ test('open control renders the clickable switch, the Ultra track and the flags r
 });
 
 test('the cost line follows the multiplier the Host reports', () => {
-  const permissive = mountControl([true, 'effort', '', null, null, true, false, true, { value: 4, exact: true }, false, {}, null]).element;
+  const permissive = mountControl([true, 'effort', '', null, null, true, false, false, true, { value: 4, exact: true }, false, {}, null]).element;
   assert.match(treeText(permissive), /4\s*[x\u00d7]\s*token/i, 'a different multiplier must be shown as-is');
 
-  const inexact = mountControl([true, 'effort', '', null, null, true, false, true, { value: 15, exact: false }, false, {}, null]).element;
+  const inexact = mountControl([true, 'effort', '', null, null, true, false, false, true, { value: 15, exact: false }, false, {}, null]).element;
   assert.match(treeText(inexact), /15\s*[x\u00d7]\s*token/i, 'the fallback figure still shows');
 
   const disarmed = mountControl(OPEN_REAL_TIER).element;
-  // The figure now lives only in the switch's tooltip, which explains itself in both states.
-  assert.match(treeText(disarmed), /开启后每轮至少并发 2 个子代理/, 'the disarmed switch still explains itself');
+  // The figure now lives in the trigger's tooltip, which explains the menu in every state. The wording moved
+  // with the interaction: the bolt opens a two-option menu, so a disarmed bolt advertises 快速.
+  assert.match(treeText(disarmed), /快速每轮至少并发 2 个子代理/, 'the disarmed bolt still explains what it offers');
   assert.doesNotMatch(treeText(disarmed), /已开启/, 'and does not claim to be armed');
 });
 
@@ -316,8 +321,8 @@ test('a blank conversation adopts the switches the user last used', async () => 
   // The mount state is before the first Host read: nothing is armed and the switches are
   // not ready yet, so only the read can turn them on. Lightning / Ultra / readiness are
   // the only slots the read is allowed to write, which is what a real re-render does.
-  const beforeRead = [false, 'effort', '', null, null, false, false, false, { value: 15, exact: true }, false, {}, null];
-  const writableSlots = [5, 6, 7];
+  const beforeRead = [false, 'effort', '', null, null, false, false, false, false, { value: 15, exact: true }, false, {}, null];
+  const writableSlots = [5, 6, 7, 8];
   const { rerender } = mountControl(beforeRead, modelStore('medium'), {}, { blank: true, calls, memory, writableSlots });
   // The read resolves on a later microtask, so settle it, then let the sync effects run.
   await new Promise(resolve => setTimeout(resolve, 0));
@@ -333,8 +338,8 @@ test('a blank conversation adopts the switches the user last used', async () => 
 test('a running conversation never adopts the remembered switches', async () => {
   const calls = [];
   const memory = { 'dsh-codex-ui/composer-switches': { lightning: true, ultra: true } };
-  const beforeRead = [false, 'effort', '', null, null, false, false, false, { value: 15, exact: true }, false, {}, null];
-  const { rerender } = mountControl(beforeRead, modelStore('medium'), {}, { blank: false, calls, memory, writableSlots: [5, 6, 7] });
+  const beforeRead = [false, 'effort', '', null, null, false, false, false, false, { value: 15, exact: true }, false, {}, null];
+  const { rerender } = mountControl(beforeRead, modelStore('medium'), {}, { blank: false, calls, memory, writableSlots: [5, 6, 7, 8] });
   await new Promise(resolve => setTimeout(resolve, 0));
   rerender();
   // The shim recreates refs per render, so the sync effect re-runs where React would have
@@ -415,7 +420,7 @@ test('landing on Ultra swaps the tier name for the cost notice, then restores it
   // The read answers "pinned", which is what the app would have settled on before a drag and
   // what keeps the probe's repeated reads from fighting the pin.
   const read = { lightning: false, ultra: true, tokenMultiple: 15, tokenExact: true };
-  const { rerender } = mountControl(OPEN_REAL_TIER, modelStore('medium'), {}, { writableSlots: [3, 6, 9], read });
+  const { rerender } = mountControl(OPEN_REAL_TIER, modelStore('medium'), {}, { writableSlots: [3, 7, 10], read });
   const summary = tree => byClass(tree, 'cg-model-summary')[0].props.children[0];
   assert.equal(summary(rerender()).props.children, 'Medium', 'the tier name stands while the tier is not Ultra');
   // Let the first read settle first: in the app it lands long before anyone drags, and it
@@ -454,7 +459,7 @@ test('landing on Ultra swaps the tier name for the cost notice, then restores it
 test('releasing without previewing Ultra announces nothing', async () => {
   // The release paths run chooseLevel; a notice there announced twice (pointerup, then the
   // blur that follows), which is the bug this pins down.
-  const { rerender } = mountControl(OPEN_REAL_TIER, modelStore('medium'), {}, { writableSlots: [3, 6, 9] });
+  const { rerender } = mountControl(OPEN_REAL_TIER, modelStore('medium'), {}, { writableSlots: [3, 7, 10] });
   await new Promise(resolve => setTimeout(resolve, 0));
   rerender();
   await byClass(rerender(), 'cg-model-slider')[0].props.onPointerUp({ currentTarget: { value: '3' } });
@@ -495,7 +500,7 @@ test('reset leaves Ultra as well as restoring the default effort', async () => {
   // The Host answers "pinned" once, then agrees with the reset the component pushes.
   let reads = 0;
   const read = () => { reads += 1; return { lightning: false, ultra: reads === 1, tokenMultiple: 15, tokenExact: true }; };
-  const { rerender, selections } = mountControl(OPEN_AT_MAX, modelStore('high'), {}, { writableSlots: [3, 6, 9], calls, read });
+  const { rerender, selections } = mountControl(OPEN_AT_MAX, modelStore('high'), {}, { writableSlots: [3, 7, 10], calls, read });
   await new Promise(resolve => setTimeout(resolve, 0));
   rerender();
   const before = byClass(rerender(), 'cg-model-slider')[0];
@@ -644,7 +649,7 @@ function byLabel(tree, pattern) {
 const SIDEBAR_SLOT = {
   heroMarkOpen: 8, pinsOpen: 11,
   taskMenu: 13, renameTarget: 14, renameDraft: 15, renameError: 16, renamePending: 17,
-  recentOpen: 19, archivedOpen: 20, childPanel: 21, subagentOpen: 22, branchOpen: 23, groupShowAll: 24,
+  recentOpen: 19, archivedOpen: 20, childPanel: 21, subagentOpen: 22, branchOpen: 23, groupShowAll: 24, ghostIds: 27,
   navigationError: 25, purgedIds: 26,
 };
 
@@ -656,7 +661,7 @@ function sidebarStates(overrides = {}) {
   const states = [
     null, false, '', 'home', false, false, null, false, false, false, false, false,
     null, null, null, '', '', false, null, false, false, new Set(), new Set(), new Set(), new Set(), '',
-    new Set(),
+    new Set(), new Set(),
   ];
   for (const [index, value] of Object.entries(overrides)) states[Number(index)] = value;
   return states;
@@ -1013,12 +1018,12 @@ test('a refused deletion keeps the row and states why', async () => {
     writableSlots: [SIDEBAR_SLOT.archivedOpen, SIDEBAR_SLOT.navigationError, SIDEBAR_SLOT.purgedIds],
     overrides: { [SIDEBAR_SLOT.archivedOpen]: true },
     workspaces: { items: [], pinnedSessionIds: [], archivedSessionIds: ['archived'] },
-    purgeResult: { ok: false, error: { message: '找不到该会话的日志目录' } },
+    purgeResult: { ok: false, error: { message: '归档列表不可读' } },
   });
   await byLabel(rerender(), /^删除会话日志/)[0].props.onClick();
   const after = rerender();
   assert.equal(byLabel(after, /^删除会话日志/).length, 1, 'a refusal must not hide the row');
-  assert.match(treeText(after), /找不到该会话的日志目录/);
+  assert.match(treeText(after), /归档列表不可读/);
 });
 
 test('a missing delete route tells the user to restart DSH', async () => {
@@ -1050,7 +1055,7 @@ test('a model alias repaints the name and leaves the request alone', () => {
   const alias = { 'deepseek/deepseek-chat': '小闪' };
   // The alias map is state seeded from storage, so the mount carries both: the queued slot is what
   // this render reads, and the storage entry is what the next page load would read.
-  const seeded = [true, 'model', '', null, null, false, false, true, { value: 15, exact: true }, false, alias, null];
+  const seeded = [true, 'model', '', null, null, false, false, false, true, { value: 15, exact: true }, false, alias, null];
   const { element, selections } = mountControl(seeded, store, {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
   assert.equal(byClass(element, 'cg-model-trigger-name')[0].props.children, '小闪', 'the composer label uses the alias');
   const option = byClass(element, 'cg-model-option')[0];
@@ -1063,19 +1068,19 @@ test('a model alias repaints the name and leaves the request alone', () => {
 
 test('a model can be found by either of its names', () => {
   const alias = { 'deepseek/deepseek-chat': '小闪' };
-  const byAlias = mountControl([true, 'model', '小闪', null, null, false, false, true, { value: 15, exact: true }, false, alias, null], modelStore(), {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
+  const byAlias = mountControl([true, 'model', '小闪', null, null, false, false, false, true, { value: 15, exact: true }, false, alias, null], modelStore(), {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
   assert.equal(byClass(byAlias.element, 'cg-model-option').length, 1, 'searching the alias finds the model');
-  const byReal = mountControl([true, 'model', 'deepseek-chat', null, null, false, false, true, { value: 15, exact: true }, false, alias, null], modelStore(), {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
+  const byReal = mountControl([true, 'model', 'deepseek-chat', null, null, false, false, false, true, { value: 15, exact: true }, false, alias, null], modelStore(), {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
   assert.equal(byClass(byReal.element, 'cg-model-option').length, 1, 'and so does the real name');
-  const byNothing = mountControl([true, 'model', 'zzz', null, null, false, false, true, { value: 15, exact: true }, false, alias, null], modelStore(), {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
+  const byNothing = mountControl([true, 'model', 'zzz', null, null, false, false, false, true, { value: 15, exact: true }, false, alias, null], modelStore(), {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
   assert.equal(byClass(byNothing.element, 'cg-model-option').length, 0, 'an unrelated query still filters it out');
 });
 
 test('renaming from the picker stores the alias, trims it, and clears on reset', () => {
   // The row keeps a rename control of its own: a click on the row already means "use this model",
   // so the gesture cannot be a double click. The editor it opens carries no buttons at all.
-  const seeded = [true, 'model', '', null, null, false, false, true, { value: 15, exact: true }, false, {}, null];
-  const { rerender, memory } = mountControl(seeded, modelStore(), {}, { writableSlots: [10, 11] });
+  const seeded = [true, 'model', '', null, null, false, false, false, true, { value: 15, exact: true }, false, {}, null];
+  const { rerender, memory } = mountControl(seeded, modelStore(), {}, { writableSlots: [11, 12] });
   // Found by class, the same way the sidebar tests find their row actions. The label is checked for
   // content rather than for an exact sentence: the wording is not the contract.
   const found = () => byClassPart(rerender(), 'cg-model-rename')[0];
@@ -1121,7 +1126,7 @@ test('a name belongs to one account, not to the model id at large', () => {
     pending: null, status: 'ready', failures: [], retainedEffort: null,
   };
   const alias = { 'deepseek/deepseek-chat': '小闪' };
-  const seeded = [true, 'model', '', null, null, false, false, true, { value: 15, exact: true }, false, alias, null];
+  const seeded = [true, 'model', '', null, null, false, false, false, true, { value: 15, exact: true }, false, alias, null];
   const { element } = mountControl(seeded, store, {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
   const rows = byClassPart(element, 'cg-model-option');
   assert.equal(rows.length, 2, 'the same model id is offered by both accounts');
@@ -1132,8 +1137,8 @@ test('a name belongs to one account, not to the model id at large', () => {
 test('renaming happens inside the row, and the picker stays on screen', () => {
   // The editor used to be a floating panel: it was clipped by its own popover, and clicking the
   // pencil could leave the reader with nothing. So the assertions here are about what survives.
-  const seeded = [true, 'model', '', null, null, false, false, true, { value: 15, exact: true }, false, {}, null];
-  const { rerender } = mountControl(seeded, modelStore(), {}, { writableSlots: [10, 11] });
+  const seeded = [true, 'model', '', null, null, false, false, false, true, { value: 15, exact: true }, false, {}, null];
+  const { rerender } = mountControl(seeded, modelStore(), {}, { writableSlots: [11, 12] });
   const rows = () => byClassPart(rerender(), 'cg-model-row');
   assert.equal(rows().length, 1, 'the picker lists the model');
   const found = () => byClassPart(rerender(), 'cg-model-rename')[0];
@@ -1178,8 +1183,8 @@ test('editing one account does not put the other account row into editing', () =
     current: { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'high' },
     pending: null, status: 'ready', failures: [], retainedEffort: null,
   };
-  const seeded = [true, 'model', '', null, null, false, false, true, { value: 15, exact: true }, false, {}, null];
-  const { rerender } = mountControl(seeded, store, {}, { writableSlots: [10, 11] });
+  const seeded = [true, 'model', '', null, null, false, false, false, true, { value: 15, exact: true }, false, {}, null];
+  const { rerender } = mountControl(seeded, store, {}, { writableSlots: [11, 12] });
   const rows = () => byClassPart(rerender(), 'cg-model-row');
   assert.equal(rows().length, 2, 'two accounts list the same model');
 
@@ -1273,3 +1278,27 @@ test('the running label keeps the host elapsed time and drops the host wording',
   assert.equal(runningTailOf(''), '');
   assert.equal(runningTailOf(undefined), '');
 });
+
+test('超快 paints each tier, light and dark, and leaves Off empty', () => {
+  // The palette the owner specified: Low cream, High pale gold, Max gold, Ultra pale gold → gold, and a dark
+  // counterpart for each. Two traps are pinned here on purpose — every per-tier rule must be declared after the
+  // superfast base rule (an indexOf-based probe elsewhere reads the first match), and Off must override that base
+  // rule, which is one class deeper than the shared transparent rules.
+  const css = readFileSync(BUNDLE, 'utf8').replace(/\\"/g, '"');
+  const base = css.indexOf('.cg-model-root[data-superfast="true"] .cg-model-slider-shell .cg-model-slider-fill');
+  assert.ok(base > -1, 'the superfast base fill ships in the artifact');
+  const palette = [['low', '#e6cb97'], ['minimal', '#e6cb97'], ['high', '#dfb662'], ['xhigh', '#d9a534'], ['max', '#d9a534']];
+  for (const [tier, colour] of palette) {
+    const selector = `.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="${tier}"] .cg-model-slider-fill`;
+    const at = css.indexOf(selector);
+    assert.ok(at > base, `${tier}: the tier rule must be declared after the base rule`);
+    assert.match(css.slice(at, css.indexOf('}', at)), new RegExp(colour), `${tier} keeps its audited colour`);
+    assert.ok(css.indexOf(`html[data-chatgpt-ui]:has([data-ds-dark-theme]) ${selector}`) > -1, `${tier} ships a dark counterpart`);
+  }
+  const ultra = css.indexOf('.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill');
+  assert.match(css.slice(ultra, css.indexOf('}', ultra)), /linear-gradient\(90deg, #dfb662 0%/, 'Ultra runs the new High into gold');
+  const off = css.indexOf('.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="off"] .cg-model-slider-fill');
+  assert.ok(off > -1, 'Off needs its own override to stay empty');
+  assert.match(css.slice(off, css.indexOf('}', off)), /background: transparent/, 'Off stays empty under 超快');
+});
+

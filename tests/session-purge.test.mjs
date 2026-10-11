@@ -63,11 +63,15 @@ test('a malformed id cannot name a directory at all', () => {
   });
 });
 
-test('a directory without a Session log is reported, not removed', () => {
+test('a directory without a Session log is kept, and only its stale archive entry is cleared', () => {
   withHome([ARCHIVED], ({ root, project }) => {
     rmSync(join(project, ARCHIVED, LOG));
-    assert.throws(() => purgeArchivedSession({ root, sessionId: ARCHIVED }), /找不到该会话的日志目录/);
+    const value = purgeArchivedSession({ root, sessionId: ARCHIVED });
+    assert.equal(value.removed, null, 'nothing was removed');
+    assert.deepEqual(value.cleaned, ['archivedSessionIds'], 'the stale archive entry is the only thing left to drop');
     assert.equal(existsSync(join(project, ARCHIVED)), true, 'a directory that is not a log is left alone');
+    const registry = JSON.parse(readFileSync(join(root, 'storages', 'workspace.json'), 'utf8'));
+    assert.deepEqual(registry.global.archivedSessionIds, [], 'the id no longer keeps a row on the archive list');
   });
 });
 
@@ -97,7 +101,8 @@ test('a junction standing in for a Session directory is refused, and its target 
     writeFileSync(join(victim, 'precious.txt'), 'keep me\n', 'utf8');
     rmSync(join(project, ARCHIVED), { recursive: true, force: true });
     symlinkSync(victim, join(project, ARCHIVED), 'junction');
-    assert.throws(() => purgeArchivedSession({ root, sessionId: ARCHIVED }), /找不到该会话的日志目录/);
+    const value = purgeArchivedSession({ root, sessionId: ARCHIVED });
+    assert.equal(value.removed, null, 'a junction is never the directory that gets removed');
     assert.equal(existsSync(join(victim, 'precious.txt')), true, 'the junction target is untouched');
   });
 });

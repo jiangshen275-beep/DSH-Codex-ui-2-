@@ -14,7 +14,7 @@
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { policyText, OFF_NOTICE, tokenMultiplier } from './turbo-policy.js';
+import { policyText, lightningNudge, OFF_NOTICE, tokenMultiplier } from './turbo-policy.js';
 import { setAliases, identityHealth, writeAliasesToDisk } from './model-identity.js';
 
 export const TURBO_EVENT = 'dsh-codex-ui/turbo';
@@ -49,6 +49,7 @@ function readState(file) {
         persona: value.persona === 'chat' || value.persona === 'work' ? value.persona : '',
         lightning: value.lightning === true,
         ultra: value.ultra === true,
+        superfast: value.superfast === true,
         at: Number.isFinite(value.at) ? value.at : 0,
       };
     }
@@ -72,7 +73,7 @@ function writeState(file, state) {
   // recency let a handful of child rows push the switches of the conversation the user is actually
   // in out of the file — the composer then reads them as off. Armed rows are therefore kept first,
   // and only rows of equal weight compete on recency.
-  const weight = value => (value.ultra || value.lightning ? 1 : 0);
+  const weight = value => (value.ultra || value.lightning || value.superfast ? 1 : 0);
   const rows = Object.entries(state.sessions)
     .sort((a, b) => weight(b[1]) - weight(a[1]) || (b[1].at ?? 0) - (a[1].at ?? 0))
     .slice(0, MAX_SESSIONS);
@@ -83,7 +84,7 @@ function writeState(file, state) {
     // mistake "never chose" for the default.
     const sessions = Object.fromEntries(rows.map(([id, value]) => [id, value.persona
       ? value
-      : { lightning: value.lightning, ultra: value.ultra, at: value.at }]));
+      : { lightning: value.lightning, ultra: value.ultra, superfast: value.superfast, at: value.at }]));
     writeFileSync(temp, `${JSON.stringify({
       sessions,
       pendingPersona: state.pendingPersona || '',
@@ -217,12 +218,13 @@ export function registerTurbo(ctx) {
     persona: personaFor(sessionId, position),
     lightning: state.sessions[sessionId]?.lightning === true,
     ultra: state.sessions[sessionId]?.ultra === true,
+    superfast: state.sessions[sessionId]?.superfast === true,
   });
   // The cost of the contract travels with the state so the interface never hard-codes it.
   const budget = tokenMultiplier();
 
   /** The flags for the hero's "next session" scope. */
-  const pendingFlags = () => ({ persona: pendingPersona(), lightning: false, ultra: false });
+  const pendingFlags = () => ({ persona: pendingPersona(), lightning: false, ultra: false, superfast: false });
 
   const resolve = (sessionId, agent, position) => {
     if (!sessionId) return '';
@@ -242,9 +244,51 @@ export function registerTurbo(ctx) {
   };
 
   const disposeInjector = createPolicyInjector(ctx, resolve);
+  // The contract above is delivered once; this keeps the mandate in front of the model on every turn.
+  // Without it the only copy sits hundreds of turns back in the log and steers nothing — measured on a live
+  // armed session: 539 tool calls, zero delegations, with the contract demonstrably present in the log.
+  const nudgedStep = new Map();
+  const nudgeHandler = async (payload, next) => {
+    const decision = typeof next === 'function' ? await next() : undefined;
+    try {
+      if (!decision || decision.kind !== 'enter' || !Array.isArray(decision.messages)) return decision;
+      if (payload?.signal?.aborted) return decision;
+      const sessionId = payload?.agent?.id;
+      if (typeof sessionId !== 'string' || sessionId === '') return decision;
+      // `superfast` implies the tree contract, so either switch arms the reminder.
+      const row = state.sessions[sessionId];
+      if (row?.lightning !== true && row?.superfast !== true) return decision;
+      const turn = payload?.turn;
+      if (!Number.isFinite(turn)) return decision;
+      // Steps 1..3 of every turn, once each. The opener alone was not enough: measured across armed
+      // sessions, a single opening reminder still produced turns with zero delegations, because by the time
+      // the model is ready to answer the reminder is several tool results behind it. Repeating it on the
+      // next two steps keeps the demand in front of the model while it still has steps left to act on.
+      const step = Number.isFinite(payload?.step) ? payload.step : 1;
+      if (step < 1 || step > 3) return decision;
+      const key = `${sessionId}:${turn}`;
+      const seen = nudgedStep.get(key) ?? new Set();
+      if (seen.has(step)) return decision;
+      seen.add(step);
+      nudgedStep.set(key, seen);
+      return {
+        ...decision,
+        messages: [...decision.messages, {
+          id: randomUUID(),
+          role: 'user',
+          content: [{ type: 'text', text: lightningNudge(turn, step) }],
+          source: { kind: INJECTED_KIND, form: 'instructions' },
+        }],
+      };
+    } catch {
+      // A reminder that fails must never fail the step itself.
+      return decision;
+    }
+  };
+  const offNudge = ctx.on('agent/pre-step', nudgeHandler);
   // `ctx.on` lifetime is already owned by the plugin fiber; this only covers an
   // explicit teardown, so an ignored return value would not leak anything.
-  ctx.effect(() => () => { disposeInjector(); writes.catch(() => {}); });
+  ctx.effect(() => () => { disposeInjector(); offNudge(); writes.catch(() => {}); });
   /** Resolves once every queued state write has been attempted; used by tests. */
   const settled = () => writes.catch(() => {});
 
@@ -263,6 +307,7 @@ export function registerTurbo(ctx) {
         persona: state.sessions[sessionId]?.persona ?? '',
         lightning: change.lightning === undefined ? previous.lightning : change.lightning === true,
         ultra: change.ultra === undefined ? previous.ultra : change.ultra === true,
+        superfast: change.superfast === undefined ? previous.superfast : change.superfast === true,
         at: Date.now(),
       };
     }
@@ -310,6 +355,13 @@ export function registerTurbo(ctx) {
         if (pending) return fail('turbo/invalid', 'Ultra 开关需要会话。');
         if (typeof payload.ultra !== 'boolean') return fail('turbo/invalid', 'Ultra 开关参数无效。');
         change.ultra = payload.ultra;
+      }
+      // Superfast: the tree contract. It implies Lightning, so a session cannot run the tree
+      // without the fan-out rules that tell it how to brief a child in the first place.
+      if (payload.superfast !== undefined) {
+        if (pending) return fail('turbo/invalid', '超快开关需要会话。');
+        if (typeof payload.superfast !== 'boolean') return fail('turbo/invalid', '超快开关参数无效。');
+        change.superfast = payload.superfast;
       }
       if (payload.persona !== undefined) {
         if (payload.persona !== 'chat' && payload.persona !== 'work') return fail('turbo/invalid', '回复风格参数无效。');

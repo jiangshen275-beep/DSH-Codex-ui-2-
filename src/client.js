@@ -465,7 +465,7 @@ function startStyleWatch() {
  * This draws a single overlay bar and places it on the host's bar whenever anything may have moved;
  * the transform does the travelling, so it slides like the chat list's hover card.
  */
-export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 'sessions', 'remote', 'remote.agentPresets'];export function apply(ctx) {
+export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 'sessions', 'remote', 'remote.agentPresets', 'remote.session'];export function apply(ctx) {
   // Stylesheet first, before any slot registration. Slot registrations can throw (a single-kind slot
   // rejects a second entry at the same priority), and when that happened mid-apply the stylesheet
   // and the root attribute were never installed, leaving the sidebar rendered but unstyled.
@@ -815,6 +815,15 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     // The registry-global archive set drives both the row action and what the lists show.
     const archivedIds = workspaces.archivedSessionIds || [];
     const archivedSet = new Set(archivedIds);
+    // A Session whose log is gone can still linger in the client store: a parent's catalog projection
+    // keeps listing a subagent after its log was deleted, yet the Host refuses every action on that
+    // row (archive and open both fail with `session/not-found`). Such ids are asked about once, then
+    // hidden, so a phantom row cannot keep offering an action that can never succeed.
+    const [ghostIds, setGhostIds] = React.useState(() => new Set());
+    const ghostChecked = React.useRef(new Set());
+    const markGhost = id => setGhostIds(prev => { if (prev.has(id)) return prev; const next = new Set(prev); next.add(id); return next; });
+    const isMissingSession = error => /not[- ]?found|no such session|hold no such session/i.test(String(error?.message ?? error));
+    const missingNotice = '该会话的数据已不存在（日志已删除或被清理），已把它从列表里隐藏。';
     // A session the agent spawned as a subagent rides `parentId` in the client list store (the remote
     // summary calls it parentSessionId, and marks such rows origin 'subagent'). DSH's own sidebar
     // drops them from the list entirely; here they are folded into the spawning session's branch
@@ -831,6 +840,9 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     const childGroupsOf = React.useMemo(() => {
       const map = new Map();
       for (const id of Object.keys(sessions)) {
+        // An archived child belongs to the 已归档 list, not to its parent's panel: keeping it in both
+        // places is how a Session ended up reachable from neither. A phantom child is not listed at all.
+        if (archivedSet.has(id) || ghostIds.has(id)) continue;
         const parent = parentOf(id);
         if (parent === undefined || sessions[parent] === undefined) continue;
         const groups = map.get(parent) ?? { subagents: [], branches: [] };
@@ -840,7 +852,42 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
       const byAge = (a, b) => (sessions[a].createdAt ?? stamp(sessions[a])) - (sessions[b].createdAt ?? stamp(sessions[b])) || String(a).localeCompare(String(b));
       for (const groups of map.values()) { groups.subagents.sort(byAge); groups.branches.sort(byAge); }
       return map;
-    }, [sessions]);
+    }, [sessions, archivedIds, ghostIds]);
+    // One question per candidate, to the Host rather than to the list the Host sent earlier: the
+    // store cannot tell "this Session exists" from "its log was deleted after the row was built".
+    //
+    // This used to call `ctx.remote.session.inspect`, which does not exist on the client Remote surface:
+    // the Host declares `inspect` without the `@Remote` marker (dsh-api-session-controller/lib/typert.host.js:1428-1431),
+    // so no descriptor is generated and the property is absent (dsh-api-gateway/lib/types/client/index.js:469-494).
+    // The `typeof` guard therefore returned every time and the whole probe was unreachable — measured by
+    // grepping the generated Remote client: `/inspect/i` matches zero lines in dsh-api-session-controller/lib/typert.remote-client.js.
+    // `projections` is exposed and answers exactly this question: its Host implementation returns null when the
+    // Session does not exist (dsh-api-session-controller/lib/index.js:3149-3177). Remote methods resolve to a
+    // result object rather than throwing (dsh-api-gateway/lib/types/client/index.js:282-287), so the failure is
+    // read from the result, not from a catch.
+    React.useEffect(() => {
+      try {
+        const projections = ctx.remote?.session?.projections;
+        if (typeof projections !== 'function') return undefined;
+        const pending = Object.keys(sessions).filter(id => sessions[id]?.origin === 'subagent' && !archivedSet.has(id) && !ghostIds.has(id) && !ghostChecked.current.has(id));
+        if (pending.length === 0) return undefined;
+        let cancelled = false;
+        (async () => {
+          for (const id of pending) {
+            if (cancelled) return;
+            ghostChecked.current.add(id);
+            try {
+              const result = await projections.call(ctx.remote.session, { sessionId: id });
+              const gone = result?.ok === false
+                ? isMissingSession(result.error)
+                : result?.value === null || result?.value === undefined;
+              if (gone && !cancelled) markGhost(id);
+            } catch (error) { if (isMissingSession(error)) markGhost(id); }
+          }
+        })();
+        return () => { cancelled = true; };
+      } catch { return undefined; }
+    }, [sessions, archivedIds, ghostIds]);
     const isBranchChild = id => { const parent = parentOf(id); return parent !== undefined && sessions[parent] !== undefined; };
     const groupOpen = { subagents: subagentOpen, branches: branchOpen };
     // The row's panel is its own state: opening it reveals the two group headers and nothing else,
@@ -863,7 +910,10 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
       return next;
     });
     const revealGroup = key => setGroupShowAll(prev => { const next = new Set(prev); next.add(key); return next; });
-    const archivedList = archivedIds.filter(id => sessions[id] && !isBranchChild(id) && !purgedIds.has(id));
+    // The archive list is driven by the registry's own set, never by the session list. An id whose
+    // Session the host no longer lists — an archived subagent whose parent moved on, or a log that
+    // was already deleted — must still get a row: the row is the only way to unarchive it again.
+    const archivedList = archivedIds.filter(id => !purgedIds.has(id));
     const searchSessions = () => { setRecentOpen(true); requestAnimationFrame(search); };
     const status = useSessionStatus(s => s);
     const waiting = Array.from(status.values()).filter(s => s.pendingInteraction || s.completionUnread).length;
@@ -914,8 +964,38 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
         if (archive) await ctx.uiWorkspace.archiveSession(id, sessions[id]?.running ? { stopActivity: true } : {});
         else await ctx.uiWorkspace.unarchiveSession(id);
       } catch (error) {
+        if (isMissingSession(error)) { markGhost(id); setNavigationError(missingNotice); return; }
         setNavigationError(error?.message || String(error));
       }
+    };
+    // A subagent Session cannot be opened by id alone.
+    //
+    // Observed: clicking one of these rows left the conversation pane showing
+    // `历史加载失败：subagent Sessions require their durable parent address (session/agent-busy)`.
+    // The host throws exactly that when it receives a plain session address for a row whose origin is
+    // 'subagent' (dsh-api-session-controller/lib/index.js:1628) and wants a SubagentAddress instead
+    // (dsh-subagent/lib/types/control-types.d.ts:60 → `{ parentSessionId, childSessionId, mode }`).
+    // `openSession` has always accepted either ("known Session identity or durable direct-parent subagent
+    // address", dsh-client-ui-workspace/lib/types/client/navigation.d.ts:15) — the row's parent was already
+    // being read for grouping, it just was not being handed over. `mode: 'unknown'` is the declared variant
+    // for a caller that does not know whether the child is continuable.
+    const subagentTarget = id => {
+      const entry = sessions[id];
+      if (entry?.origin !== 'subagent') return undefined;
+      const parent = entry.parentId ?? entry.parentSessionId;
+      if (typeof parent !== 'string' || parent === '' || parent === id) return undefined;
+      return { parentSessionId: parent, childSessionId: id, mode: 'unknown' };
+    };
+    // Opening a phantom row fails the same way the archive action does, so the failure teaches the
+    // list the same lesson: the row is hidden instead of refusing again on the next click.
+    const openSession = id => {
+      setSelectedTask(id);
+      Promise.resolve()
+        .then(() => ctx.uiWorkspace.openSession(subagentTarget(id) ?? id))
+        .catch(error => {
+          if (isMissingSession(error)) { markGhost(id); setNavigationError(missingNotice); return; }
+          setNavigationError(error?.message || String(error));
+        });
     };
     // Pinning is DSH's own workspace call, so the 置顶 group, the ordering and the persisted
     // `pinnedSessionIds` all stay the host's business; this side only offers the action.
@@ -986,16 +1066,29 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     // user opened (recursively). A row with children is no longer one anonymous "branch".
     const renderTask = (id, depth = 0) => {
       const entry = sessions[id];
-      if (entry === undefined || purgedIds.has(id)) return null;
-      const title = entry.title || '新会话';
+      if (purgedIds.has(id)) return null;
+      // A phantom row is hidden, but an archived one stays reachable on purpose: the archive list is
+      // the only place its id can still be removed from the archive set.
+      if (ghostIds.has(id) && !archivedSet.has(id)) return null;
+      // A row with no store entry is legitimate only while it is archived: the registry still lists
+      // the id (its log may already be gone), and dropping the row would strand it forever.
       const isArchived = archivedSet.has(id);
+      if (entry === undefined && !isArchived) return null;
+      const openable = entry !== undefined;
+      // The store carries its own display name (`displayTitle`: title → cwd → id). Reading only
+      // `title` left every unnamed Session — most subagent rows — falling through to the archive
+      // wording, so archived-looking labels appeared on rows that were never archived.
+      const title = openable
+        ? entry.displayTitle || entry.title || String(id).slice(0, 8)
+        : `已归档会话 ${String(id).slice(0, 8)}`;
       const archiveLabel = isArchived ? '取消归档' : '归档会话';
-      const isPinned = pins.includes(id);
-      const groups = childGroupsOf.get(id);
+      const isPinned = openable && pins.includes(id);
+      const groups = openable ? childGroupsOf.get(id) : undefined;
       const childCount = (groups?.subagents.length ?? 0) + (groups?.branches.length ?? 0);
-      const panelOpen = childPanelOpen(id);
+      const panelOpen = openable && childPanelOpen(id);
       const row = h('div', {
         key: id,
+        'data-session-id': id,
         className: 'cg-task-row' + (depth > 0 ? ' cg-task-child' : '') + (childCount > 0 ? ' cg-task-with-children' : '') + (isArchived ? ' cg-task-archived' : '') + ((currentSession?.id ?? selectedTask) === id ? ' cg-task-current' : ''),
         style: depth > 0 ? { '--cg-branch-indent': (depth * 12) + 'px' } : undefined,
         onMouseEnter: event => { const rect = event.currentTarget.getBoundingClientRect(); setTaskHover({ title, right: rect.right, top: rect.top }); },
@@ -1010,18 +1103,18 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
           title: `${panelOpen ? '收起' : '展开'}子会话（子代理 ${groups?.subagents.length ?? 0} / 分支 ${groups?.branches.length ?? 0}）`,
           onClick: event => { event.stopPropagation(); toggleChildren(id); }
         }, h(Icon, { name: 'chevron', size: 11 })),
-        h(Button, { label: title, className: 'cg-pinned-row', onClick: () => { setSelectedTask(id); ctx.uiWorkspace.openSession(id); }, children: title }),
+        h(Button, { label: title, className: 'cg-pinned-row', disabled: !openable, onClick: () => { if (!openable) return; openSession(id); }, children: title }),
         h('div', { className: 'cg-task-actions' },
-          h(Button, { icon: 'pin', active: isPinned, label: (isPinned ? '取消置顶 ' : '置顶 ') + title, className: isPinned ? 'cg-pin-action cg-pin-on' : 'cg-pin-action', onClick: () => setPinned(id, !isPinned) }),
+          openable && h(Button, { icon: 'pin', active: isPinned, label: (isPinned ? '取消置顶 ' : '置顶 ') + title, className: isPinned ? 'cg-pin-action cg-pin-on' : 'cg-pin-action', onClick: () => setPinned(id, !isPinned) }),
           h(Button, { icon: isArchived ? 'unarchive' : 'archive', label: archiveLabel + ' ' + title, onClick: () => setArchived(id, !isArchived) }),
           // Only an archived Session offers deletion: it is the user's own "done with this" signal,
           // and DSH stops an archived Session from running another step.
           isArchived && h(Button, { icon: 'trash', label: '删除会话日志 ' + title, className: 'cg-purge-action', onClick: () => purgeSession(id) }),
           h(Button, { icon: 'more', label: title + ' 的操作', 'data-menu-trigger': true, onClick: () => setTaskMenu(taskMenu === id ? null : id) })),
         taskMenu === id && h('div', { className: 'cg-task-menu' },
-          h(Button, { label: '打开任务', children: '打开任务', onClick: () => { setTaskMenu(null); setSelectedTask(id); ctx.uiWorkspace.openSession(id); } }),
-          h(Button, { label: (isPinned ? '取消置顶 ' : '置顶 ') + title, icon: 'pin', children: isPinned ? '取消置顶' : '置顶会话', onClick: () => setPinned(id, !isPinned) }),
-          h(Button, { label: '重命名 ' + title, icon: 'edit', children: '重命名', onClick: () => openRename(id) }),
+          openable && h(Button, { label: '打开任务', children: '打开任务', onClick: () => { setTaskMenu(null); openSession(id); } }),
+          openable && h(Button, { label: (isPinned ? '取消置顶 ' : '置顶 ') + title, icon: 'pin', children: isPinned ? '取消置顶' : '置顶会话', onClick: () => setPinned(id, !isPinned) }),
+          openable && h(Button, { label: '重命名 ' + title, icon: 'edit', children: '重命名', onClick: () => openRename(id) }),
           h(Button, { label: archiveLabel, icon: isArchived ? 'unarchive' : 'archive', children: archiveLabel, onClick: () => setArchived(id, !isArchived) }),
           isArchived && h(Button, { label: '删除会话日志 ' + title, icon: 'trash', className: 'cg-purge-action', children: '删除会话日志', onClick: () => purgeSession(id) })));
       return [
@@ -1030,7 +1123,7 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
         ...renderGroup(id, 'branches', groups?.branches ?? [], depth)
       ];
     };
-    const recentIds = Object.keys(sessions).filter(id => !pins.includes(id) && !archivedSet.has(id) && !isBranchChild(id) && !purgedIds.has(id)).sort((a, b) => stamp(sessions[b]) - stamp(sessions[a]));
+    const recentIds = Object.keys(sessions).filter(id => !pins.includes(id) && !archivedSet.has(id) && !isBranchChild(id) && !purgedIds.has(id) && !ghostIds.has(id)).sort((a, b) => stamp(sessions[b]) - stamp(sessions[a]));
     return h('div', { className: `cg-sidebar${collapsed ? ' cg-collapsed' : ''}` },
       h('nav', { className: 'cg-rail', 'aria-label': '应用导航' },
         rail('home', '主页', () => { setLocalSection('home'); go(null); if (collapsed) ctx.layout.toggleSidebar(); }),
@@ -1068,7 +1161,7 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
         h(Button, { icon: 'edit', label: '新聊天', className: 'cg-new', onClick: () => ctx.uiWorkspace.startSession(), children: '新聊天' }),
         h('div', { className: 'cg-browse' },
           pins.some(id => sessions[id] && !archivedSet.has(id)) && h(Button, { label: '置顶', className: 'cg-section-toggle cg-pins-toggle', 'aria-expanded': pinsOpen, onClick: () => setPinsOpen(!pinsOpen), children: ['置顶', h('span', { key: 'arrow', className: 'cg-disclosure-arrow', 'aria-hidden': true }, h(Icon, { name: 'chevron', size: 13 }))] }),
-          ...(pinsOpen ? pins.filter(id => sessions[id] && !archivedSet.has(id) && !isBranchChild(id) && !purgedIds.has(id)).map(id => renderTask(id)) : []),
+          ...(pinsOpen ? pins.filter(id => sessions[id] && !archivedSet.has(id) && !isBranchChild(id) && !purgedIds.has(id) && !ghostIds.has(id)).map(id => renderTask(id)) : []),
           h(Button, { label: '项目', className: 'cg-section-toggle', 'aria-expanded': projectsOpen, onClick: () => setProjectsOpen(!projectsOpen), children: ['项目', h('span', { key: 'arrow', className: 'cg-disclosure-arrow', 'aria-hidden': true }, h(Icon, { name: 'chevron', size: 13 }))] }),
           projectsOpen && h('div', { className: 'cg-projects' }, ...workspaces.items.map(project => { const title = !project.title || project.title === 'default-workspace' ? '默认工作区' : project.title; return h(Button, { key: project.workspaceId, icon: 'folder', label: title, onClick: () => ctx.uiWorkspace.openWorkspace(project.workspaceId).catch(error => setNavigationError(error.message || String(error))), children: title }); }), h(Button, { icon: 'plus', label: '添加项目', onClick: () => document.querySelector('.cg-workspaces [class*="headerActions"] button[class*="iconButton"]')?.click(), children: '添加项目' })),
           h(Button, { label: '最近', className: 'cg-section-toggle', 'aria-expanded': recentOpen, onClick: () => setRecentOpen(!recentOpen), children: ['最近', h('span', { key: 'arrow', className: 'cg-disclosure-arrow', 'aria-hidden': true }, h(Icon, { name: 'chevron', size: 13 }))] }),

@@ -16,16 +16,16 @@ DeepSeek Harness 的 Codex 风格 UI 插件，适配 **0.2.0-rc.2 Web**。
 
 **A. 本地 tarball（不依赖 registry）**
 
-拿到 `dsh-codex-ui-0.6.34.tgz` 后，在 DSH **插件 → 添加插件**里填该文件的绝对路径，或：
+拿到 `dsh-codex-ui-1.0.0.tgz` 后，在 DSH **插件 → 添加插件**里填该文件的绝对路径，或：
 
 ```powershell
-dsh plugin --profile <profile> add 'C:/path/dsh-codex-ui-0.6.34.tgz'
+dsh plugin --profile <profile> add 'C:/path/dsh-codex-ui-1.0.0.tgz'
 ```
 
 **B. npm**
 
 ```powershell
-dsh plugin --profile <profile> add dsh-codex-ui@0.6.34
+dsh plugin --profile <profile> add dsh-codex-ui@1.0.0
 ```
 
 DSH 插件页只安装**发布满 24 小时**的版本，首次安装请带上版本号。

@@ -15,9 +15,14 @@ function registerModelUI(ctx) {
     { d: 'M19.6 12.9 20.1 14.4 21.6 14.9 20.1 15.4 19.6 16.9 19.1 15.4 17.6 14.9 19.1 14.4Z', delay: '0.62s' },
     { d: 'M9.3 18.9 9.7 20 10.8 20.4 9.7 20.8 9.3 21.9 8.9 20.8 7.8 20.4 8.9 20Z', delay: '1.24s' },
   ];
-  const boltGlyph = (className, armed) => h('svg', {
+  // The pair needs its own positioning context. The second bolt is absolutely positioned, and an absolutely
+  // positioned box resolves against the nearest *positioned ancestor* — not against its sibling — so two bare
+  // sibling <svg> elements let it escape the icon box entirely. One relative wrapper fixes it; the CSS paints
+  // the second one as an outline and hides its sparkles.
+  const boltGlyph = (className, armed, variant) => h('svg', {
     className, width: 18, height: 18, viewBox: '0 0 24 24', 'aria-hidden': true,
-    fill: armed ? 'url(#cg-bolt-deep)' : 'none', stroke: armed ? 'url(#cg-bolt-deep)' : 'currentColor',
+    fill: armed ? `url(#${variant === 'gold' ? 'cg-bolt-gold' : 'cg-bolt-deep'})` : 'none',
+    stroke: armed || variant === 'gold' ? `url(#${variant === 'gold' ? 'cg-bolt-gold' : 'cg-bolt-deep'})` : 'currentColor',
     strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round',
   },
   h('path', { d: BOLT_PATH }),
@@ -42,9 +47,9 @@ function registerModelUI(ctx) {
   function rememberedSwitches() {
     try {
       const raw = JSON.parse(window.localStorage.getItem(SWITCH_MEMORY) ?? '{}');
-      return { lightning: raw?.lightning === true, ultra: raw?.ultra === true };
+      return { lightning: raw?.lightning === true, ultra: raw?.ultra === true, superfast: raw?.superfast === true };
     } catch {
-      return { lightning: false, ultra: false };
+      return { lightning: false, ultra: false, superfast: false };
     }
   }
 
@@ -87,6 +92,9 @@ function registerModelUI(ctx) {
     const [draftIndex, setDraftIndex] = React.useState(null);
     const [actionError, setActionError] = React.useState(null);
     const [lightning, setLightning] = React.useState(false);
+  // The tree switch. The Host deliberately keeps the two flags independent (`superfast` never writes
+  // `lightning`), so exclusivity is the UI's job — see chooseMode below.
+  const [superfast, setSuperfast] = React.useState(false);
     // The Host's record of the Ultra switch. It only re-pins the slider on the first
     // sync; after that the slider position is the truth and this is the last value we
     // pushed, which keeps a slow Host response from fighting the user's drag.
@@ -108,7 +116,12 @@ function registerModelUI(ctx) {
     // middle of the rail. The effect body is declared below the derived `ultraOn`.
     const meteorShellRef = React.useRef(null);
     const meteorFieldRef = React.useRef(null);
+    // The knob is positioned from a percentage plus `translateX(-50%)`, which lands its edges on
+    // fractional device pixels at a fractional DPR — and a circle rasterised off the grid reads as a
+    // rounded square. This ref lets the effect below rewrite `left` on the device-pixel grid.
+    const thumbRef = React.useRef(null);
     const lightningRef = React.useRef(false);
+  const superfastRef = React.useRef(false);
     const ultraSentRef = React.useRef(null);
     // Set when a blank conversation adopted the remembered switches, so the Ultra pin also
     // reaches the model directory once its effort levels are known.
@@ -181,22 +194,28 @@ function registerModelUI(ctx) {
       svg.setAttribute('height', '0');
       svg.style.position = 'absolute';
       const defs = document.createElementNS(namespace, 'defs');
-      const gradient = document.createElementNS(namespace, 'linearGradient');
-      gradient.setAttribute('id', 'cg-bolt-deep');
-      gradient.setAttribute('x1', '0');
-      gradient.setAttribute('y1', '0');
-      gradient.setAttribute('x2', '24');
-      gradient.setAttribute('y2', '24');
-      gradient.setAttribute('gradientUnits', 'userSpaceOnUse');
-      // The same three stops the effort ramp ends on, so the bolt and the Ultra track agree.
-      const stops = [['0%', '#4c1d95'], ['46%', '#8a4ff0'], ['100%', '#bb74ff']];
-      for (const [offset, color] of stops) {
-        const stop = document.createElementNS(namespace, 'stop');
-        stop.setAttribute('offset', offset);
-        stop.setAttribute('stop-color', color);
-        gradient.append(stop);
-      }
-      defs.append(gradient);
+      // Two gradients, built the same way: the bolt's own paint is a mode colour, and 超快 is gold while Fast
+      // stays purple. One gradient per mode rather than one recoloured, because both modes render the same glyph.
+      const addGradient = (id, stops) => {
+        const gradient = document.createElementNS(namespace, 'linearGradient');
+        gradient.setAttribute('id', id);
+        gradient.setAttribute('x1', '0');
+        gradient.setAttribute('y1', '0');
+        gradient.setAttribute('x2', '24');
+        gradient.setAttribute('y2', '24');
+        gradient.setAttribute('gradientUnits', 'userSpaceOnUse');
+        for (const [offset, color] of stops) {
+          const stop = document.createElementNS(namespace, 'stop');
+          stop.setAttribute('offset', offset);
+          stop.setAttribute('stop-color', color);
+          gradient.append(stop);
+        }
+        defs.append(gradient);
+      };
+      // Fast lightning keeps the three stops the effort ramp ends on, so that bolt and the track agree.
+      addGradient('cg-bolt-deep', [['0%', '#4c1d95'], ['46%', '#8a4ff0'], ['100%', '#bb74ff']]);
+      // 超快: its own gold, so repainting one mode never touches the other.
+      addGradient('cg-bolt-gold', [['0%', '#c8860d'], ['46%', '#f0b429'], ['100%', '#ffe08a']]);
       svg.append(defs);
       document.body.append(svg);
       return () => { svg.remove(); };
@@ -233,7 +252,11 @@ function registerModelUI(ctx) {
     const effortTone = shownUltra ? 'ultra' : (effectiveIndex >= 0 ? steps[shownIndex]?.id ?? 'off' : 'off');
     const effortDepth = maxIndex > 0 ? Math.round(shownIndex / maxIndex * 4) : 0;
     // "at least 15x the tokens": the contract's own budget figure, not a second guess.
-    const tokenLabel = `${budget.exact ? '至少 ' : '约 '}${budget.value}× token`;
+    // The tree runs one extra tier (each tier-1 child opens two grandchildren), so it costs several flat
+  // rounds at once. The figure is the Host's own per-round multiple, not a second measurement: the UI must
+  // not invent a number it cannot source.
+  const treeTokenLabel = `每层 ${budget.value}×token消耗`;
+  const tokenLabel = `${budget.exact ? '至少 ' : '约 '}${budget.value}× token`;
     const modelName = chosen ? aliasOf(chosen.group.id, chosen.model) : state.current?.model || '选择模型';
     const busy = locked || state.pending !== null;
     const close = React.useCallback(() => { setOpen(false); setDraftIndex(null); triggerRef.current?.focus(); }, []);
@@ -256,6 +279,16 @@ function registerModelUI(ctx) {
       observer.observe(shell);
       return () => observer.disconnect();
     }, [ultraOn, open]);
+    // The knob's position is CSS, not a measurement.
+    //
+    // It used to be written from a layout effect that read the shell's width. Reported symptom: at Ultra the
+    // knob stopped 3.2px short of the track's end while the fill reached it, which reads as the knob
+    // "bouncing back" and leaving a gap. Measured cause: the effect read the width during the popover's
+    // entrance — 227.2px instead of the settled 230.4px — and no later pass corrected it. A `calc` cannot
+    // measure early: `12px + (100% - 24px) × ratio` is the same band (centre from 12 to width−12, so at
+    // ratio 0 and 1 the circle's edge sits exactly on the track's edge) evaluated by the browser at whatever
+    // width the track actually has.
+    const knobRatio = maxIndex > 0 ? shownIndex / maxIndex : 0;
     React.useEffect(() => { if (effortTarget.current === null || effortTarget.current === effectiveValue) setDraftIndex(null); }, [effectiveValue]);
     React.useEffect(() => { effortQueue.current = null; effortTarget.current = null; setDraftIndex(null); }, [state.current?.provider, state.current?.model]);
     React.useEffect(() => { if (locked || !available) setOpen(false); }, [locked, available]);
@@ -288,28 +321,38 @@ function registerModelUI(ctx) {
       turboRequest('read', sessionId).then(value => {
         if (cancelled) return;
         let nextLightning = value.lightning === true;
+        let nextSuperfast = value.superfast === true;
         let nextUltra = value.ultra === true;
         // A conversation that has not started yet keeps the switches the user last used, so
         // opening New Chat no longer drops Lightning or the Ultra pin. A running session is
         // never touched: only its own row counts there.
-        if (blank && (!nextLightning || !nextUltra)) {
+        if (blank && (!nextLightning || !nextSuperfast || !nextUltra)) {
           const memory = rememberedSwitches();
           if (!nextUltra && memory.ultra) {
             nextUltra = true;
             inheritEffortRef.current = true;
           }
-          if (!nextLightning && memory.lightning) {
+          // The tree is the heavier of the two, so it is inherited as the tree: the flat switch stays off,
+          // and the Host's own rule (`lightning || superfast`) still yields that contract underneath it.
+          if (!nextSuperfast && memory.superfast) {
+            nextSuperfast = true;
+            nextLightning = false;
+            turboRequest('update', sessionId, { lightning: false, superfast: true }).catch(error => setActionError(error.message || String(error)));
+          }
+          if (!nextLightning && !nextSuperfast && memory.lightning) {
             nextLightning = true;
             turboRequest('update', sessionId, { lightning: true }).catch(error => setActionError(error.message || String(error)));
           }
         }
         lightningRef.current = nextLightning;
+        superfastRef.current = nextSuperfast;
         // Adopting the Host value also satisfies the sync below, so merely opening a
         // session does not write it back: a no-op write would materialise a state row and
         // freeze whatever default happened to be in force at that moment. Only the Host's
         // own value counts as adopted — an inherited Ultra still has to be pushed.
         ultraSentRef.current = value.ultra === true;
         setLightning(nextLightning);
+        setSuperfast(nextSuperfast);
         setUltraFlag(nextUltra);
         if (Number.isFinite(value.tokenMultiple) && value.tokenMultiple > 0) setBudget({ value: value.tokenMultiple, exact: value.tokenExact === true });
         setTurboReady(true);
@@ -348,16 +391,27 @@ function registerModelUI(ctx) {
       inheritEffortRef.current = false;
       chooseLevel(String(maxIndex));
     }, [turboReady, blank, ultraOn, virtualUltra, steps.length, effectiveIndex, maxIndex]);
-    const toggleLightning = () => {
-      const next = !lightningRef.current;
-      lightningRef.current = next;
-      setLightning(next);
+    // One writer for the pair. 快速 and 超快 are mutually exclusive here even though the Host stores the two
+    // flags independently: `superfast` already implies the flat Lightning contract in the prompt
+    // (`turbo-policy.js`: `if (lightning || superfast) parts.push(LIGHTNING_POLICY)`), so showing both as on
+    // would misdescribe what is running. Choosing the option that is already active clears it.
+    const chooseMode = mode => {
+      const nextFast = mode === 'fast' && lightningRef.current === false;
+      const nextTree = mode === 'tree' && superfastRef.current === false;
+      const previous = { lightning: lightningRef.current, superfast: superfastRef.current };
+      lightningRef.current = nextFast;
+      superfastRef.current = nextTree;
+      setLightning(nextFast);
+      setSuperfast(nextTree);
+      setPane('effort');
       setActionError(null);
-      rememberSwitches({ lightning: next });
+      rememberSwitches({ lightning: nextFast, superfast: nextTree });
       if (typeof sessionId !== 'string' || !sessionId) return;
-      turboRequest('update', sessionId, { lightning: next }).catch(error => {
-        lightningRef.current = !next;
-        setLightning(!next);
+      turboRequest('update', sessionId, { lightning: nextFast, superfast: nextTree }).catch(error => {
+        lightningRef.current = previous.lightning;
+        superfastRef.current = previous.superfast;
+        setLightning(previous.lightning);
+        setSuperfast(previous.superfast);
         setActionError(error.message || String(error));
       });
     };
@@ -512,36 +566,80 @@ function registerModelUI(ctx) {
             }, h(Icon, { name: 'edit', size: 12 }))));
         return row;
       })));
-    return h('div', { className: 'cg-model-root', ref: rootRef, 'data-ultra': ultraOn, 'data-lightning': lightning, 'data-effort': effortTone },
-      h('button', { className: 'cg-model-trigger', type: 'button', ref: triggerRef, disabled: busy, 'aria-haspopup': 'dialog', 'aria-expanded': open, 'aria-label': `选择模型，当前 ${modelName}${steps.length || state.retainedEffort ? `，推理强度 ${label}` : ''}${lightning ? '，闪电编排已开启' : ''}`, onClick: () => open ? close() : show() },
+    return h('div', { className: 'cg-model-root', ref: rootRef, 'data-ultra': ultraOn, 'data-superfast': superfast, 'data-lightning': lightning, 'data-effort': effortTone },
+      h('button', { className: 'cg-model-trigger', type: 'button', ref: triggerRef, disabled: busy, 'aria-haspopup': 'dialog', 'aria-expanded': open, 'aria-label': `选择模型，当前 ${modelName}${steps.length || state.retainedEffort ? `，推理强度 ${label}` : ''}${lightning ? '，闪电编排已开启' : ''}${superfast ? '，超快编排已开启' : ''}`, onClick: () => open ? close() : show() },
         // No leading bolt here: the lightning switch lives in the popover, and an armed
         // session shows its marker after the effort label instead.
         h('span', { className: 'cg-model-trigger-name' }, modelName),
         (steps.length > 0 || state.retainedEffort) && h('span', { className: 'cg-model-trigger-effort', 'data-ultra': ultraOn, 'data-effort': effortTone, 'data-notice': ultraOn && ultraNotice }, effectiveIndex >= 0 ? displayLabel : state.retainedEffort || 'Off'),
-        lightning && h('span', { className: 'cg-model-trigger-bolt' }, boltGlyph(undefined, true)),
+        (lightning || superfast) && h('span', { className: 'cg-model-trigger-bolt', 'data-tree': superfast }, boltGlyph(undefined, true, superfast ? 'gold' : undefined)),
         h(Icon, { name: 'down', size: 12 })),
-      open && h('div', { className: 'cg-model-popover', ref: popupRef, role: 'dialog', 'aria-label': '模型与推理强度', 'data-ultra': ultraOn, 'data-pane': pane, 'data-effort': effortTone, 'data-notice': ultraOn && ultraNotice },
+      open && h('div', { className: 'cg-model-popover', ref: popupRef, role: 'dialog', 'aria-label': '模型与推理强度', 'data-ultra': ultraOn, 'data-superfast': superfast, 'data-pane': pane, 'data-effort': effortTone, 'data-notice': ultraOn && ultraNotice },
         // Keyed on the pane so switching replays the entrance: the two views cross over instead of
         // swapping in one frame. The wrapper changes nothing about layout — the popover styles no
         // direct children.
-        pane === 'effort' ? h('div', { className: 'cg-model-pane', key: 'effort' },
+        pane === 'lightning' ? h('div', { className: 'cg-model-pane', key: 'lightning' },
+          h('div', { className: 'cg-model-modes', role: 'menu', 'aria-label': '编排模式' },
+            h('button', { className: 'cg-model-mode', type: 'button', role: 'menuitemradio', 'aria-checked': !lightning && !superfast, 'data-on': !lightning && !superfast, 'data-mode': 'standard', disabled: busy || !sessionId, onClick: () => chooseMode('standard') },
+              h('span', { className: 'cg-model-mode-text' },
+                h('strong', null, '标准'),
+                h('span', null, '默认速度')),
+              h('span', { className: 'cg-model-mode-check', 'aria-hidden': true }, !lightning && !superfast && h(Icon, { name: 'check', size: 14 }))),
+            h('button', { className: 'cg-model-mode', type: 'button', role: 'menuitemradio', 'aria-checked': lightning, 'data-on': lightning, 'data-mode': 'fast', disabled: busy || !sessionId, onClick: () => chooseMode('fast') },
+              h('span', { className: 'cg-model-mode-text' },
+                h('strong', null, '快速'),
+                h('span', null, `${tokenLabel} 用量更多`)),
+              h('span', { className: 'cg-model-mode-check', 'aria-hidden': true }, lightning && h(Icon, { name: 'check', size: 14 }))),
+            h('button', { className: 'cg-model-mode', type: 'button', role: 'menuitemradio', 'aria-checked': superfast, 'data-on': superfast, 'data-mode': 'tree', disabled: busy || !sessionId, onClick: () => chooseMode('tree') },
+              h('span', { className: 'cg-model-mode-text' },
+                h('strong', null, '超快'),
+                h('span', null, `${treeTokenLabel} 更快更好的回答`)),
+              h('span', { className: 'cg-model-mode-check', 'aria-hidden': true }, superfast && h(Icon, { name: 'check', size: 14 })))))
+        : pane === 'effort' ? h('div', { className: 'cg-model-pane', key: 'effort' },
           h('div', { className: 'cg-model-top' },
-            h('button', { className: 'cg-model-zap', type: 'button', 'data-on': lightning, disabled: busy || !sessionId, 'aria-pressed': lightning, 'aria-label': lightning ? '关闭闪电编排' : '开启闪电编排', onClick: toggleLightning },
-              boltGlyph('cg-model-zap-glyph', lightning),
-              h('span', { className: 'cg-model-tooltip', role: 'tooltip' }, lightning ? `闪电编排：已开启，${tokenLabel}` : `闪电编排：开启后每轮至少并发 2 个子代理，${tokenLabel}`)),
+            h('button', { className: 'cg-model-zap', type: 'button', 'data-on': lightning || superfast, 'data-mode': superfast ? 'tree' : lightning ? 'fast' : 'off', disabled: busy || !sessionId, 'aria-haspopup': 'menu', 'aria-expanded': pane === 'lightning', 'aria-label': superfast ? '编排模式：超快已开启，点击更换' : lightning ? '编排模式：快速已开启，点击更换' : '编排模式：选择快速或超快', onClick: () => setPane(pane === 'lightning' ? 'effort' : 'lightning') },
+              superfast ? boltGlyph('cg-model-zap-glyph', true, 'gold') : boltGlyph('cg-model-zap-glyph', lightning),
+              h('span', { className: 'cg-model-tooltip', role: 'tooltip' }, superfast ? `超快编排：已开启，每个子代理再开两个孙代理，${treeTokenLabel}` : lightning ? `快速编排：已开启，${tokenLabel}` : `编排模式：快速每轮至少并发 2 个子代理，${tokenLabel}`)),
             h('button', { className: 'cg-model-summary', type: 'button', disabled: busy, 'aria-label': '更换模型', onClick: () => { setPane('model'); focusPending.current = true; } }, h('strong', { 'aria-live': 'polite', 'data-notice': ultraOn && ultraNotice }, steps.length ? displayLabel : '选择模型'), h('span', { className: 'cg-model-summary-name' }, modelName, h(Icon, { name: 'chevron', size: 11 }))),
             h('button', { className: 'cg-model-reset', type: 'button', 'aria-label': '恢复默认强度', disabled: busy || !reasoning || !state.current, onClick: reset }, glyph('reset'), h('span', { className: 'cg-model-tooltip', role: 'tooltip' }, '重置为默认')),
+            // The burst lives on the row, not inside the bolt: when the knob lands on Ultra the notice hides the
+            // three controls — .cg-model-zap gets opacity:0 — and a parent's opacity cannot be undone by any child,
+            // so a burst nested in the button was invisible for its whole 620ms on the one path that matters.
             // The three controls fade out while this stands in their row, so the popover
             // keeps its height and nothing jumps when the notice comes and goes.
             h('div', { className: 'cg-model-ultra-notice', role: 'status', 'aria-live': 'polite' },
               ultraNotice && ultraOn ? '更快消耗 Token' : '')),
-          steps.length > 0 ? h('div', { className: 'cg-model-slider-shell', ref: meteorShellRef, 'data-max': shownIndex === maxIndex && maxIndex > 0, 'data-ultra': ultraOn, 'data-effort': effortTone, 'data-depth': effortDepth },
-            h('div', { className: 'cg-model-slider-fill', style: { width: `calc(${maxIndex > 0 ? shownIndex / maxIndex * 100 : 0}% + ${12 - (maxIndex > 0 ? shownIndex / maxIndex : 0) * 24}px)` } }),
+          steps.length > 0 ? h('div', {
+          className: 'cg-model-slider-shell', ref: meteorShellRef, 'data-max': shownIndex === maxIndex && maxIndex > 0, 'data-ultra': ultraOn, 'data-effort': effortTone, 'data-depth': effortDepth,
+          // Grow the knob only when the pointer is actually over it. The knob cannot receive pointer events
+          // itself (`pointer-events: none`, or it would swallow the press and the native range could not be
+          // dragged), so the test is geometric: distance from the pointer to the knob's centre against the
+          // knob's own radius. The attribute is written straight onto the node — a state update here would
+          // re-render the whole popover on every mouse move.
+          onPointerMove: event => {
+            const thumb = thumbRef.current;
+            if (!thumb) return;
+            const box = thumb.getBoundingClientRect();
+            const dx = event.clientX - (box.left + box.width / 2);
+            const dy = event.clientY - (box.top + box.height / 2);
+            const over = Math.sqrt(dx * dx + dy * dy) <= box.width / 2 + 2;
+            if (over && thumb.getAttribute('data-over') !== 'true') thumb.setAttribute('data-over', 'true');
+            else if (!over && thumb.getAttribute('data-over') === 'true') thumb.removeAttribute('data-over');
+          },
+          onPointerLeave: () => thumbRef.current?.removeAttribute('data-over')
+        },
+            // The fill ends where the knob *ends*: `24px + (100% − 24px) × ratio` is the knob's right edge, so
+            // the bar reaches the far side of the circle at every tier. The bare `ratio × 100%` stopped short of
+            // it by `24 × (1 − ratio)` px — 18px at the low tier — and the owner read that, correctly, as the bar
+            // not being covered by the dot. This form equals `100%` exactly at ratio 1, so the top tier cannot get
+            // shorter; the earlier `ratio × (width − 24)` attempt did shorten it, which is what "you just made the
+            // purple shorter" was about.
+            h('div', { className: 'cg-model-slider-fill', style: { width: `calc(24px + (100% - 24px) * ${knobRatio})` } }),
             ultraOn && meteorField(meteorFieldRef),
             // A dot states whether the fill has reached it: inside the fill it has to read
             // against the tier colour, outside it stays a track marker.
             h('div', { className: 'cg-model-slider-dots', 'aria-hidden': true }, ...steps.map((step, index) => h('span', { key: step.id, 'data-ultra': step.id === '__ultra__', 'data-on': index <= shownIndex }))),
-            h('span', { className: 'cg-model-thumb', 'aria-hidden': true, style: { left: `calc(${maxIndex > 0 ? shownIndex / maxIndex * 100 : 0}% + ${12 - (maxIndex > 0 ? shownIndex / maxIndex : 0) * 24}px)` } }),
+            h('span', { className: 'cg-model-thumb', 'aria-hidden': true, ref: thumbRef, style: { left: `calc(12px + (100% - 24px) * ${knobRatio})` } }),
             h('input', { className: 'cg-model-slider', type: 'range', min: 0, max: maxIndex, step: 1, value: shownIndex, disabled: locked || maxIndex < 1, 'aria-label': '推理强度', 'aria-valuetext': label,
               // The notice belongs to the move itself, so it fires while the drag is still
               // held — not on release. Release paths (pointerup, keyup, blur) call
