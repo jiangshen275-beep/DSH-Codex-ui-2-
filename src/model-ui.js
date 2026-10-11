@@ -252,7 +252,7 @@ function registerModelUI(ctx) {
     const effortTone = shownUltra ? 'ultra' : (effectiveIndex >= 0 ? steps[shownIndex]?.id ?? 'off' : 'off');
     const effortDepth = maxIndex > 0 ? Math.round(shownIndex / maxIndex * 4) : 0;
     // The budget figure is measured, not guessed: one delegation costs a delegated turn about 1.5x a plain turn, and a
-// superfast turn about 3x — see CHANGELOG 1.0.1 for the ledger numbers behind those two ratios.
+// superfast turn about 3x — see CHANGELOG 1.0.0 for the ledger numbers behind those two ratios.
     // The tree runs one extra tier (each tier-1 child opens two grandchildren), so it costs several flat
   // rounds at once. The figure is the Host's own per-round multiple, not a second measurement: the UI must
   // not invent a number it cannot source.
