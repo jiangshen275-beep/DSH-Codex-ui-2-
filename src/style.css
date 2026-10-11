@@ -291,7 +291,12 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-brand-option:hover,html[data
 .cg-task-error { margin: 8px 0 0; color: #c54545; font-size: 12px; line-height: 17px; }
 .cg-task-modal { width: min(420px,calc(100vw - 80px)); padding: 24px; border-radius: 20px; background: var(--cg-page); box-shadow: 0 20px 80px #0002; }
 .cg-task-modal label { display: block; font-size: 13px; margin: 14px 0; }
-.cg-task-modal input,.cg-task-modal textarea,.cg-task-modal select,.cg-task-search { box-sizing: border-box; display: block; width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 9px; background: var(--cg-page); color: var(--cg-text); margin-top: 6px; font: inherit; }
+.cg-task-modal input,.cg-task-modal textarea,.cg-task-modal select,.cg-task-search,.cg-session-search-input { box-sizing: border-box; display: block; width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 9px; background: var(--cg-page); color: var(--cg-text); margin-top: 6px; font: inherit; }
+/* The session search field is the plugin's own: the native one lives in a container this plugin
+   renders hidden, where it can be neither seen nor focused. */
+.cg-session-search { margin: 4px 0 2px; }
+.cg-session-search-input { margin-top: 0; padding: 7px 10px; font-size: 13px; }
+.cg-session-search-empty { margin: 6px 2px; font-size: 12px; line-height: 17px; color: #737373; }
 .cg-task-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .cg-task-form-actions > button[type=submit] { background: #3982fa; color: white; border: 0; border-radius: 8px; padding: 8px 16px; cursor: pointer; }
 @media(max-width: 850px) { .cg-task-templates { grid-template-columns: 1fr; } .cg-schedule-content { padding-top: 60px; } }

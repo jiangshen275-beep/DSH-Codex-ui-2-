@@ -650,7 +650,7 @@ const SIDEBAR_SLOT = {
   heroMarkOpen: 8, pinsOpen: 11,
   taskMenu: 13, renameTarget: 14, renameDraft: 15, renameError: 16, renamePending: 17,
   recentOpen: 19, archivedOpen: 20, childPanel: 21, subagentOpen: 22, branchOpen: 23, groupShowAll: 24, ghostIds: 27,
-  navigationError: 25, purgedIds: 26,
+  navigationError: 25, purgedIds: 26, sessionQuery: 28, searchOpen: 29,
 };
 
 function sidebarStates(overrides = {}) {
@@ -661,7 +661,7 @@ function sidebarStates(overrides = {}) {
   const states = [
     null, false, '', 'home', false, false, null, false, false, false, false, false,
     null, null, null, '', '', false, null, false, false, new Set(), new Set(), new Set(), new Set(), '',
-    new Set(), new Set(),
+    new Set(), new Set(), '', false,
   ];
   for (const [index, value] of Object.entries(overrides)) states[Number(index)] = value;
   return states;

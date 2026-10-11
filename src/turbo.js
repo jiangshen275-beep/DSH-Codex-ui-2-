@@ -14,7 +14,7 @@
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { policyText, lightningNudge, OFF_NOTICE, tokenMultiplier } from './turbo-policy.js';
+import { policyText, lightningNudge, OFF_NOTICE, tokenMultiplier, presetSilences } from './turbo-policy.js';
 import { setAliases, identityHealth, writeAliasesToDisk } from './model-identity.js';
 
 export const TURBO_EVENT = 'dsh-codex-ui/turbo';
@@ -228,6 +228,9 @@ export function registerTurbo(ctx) {
 
   const resolve = (sessionId, agent, position) => {
     if (!sessionId) return '';
+    // A session on a preset that owns its own prompt gets nothing from this plugin — not the language
+    // contract, not the persona, not the orchestration blocks. resolve() is the single source for all of them.
+    if (presetSilences(agent)) return '';
     // Chinese thinking and Chinese answers are forced for every session this plugin arms —
     // including sessions with no persona and no switches, which is why it is decided here
     // and not in the state file. Flip this constant to make it optional again.
@@ -255,6 +258,7 @@ export function registerTurbo(ctx) {
       if (payload?.signal?.aborted) return decision;
       const sessionId = payload?.agent?.id;
       if (typeof sessionId !== 'string' || sessionId === '') return decision;
+      if (presetSilences(payload?.agent)) return decision;
       // `superfast` implies the tree contract, so either switch arms the reminder.
       const row = state.sessions[sessionId];
       if (row?.lightning !== true && row?.superfast !== true) return decision;

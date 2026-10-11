@@ -1,3 +1,4 @@
+import { presetSilences } from './turbo-policy.js';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 
@@ -43,7 +44,7 @@ export async function apply(ctx) {
     order: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_SUFFIX') + 1,
     interpolate: false,
     // An empty section renders no bytes: only a session explicitly on DeepSeek uses the native prompt.
-    text: ({ agent }) => agent && modeFor(agent.session) === 'Codex' ? CODEX_PROMPT : '',
+    text: ({ agent }) => agent && !presetSilences(agent) && modeFor(agent.session) === 'Codex' ? CODEX_PROMPT : '',
   });
 
   // Use DSH's authenticated Connection carrier; no extra HTTP server or token.

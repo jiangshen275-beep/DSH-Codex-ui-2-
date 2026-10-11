@@ -620,7 +620,6 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
   };
   ctx.effect(() => ctx.theme?.overrideTokens?.('dsh-codex-ui', Object.fromEntries(Object.entries(pairs).map(([k, v]) => [k, { light: v[0], dark: v[1] }]))));
 
-  const search = () => document.querySelector('.cg-workspaces [class*="searchButton"]')?.click();
   const go = id => ctx.layout?.selectPanel?.(id);
   // Typing must not slide the transcript. One frame after each input event the conversation
   // column is compared with where it was: if it moved downward, the view is put back. Whatever
@@ -913,8 +912,26 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     // The archive list is driven by the registry's own set, never by the session list. An id whose
     // Session the host no longer lists — an archived subagent whose parent moved on, or a log that
     // was already deleted — must still get a row: the row is the only way to unarchive it again.
-    const archivedList = archivedIds.filter(id => !purgedIds.has(id));
-    const searchSessions = () => { setRecentOpen(true); requestAnimationFrame(search); };
+    // The native search field lives inside `.cg-workspaces`, which this plugin renders `hidden`
+    // (measured: display:none, 0x0), so clicking through to it could only ever expand a field that
+    // can be neither seen nor focused — that is exactly why 搜索会话 looked dead. The field is the
+    // plugin's own instead, filtering the three lists by title, display name or id.
+    const [sessionQuery, setSessionQuery] = React.useState('');
+    const [searchOpen, setSearchOpen] = React.useState(false);
+    const sessionSearchRef = React.useRef(null);
+    const matchesQuery = id => {
+      const query = sessionQuery.trim().toLowerCase();
+      if (query === '') return true;
+      const entry = sessions[id];
+      return `${entry?.displayTitle ?? ''} ${entry?.title ?? ''} ${id}`.toLowerCase().includes(query);
+    };
+    const archivedList = archivedIds.filter(id => !purgedIds.has(id) && matchesQuery(id));
+    const searchSessions = () => {
+      if (searchOpen) { setSessionQuery(''); setSearchOpen(false); return; }
+      setRecentOpen(true);
+      setSearchOpen(true);
+      requestAnimationFrame(() => sessionSearchRef.current?.focus());
+    };
     const status = useSessionStatus(s => s);
     const waiting = Array.from(status.values()).filter(s => s.pendingInteraction || s.completionUnread).length;
     const settings = () => { setSettingsMenu(false); document.querySelector('.cg-native-settings button')?.click(); };
@@ -1123,7 +1140,7 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
         ...renderGroup(id, 'branches', groups?.branches ?? [], depth)
       ];
     };
-    const recentIds = Object.keys(sessions).filter(id => !pins.includes(id) && !archivedSet.has(id) && !isBranchChild(id) && !purgedIds.has(id) && !ghostIds.has(id)).sort((a, b) => stamp(sessions[b]) - stamp(sessions[a]));
+    const recentIds = Object.keys(sessions).filter(id => !pins.includes(id) && !archivedSet.has(id) && !isBranchChild(id) && !purgedIds.has(id) && !ghostIds.has(id) && matchesQuery(id)).sort((a, b) => stamp(sessions[b]) - stamp(sessions[a]));
     return h('div', { className: `cg-sidebar${collapsed ? ' cg-collapsed' : ''}` },
       h('nav', { className: 'cg-rail', 'aria-label': '应用导航' },
         rail('home', '主页', () => { setLocalSection('home'); go(null); if (collapsed) ctx.layout.toggleSidebar(); }),
@@ -1160,8 +1177,17 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
         modeError && h('div', { className: 'cg-notice', role: 'alert' }, modeError),
         h(Button, { icon: 'edit', label: '新聊天', className: 'cg-new', onClick: () => ctx.uiWorkspace.startSession(), children: '新聊天' }),
         h('div', { className: 'cg-browse' },
+          searchOpen && h('div', { className: 'cg-session-search', role: 'search' },
+            h('input', {
+              ref: sessionSearchRef, className: 'cg-session-search-input', type: 'search', value: sessionQuery,
+              placeholder: '搜索会话…', 'aria-label': '搜索会话', autoComplete: 'off',
+              onChange: event => setSessionQuery(event.target.value),
+              onKeyDown: event => { if (event.key === 'Escape') { event.stopPropagation(); setSessionQuery(''); setSearchOpen(false); } }
+            }),
+            sessionQuery !== '' && recentIds.length === 0 && pins.filter(matchesQuery).length === 0 && archivedList.length === 0
+              && h('p', { className: 'cg-session-search-empty', role: 'status' }, '没有匹配的会话。')),
           pins.some(id => sessions[id] && !archivedSet.has(id)) && h(Button, { label: '置顶', className: 'cg-section-toggle cg-pins-toggle', 'aria-expanded': pinsOpen, onClick: () => setPinsOpen(!pinsOpen), children: ['置顶', h('span', { key: 'arrow', className: 'cg-disclosure-arrow', 'aria-hidden': true }, h(Icon, { name: 'chevron', size: 13 }))] }),
-          ...(pinsOpen ? pins.filter(id => sessions[id] && !archivedSet.has(id) && !isBranchChild(id) && !purgedIds.has(id) && !ghostIds.has(id)).map(id => renderTask(id)) : []),
+          ...(pinsOpen ? pins.filter(id => sessions[id] && !archivedSet.has(id) && !isBranchChild(id) && !purgedIds.has(id) && !ghostIds.has(id) && matchesQuery(id)).map(id => renderTask(id)) : []),
           h(Button, { label: '项目', className: 'cg-section-toggle', 'aria-expanded': projectsOpen, onClick: () => setProjectsOpen(!projectsOpen), children: ['项目', h('span', { key: 'arrow', className: 'cg-disclosure-arrow', 'aria-hidden': true }, h(Icon, { name: 'chevron', size: 13 }))] }),
           projectsOpen && h('div', { className: 'cg-projects' }, ...workspaces.items.map(project => { const title = !project.title || project.title === 'default-workspace' ? '默认工作区' : project.title; return h(Button, { key: project.workspaceId, icon: 'folder', label: title, onClick: () => ctx.uiWorkspace.openWorkspace(project.workspaceId).catch(error => setNavigationError(error.message || String(error))), children: title }); }), h(Button, { icon: 'plus', label: '添加项目', onClick: () => document.querySelector('.cg-workspaces [class*="headerActions"] button[class*="iconButton"]')?.click(), children: '添加项目' })),
           h(Button, { label: '最近', className: 'cg-section-toggle', 'aria-expanded': recentOpen, onClick: () => setRecentOpen(!recentOpen), children: ['最近', h('span', { key: 'arrow', className: 'cg-disclosure-arrow', 'aria-hidden': true }, h(Icon, { name: 'chevron', size: 13 }))] }),

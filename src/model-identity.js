@@ -1,3 +1,4 @@
+import { presetSilences } from './turbo-policy.js';
 /**
  * The name the assistant answers to.
  *
@@ -182,7 +183,7 @@ export function registerModelIdentity(ctx) {
         name: 'chatgpt-ui:model-identity',
         order,
         interpolate: false,
-        text: ({ agent }) => identityText(agent?.options),
+        text: ({ agent }) => presetSilences(agent) ? '' : identityText(agent?.options),
       });
       sectionState = { ok: true, error: '', order };
       writeIdentityStatus({ step: 'section', sectionOk: true, sectionError: '', order });

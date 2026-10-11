@@ -193,7 +193,19 @@ export function policyText({ persona, ultra = false, lightning = false, superfas
   return parts.join('\n\n');
 }
 
-export default { PRECEDENCE, LANGUAGE_POLICY, CHAT_PERSONA, WORK_PERSONA, ULTRA_POLICY, LIGHTNING_POLICY, SUPERFAST_POLICY, SUPERFAST_CHILD_NOTE, SUBAGENT_GUARD, OFF_NOTICE, policyText, tokenMultiplier };
+/**
+ * Agent presets under which this plugin stays out of the prompt entirely, so a persona injected by another
+ * plugin is not competing with ours. Matched on the session's agent preset.
+ */
+export const SILENT_PRESETS = ['clean'];
+
+/** True when this session's agent preset asks the plugin to inject nothing. */
+export function presetSilences(agent) {
+  const preset = agent?.session?.header?.agentPreset;
+  return typeof preset === 'string' && SILENT_PRESETS.includes(preset);
+}
+
+export default { PRECEDENCE, LANGUAGE_POLICY, CHAT_PERSONA, WORK_PERSONA, ULTRA_POLICY, LIGHTNING_POLICY, SUPERFAST_POLICY, SUPERFAST_CHILD_NOTE, SUBAGENT_GUARD, OFF_NOTICE, policyText, tokenMultiplier, SILENT_PRESETS, presetSilences };
 
 /**
  * The token multiplier the Lightning contract states, read back out of the contract text
