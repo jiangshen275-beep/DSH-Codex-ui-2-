@@ -6,3 +6,11 @@ node_modules/
 .env.*
 .DS_Store
 Thumbs.db
+tmp/
+dist/
+coverage/
+*.bak
+*.tmp
+.dsh/
+profile-backup-*/
+_audit-codex-ui/
