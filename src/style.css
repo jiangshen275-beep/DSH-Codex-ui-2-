@@ -1315,14 +1315,26 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="t
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="high"] .cg-model-summary strong,
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="high"] { color: #e0b766; }
 
+/* Orchestration on: the effort box’s edge glows. Colour comes from --cg-glow, which defaults to the tier’s
+   own --cg-e* value and switches to the superfast gold palette when superfast is armed. A crisp 1px ring plus a
+   soft 18px halo (the halo alone washed out in the light theme). Static on purpose — no reduced-motion clause. */
+.cg-model-root[data-lightning="true"] .cg-model-slider-shell,
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell { box-shadow: 0 0 0 1px var(--cg-glow), 0 0 18px 2px var(--cg-glow); }
 
-/* Lightning (fast) mode: the effort box's edge glows in the tier's own colour. The tier colours already live on the
-   shell as --cg-e1..--cg-e5 (theme-scoped), so light and dark come for free; superfast keeps its own gold rings, which
-   is why it is excluded here. Static shadow on purpose — no animation, so no reduced-motion clause is needed. */
-.cg-model-root[data-lightning="true"]:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="minimal"],
-.cg-model-root[data-lightning="true"]:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="low"] { box-shadow: 0 0 12px 0 var(--cg-e2), 0 0 3px 0 var(--cg-e2); }
-.cg-model-root[data-lightning="true"]:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="high"] { box-shadow: 0 0 12px 0 var(--cg-e4), 0 0 3px 0 var(--cg-e4); }
-.cg-model-root[data-lightning="true"]:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="max"],
-.cg-model-root[data-lightning="true"]:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="xhigh"] { box-shadow: 0 0 12px 0 var(--cg-e5), 0 0 3px 0 var(--cg-e5); }
-.cg-model-root[data-lightning="true"]:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="ultra"],
-.cg-model-root[data-lightning="true"]:not([data-superfast="true"]) .cg-model-slider-shell[data-max="true"] { box-shadow: 0 0 14px 0 #bb74ff, 0 0 4px 0 #bb74ff; }
+.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="minimal"] { --cg-glow: var(--cg-e2); }
+.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="low"] { --cg-glow: var(--cg-e2); }
+.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="medium"] { --cg-glow: var(--cg-e3); }
+.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="high"] { --cg-glow: var(--cg-e4); }
+.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="xhigh"] { --cg-glow: var(--cg-e5); }
+.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="max"] { --cg-glow: var(--cg-e5); }
+.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-effort="ultra"],
+.cg-model-root:not([data-superfast="true"]) .cg-model-slider-shell[data-max="true"] { --cg-glow: #bb74ff; }
+
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="minimal"] { --cg-glow: #e0b766; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="low"] { --cg-glow: #e0b766; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="medium"] { --cg-glow: #dfb662; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="high"] { --cg-glow: #dfb662; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="xhigh"] { --cg-glow: #d9a534; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="max"] { --cg-glow: #d9a534; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="ultra"],
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-max="true"] { --cg-glow: #f7c948; }
