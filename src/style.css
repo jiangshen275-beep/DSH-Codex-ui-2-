@@ -1321,7 +1321,14 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="t
 .cg-model-root[data-lightning="true"] .cg-model-popover,
 .cg-model-root[data-superfast="true"] .cg-model-popover {
   border-color: var(--cg-glow);
+  /* The entrance animation is kept in the same list, then the glow breathes after it. */
+  animation: cg-model-enter 120ms ease-out, cg-model-glow-breathe 2.6s ease-in-out 120ms infinite;
   box-shadow: 0 6px 14px #0000000c, 0 0 0 1px var(--cg-glow), 0 0 22px 4px var(--cg-glow);
+}
+
+@keyframes cg-model-glow-breathe {
+  0%, 100% { box-shadow: 0 6px 14px #0000000c, 0 0 0 1px var(--cg-glow), 0 0 18px 3px var(--cg-glow); }
+  50% { box-shadow: 0 6px 14px #0000000c, 0 0 0 1px var(--cg-glow), 0 0 30px 7px var(--cg-glow); }
 }
 
 .cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="minimal"] { --cg-glow: var(--cg-e2); }
@@ -1341,3 +1348,10 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="t
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="max"] { --cg-glow: #d9a534; }
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="ultra"],
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-max="true"] { --cg-glow: #f7c948; }
+
+/* This selector outranks the popover clause further up, so the stop has to be repeated here. The glow itself stays
+   (it is a static box-shadow in the rule above); only the breathing is switched off. */
+@media (prefers-reduced-motion: reduce) {
+  .cg-model-root[data-lightning="true"] .cg-model-popover,
+  .cg-model-root[data-superfast="true"] .cg-model-popover { animation: cg-model-enter 120ms ease-out; }
+}
