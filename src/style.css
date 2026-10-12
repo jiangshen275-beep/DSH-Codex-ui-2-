@@ -194,7 +194,10 @@ html[data-chatgpt-ui] [data-slot="conversation.hero.agentPreset"] { margin-left:
 .cg-agent-trigger:hover, .cg-agent-trigger[aria-expanded=true] { background: var(--cg-hover); }
 .cg-agent-trigger:disabled { opacity: .6; cursor: default; }
 .cg-agent-trigger svg { width: 14px; height: 14px; flex: none; color: var(--cg-muted); }
-.cg-agent-menu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 60; display: flex; flex-direction: column; gap: 2px; width: min(320px, calc(100vw - 96px)); padding: 6px; border: 1px solid #e8e8e8; border-radius: 14px; background: var(--cg-page); box-shadow: 0 12px 32px #0000001f; }
+/* The menu opens downward, as asked: below the trigger, never above it, and it scrolls inside itself
+   so a longer roster cannot run off the panel. The `data-flip` attribute the picker still sets has no
+   rule here and never had one — the direction is this rule alone. */
+.cg-agent-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 60; display: flex; flex-direction: column; gap: 2px; width: min(320px, calc(100vw - 96px)); max-height: min(56vh, 380px); overflow-y: auto; overscroll-behavior: contain; padding: 6px; border: 1px solid #e8e8e8; border-radius: 14px; background: var(--cg-page); box-shadow: 0 12px 32px #0000001f; }
 .cg-agent-option { display: flex; flex-direction: column; gap: 2px; padding: 7px 10px; border: 0; border-radius: 9px; background: none; color: var(--cg-text); text-align: left; cursor: pointer; }
 .cg-agent-option:hover { background: var(--cg-hover); }
 .cg-agent-option-name { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 500; line-height: 20px; }

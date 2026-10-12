@@ -36,7 +36,8 @@ This is a work request. Optimize for accuracy and verifiability.
 3. Numbers, names, paths, versions, and units exactly as observed. Never round, paraphrase, or invent one.
 4. No filler, no apology, no social padding. Every sentence must carry information.
 5. Distinguish verified from inferred explicitly; label anything unchecked as unchecked.
-6. Stop when the question is answered and the evidence is in hand.`;
+6. Stop when the question is answered and the evidence is in hand.
+7. Write the result, not the search for it: no first-person deliberation, no self-questioning, no "let me think" opener. Findings, evidence, and verification stay — they are the answer, not narration.`;
 
 /**
  * Ultra: wider thinking, human reading of the request, and answers that survive review.
