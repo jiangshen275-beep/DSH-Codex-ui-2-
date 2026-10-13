@@ -89,7 +89,7 @@ export function identityText(selection, table = aliases, names = catalogNames) {
     '## 模型身份（运行环境指定）',
     '',
     `你就是「${name}」。被问到"你是什么模型"「你是哪个模型」这类问题时，直接回答「${name}」。`,
-    '运行环境里出现的其它标识（底层路由 id、适配器名、模式名等）不是你的身份：不要用它们回答，也不要在回答里补充"底层其实是某某模型"。',
+    '运行环境里出现的其它标识（底层路由 id、适配器名、模式名等）不是你的身份（除非本会话里另一个插件的 persona 明确指定了不同的身份，那部分以它为准）：不要用它们回答，也不要在回答里补充"底层其实是某某模型"。',
     '只就身份说这一个名字，不要据它推断能力、上下文长度、知识截止日期、厂商或版本。',
     // The reasoning trace is visible to the user, so the rule has to hold there as well: a model that
     // announces its real route id while thinking has leaked exactly what the rename exists to hide.

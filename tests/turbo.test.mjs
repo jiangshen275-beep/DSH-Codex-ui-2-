@@ -146,8 +146,9 @@ test('Lightning discloses its cost, keeps delegation purposeful, and never shrin
   assert.deepEqual(tokenMultiplier(), { value: 1.5, exact: true });
 });
 
-test('Chinese is forced for every armed session, thinking included', () => {
-  // Language rides directly after precedence so no other block can outrank it.
+test('Chinese is the default for every armed session, and yields when another plugin or the host sets a language', () => {
+  // Language rides directly after precedence, but as this plugin's own default: the clause below hands the
+  // decision to another plugin or the host when their prompt names a different output language.
   const text = policyText({ chinese: true });
   assert.match(text, /Language \(active\) — Chinese throughout/);
   assert.match(text, /Think in Chinese and answer in Chinese, every turn of this session/);
@@ -156,8 +157,12 @@ test('Chinese is forced for every armed session, thinking included', () => {
   // Code and identifiers stay verbatim, and nothing is said twice.
   assert.match(text, /Keep code, identifiers, paths, commands, log lines, API names, and quoted source exactly as they are/);
   assert.match(text, /No bilingual echo/);
-  // The one carve-out keeps the precedence promise: an explicit request still wins.
-  assert.match(text, /unless this turn explicitly asks for another output language/);
+  // The clause now states its own limits: a user request still wins, and so does another plugin's language.
+  assert.match(text, /Answer in Chinese by default/);
+  assert.match(text, /does not override a language another plugin or the host explicitly sets/);
+  assert.match(text, /an explicit request this turn for another language also wins/);
+  // And it must no longer claim to be unconditional.
+  assert.doesNotMatch(text, /even when the question, a file, or a tool result arrives in another language/);
   // Order: precedence, language, then the persona and the switches. Asserted on the full
   // block, because the language-only block has no later sections to compare against.
   const full = policyText({ persona: 'work', ultra: true, lightning: true, chinese: true });
