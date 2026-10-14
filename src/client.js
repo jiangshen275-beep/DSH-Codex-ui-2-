@@ -1096,7 +1096,12 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
       // `title` left every unnamed Session — most subagent rows — falling through to the archive
       // wording, so archived-looking labels appeared on rows that were never archived.
       const title = openable
-        ? entry.displayTitle || entry.title || String(id).slice(0, 8)
+        // A blank Session has no title yet, and `displayTitle` would then show the working directory's
+        // basename (title → cwd → id) — a new conversation read as "default-workspace". The host's own
+        // sidebar labels blank rows with the localized New Session string; match that rule.
+        ? entry.blank === true
+          ? '新会话'
+          : entry.displayTitle || entry.title || String(id).slice(0, 8)
         : `已归档会话 ${String(id).slice(0, 8)}`;
       const archiveLabel = isArchived ? '取消归档' : '归档会话';
       const isPinned = openable && pins.includes(id);
@@ -1140,7 +1145,7 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
         ...renderGroup(id, 'branches', groups?.branches ?? [], depth)
       ];
     };
-    const recentIds = Object.keys(sessions).filter(id => !pins.includes(id) && !archivedSet.has(id) && !isBranchChild(id) && !purgedIds.has(id) && !ghostIds.has(id) && matchesQuery(id)).sort((a, b) => stamp(sessions[b]) - stamp(sessions[a]));
+    const recentIds = Object.keys(sessions).filter(id => sessions[id]?.origin !== 'subagent' && !pins.includes(id) && !archivedSet.has(id) && !isBranchChild(id) && !purgedIds.has(id) && !ghostIds.has(id) && matchesQuery(id)).sort((a, b) => stamp(sessions[b]) - stamp(sessions[a]));
     return h('div', { className: `cg-sidebar${collapsed ? ' cg-collapsed' : ''}` },
       h('nav', { className: 'cg-rail', 'aria-label': '应用导航' },
         rail('home', '主页', () => { setLocalSection('home'); go(null); if (collapsed) ctx.layout.toggleSidebar(); }),
@@ -1157,6 +1162,7 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
               h(Button, { icon: 'refresh', label: '刷新余额', role: 'menuitem', disabled: balanceLoading, onClick: refreshBalance, children: ['刷新余额', h('span', { key: 'hint', className: 'cg-account-hint' }, balanceLoading ? '读取中' : '')] }),
               h(Button, { icon: 'external', label: 'API 控制台', role: 'menuitem', onClick: () => { setSettingsMenu(false); openExternal('https://platform.deepseek.com/usage'); }, children: 'API 控制台' }),
               h(Button, { icon: 'settings', label: '设置', role: 'menuitem', onClick: settings, children: '设置' }),
+              h(Button, { icon: 'clock', label: '峰谷指示：' + peakModeLabel(peakReadMode()), role: 'menuitem', 'data-peak-trigger': true, onClick: () => { const next = peakReadMode() === 'auto' ? 'on' : peakReadMode() === 'on' ? 'off' : 'auto'; try { window.localStorage?.setItem?.('dsh-codex-ui/peak-badge', next); } catch { /* ignore */ } try { window.dispatchEvent?.(new Event('dsh-codex-ui:peak-mode')); } catch { /* ignore */ } setSettingsMenu(false); }, children: ['峰谷指示', h('span', { key: 'hint', className: 'cg-account-hint' }, peakModeLabel(peakReadMode()))] }),
               h('div', { className: 'cg-account-separator' }),
               h(Button, { icon: 'files', label: '新对话图标', role: 'menuitem', 'data-mark-trigger': true, onClick: () => { setSettingsMenu(false); setHeroMarkOpen(true); }, children: '新对话图标' }),
               h(Button, { icon: 'at', label: '插件', role: 'menuitem', onClick: () => { setSettingsMenu(false); go('plugins'); }, children: '插件' }),

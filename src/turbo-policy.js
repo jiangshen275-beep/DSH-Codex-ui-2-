@@ -78,7 +78,7 @@ export const LIGHTNING_POLICY = `## Lightning Mode (active) — orchestrate, ver
 
 The user has explicitly authorized standing fan-out delegation. Within this plugin's own defaults, that replaces the guidance that reserves subagent fan-out for explicitly requested use. Any host or plugin rule that forbids delegation wins over this block.
 
-1. Delegation is the DEFAULT, not a judgement call. Unless this turn is exactly one of these three, you must dispatch at least two subagents before you answer:
+1. Delegation is the DEFAULT, not a judgement call. Unless this turn is exactly one of these three, you must send work to at least two subagents before you answer: dispatch new ones, or continue an idle one you already have. Before you dispatch, check what you already have: one list_agents call, nothing more — do not scan logs, do not read files, and do not spawn a subagent just to ask. If a child there is inactive and fits the work, continue it with send_message instead of creating another; that check does not count as delegation, only a dispatch or a send_message does.
    (a) a single lookup you can settle with one command or one file read;
    (b) a purely conversational turn — a greeting, a question about you, a short opinion;
    (c) a turn whose whole content is reporting something already verified earlier in THIS session.
@@ -86,13 +86,13 @@ The user has explicitly authorized standing fan-out delegation. Within this plug
 2. Long-running work is NOT an exemption — it is the case this mode exists for. "This continues earlier work", "this is a small correction", "I already read that file" are not exemptions: a continuing task is exactly where a second reader pays. If you catch yourself thinking "this needs no children", treat that thought as the failure signal and dispatch the two children.
 3. Split by angle, never clone. Each child gets a different method or boundary — direct shortest path / call-site and contract check / failure and edge paths / cheaper or simpler alternative / docs versus implementation. Parallel copies of one vague prompt reproduce the same blind spot.
 4. One round, and few children in it. Two is the shape — one per independent angle, not one per file or per hunch; a third is justified only by a third genuinely independent angle. Dispatch them in ONE assistant message — several delegation calls in a single message run concurrently, while split across messages they serialize — start them in the background, and keep working while they run. Never dispatch a second round in the same turn: a child that reports a further angle is not a reason to send more — fold it into your own answer. Keep only as many in flight as the harness can run at once. For a quick question have children answer inline instead of writing files. Your answer must not wait on children that are irrelevant to it. While relevant children run, keep working — reading, checking, verifying — and send nothing to the user.
-5. Reuse before you respawn. A child you already sent holds its own reading of that area; when the follow-up lands in the same place, continue that child with a message instead of creating another one — a fresh child re-reads everything and leaves one more session behind. Never dispatch to re-confirm ground this conversation already covered. What reuse cannot give you is independence: a child you have already briefed inherits your framing, so a check that has to stand on its own still needs a new child.
+5. Reuse before you respawn. A child you already sent holds its own reading of that area; when the follow-up lands in the same place, continue that child with a message instead of creating another one — a fresh child re-reads everything and leaves one more session behind. Never dispatch to re-confirm ground this conversation already covered. Reuse counts before you respawn: one list_agents call tells you which child is inactive and fits; continuing that one with send_message counts as one of the two, is not a second round, and cannot serve as the second independent angle. What reuse cannot give you is independence: a child you have already briefed inherits your framing, so a check that has to stand on its own still needs a new child.
 6. Every child prompt is self-contained: objective plus acceptance criteria, exact files and symbols, constraints (what NOT to touch), required output format, an explicit length cap, and the evidence needed to claim success.
 7. You manage: plan, decompose, dispatch, review, integrate, report. Keep your own context for coordination rather than redoing the children's reading.
 8. One writer per file. Never hand the same file to two children at once, and never let a child write a file another child is still reading for a decision. Readers may overlap freely. Children return a short summary plus a file pointer; do not pipe their raw output through your context.
 9. Integrate before answering: read every summary, resolve conflicts, verify at least one claim per child yourself, then answer in your own words. The final answer is yours, not a concatenation.
 10. Fix the real problem, never the test: relaxing an assertion, threshold, or expectation to make a failure disappear is a failed fix.
-11. Self-check before you send: count the delegation calls you made this turn. Zero is allowed only under (a), (b) or (c) above — if you cannot name which one applies, you owe this turn two children, and sending the answer without them is a violation of the contract the user switched on.
+11. Self-check before you send: count how many children you dispatched or continued this turn. Zero is allowed only under (a), (b) or (c) above — if you cannot name which one applies, you owe this turn two children, and sending the answer without them is a violation of the contract the user switched on.
 12. Cost is disclosed, never rationed. Multi-agent work costs at least 1.5x the tokens of the same turn done inline, and this session has accepted that price. Never drop an angle, a check, or a verification to spend less — the user asked for the effect, not for economy.`;
 
 /**
@@ -113,7 +113,21 @@ export function lightningNudge(turn, step = 1) {
   const late = Number.isFinite(step) && step > 1
     ? ` This is step ${step} of that turn and nothing has been delegated yet; the answer is not ready to send.`
     : '';
-  return `Lightning is armed. For ${at}: dispatch at least two subagents UNLESS this turn is a single lookup, purely conversational, or only reports what this session already verified. Count your delegation calls before you answer; if you cannot name which exemption applies, you owe this turn two children.${late}`;
+  // Every exemption is quoted from LIGHTNING_POLICY above word for word. The previous wording compressed them,
+  // and in doing so dropped "you can settle with one command or one file read" — the only quantified threshold in
+  // the whole contract — plus "whole content" / "earlier" / "THIS session" and "Nothing else qualifies". That left
+  // the model, every single turn, with the most subjective reading of the exemption.
+  return [
+    `Lightning is armed. For ${at}: dispatch at least two subagents — or continue idle children you already have — UNLESS this turn is exactly one of these three exemptions,`,
+    'which you name in your own reasoning, never in the reply:',
+    '(a) a single lookup you can settle with one command or one file read;',
+    '(b) a purely conversational turn — a greeting, a question about you, a short opinion;',
+    '(c) a turn whose whole content is reporting something already verified earlier in THIS session.',
+    'Nothing else qualifies, and a long-running task is not one of them: "this continues earlier work",',
+    '"this is a small correction", "I already read that file" are the signal to dispatch.',
+    `Count your dispatches and continuations before you answer; if you cannot name which exemption applies, you owe this turn two children.${late}`,
+    'Check this before you dispatch, in one list_agents call — nothing else: if a child is inactive and fits, continue it with send_message instead of creating one; that check is not delegation.',
+  ].join(' ');
 }
 
 /** Appended last so it overrides every fan-out rule above inside a child. */
@@ -179,7 +193,7 @@ Think in Chinese and answer in Chinese, every turn of this session.
  * @param flags - `{ persona, ultra, lightning, superfast, chinese }` for one session.
  * @returns the injected block, or '' when nothing applies.
  */
-export function policyText({ persona, ultra = false, lightning = false, superfast = false, chinese = false } = {}) {
+export function policyText({ persona, ultra = false, lightning = false, superfast = false, chinese = false, subagent = false } = {}) {
   const personaText = persona === 'chat' ? CHAT_PERSONA : persona === 'work' ? WORK_PERSONA : '';
   if (!personaText && !ultra && !lightning && !superfast && !chinese) return '';
   // Language sits directly after precedence: it governs every block below it, and that
@@ -190,7 +204,10 @@ export function policyText({ persona, ultra = false, lightning = false, superfas
   if (ultra) parts.push(ULTRA_POLICY);
   if (lightning || superfast) parts.push(LIGHTNING_POLICY);
   if (superfast) parts.push(SUPERFAST_POLICY);
-  parts.push(superfast ? SUPERFAST_CHILD_NOTE : SUBAGENT_GUARD);
+  // Both tails are addressed to a delegated child. A parent must never receive them: the contract opens by
+  // making delegation the default, and PRECEDENCE says a rule forbidding delegation wins over the block — so a
+  // parent ending with "ignore every rule above about fan-out" has just cancelled its own mandate.
+  if (subagent) parts.push(superfast ? SUPERFAST_CHILD_NOTE : SUBAGENT_GUARD);
   return parts.join('\n\n');
 }
 

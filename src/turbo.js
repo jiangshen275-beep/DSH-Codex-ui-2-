@@ -237,7 +237,12 @@ export function registerTurbo(ctx) {
     const FORCE_CHINESE = true;
     const flags = { ...flagsFor(sessionId, position), chinese: FORCE_CHINESE };
     const armed = state.armed.get(sessionId) ?? new Set();
-    const text = policyText(flags);
+    // `origin` alone is only a navigation classification, so the delegation depth is checked alongside it.
+    // Unknowable (no header) means NOT a child: every fixture in the tests has no header, and defaulting the
+    // other way would flip a dozen injection tests to the child semantics.
+    const header = agent?.session?.header;
+    const subagent = header?.origin === 'subagent' || (header?.delegationDepth ?? 0) > 0;
+    const text = policyText({ ...flags, subagent });
     const active = new Set(Object.keys(flags).filter(key => flags[key] && flags[key] !== false));
     // A session with no persona and no switches carries nothing; if it previously carried a
     // contract, tell it once that the contract is gone.

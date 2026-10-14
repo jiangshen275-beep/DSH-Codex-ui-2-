@@ -1,5 +1,92 @@
 import { ALIASES_KEY, readAliases, publishAliases, publishCatalogNames } from './alias-sync.js';
 
+// --- 峰谷（DeepSeek 官方规则，2026-08-17 生效）--------------------------------------------------------
+// 峰：北京时间周一至周五 09:00-12:00、14:00-18:00，不含中国法定节假日；其余全部为谷（半价）。
+// 节假日取国办发明电〔2025〕7号 2026 年放假全表；调休补班日不用建表，因为峰只认周一至周五。
+const PEAK_KEY = 'dsh-codex-ui/peak-badge';
+const PEAK_TZ_OFFSET_MINUTES = 8 * 60;
+const PEAK_WINDOWS = [[9 * 60, 12 * 60], [14 * 60, 18 * 60]];
+const PEAK_HOLIDAYS = (() => {
+  const ranges = [
+    ['2026-01-01', '2026-01-03'], ['2026-02-15', '2026-02-23'], ['2026-04-04', '2026-04-06'],
+    ['2026-05-01', '2026-05-05'], ['2026-06-19', '2026-06-21'], ['2026-09-25', '2026-09-27'],
+    ['2026-10-01', '2026-10-07'],
+  ];
+  const set = new Set();
+  for (const [from, to] of ranges) {
+    const day = new Date(`${from}T00:00:00+08:00`);
+    const end = new Date(`${to}T00:00:00+08:00`);
+    while (day <= end) { set.add(new Date(day.getTime() + PEAK_TZ_OFFSET_MINUTES * 60000).toISOString().slice(0, 10)); day.setDate(day.getDate() + 1); }
+  }
+  return set;
+})();
+const peakLocal = date => {
+  const shifted = new Date(date.getTime() + PEAK_TZ_OFFSET_MINUTES * 60000);
+  const weekday = shifted.getUTCDay();
+  const minutes = shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
+  const dateKey = shifted.toISOString().slice(0, 10);
+  const holiday = PEAK_HOLIDAYS.has(dateKey);
+  const inWindow = weekday >= 1 && weekday <= 5 && !holiday && PEAK_WINDOWS.some(([from, to]) => minutes >= from && minutes < to);
+  return { peak: inWindow, weekday, minutes, dateKey, holiday };
+};
+// The next boundary this side of midnight; if nothing is left today, the next day's 09:00 (or the whole weekend).
+const peakNextSwitch = (date = new Date()) => {
+  const now = date.getTime();
+  const shifted = new Date(now + PEAK_TZ_OFFSET_MINUTES * 60000);
+  const todayStart = Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()) - PEAK_TZ_OFFSET_MINUTES * 60000;
+  // 正在峰中：下一次切换就是当前窗口结束（12:00 或 18:00）。
+  if (peakLocal(date).peak) {
+    const minutes = shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
+    const current = PEAK_WINDOWS.find(([from, to]) => minutes >= from && minutes < to);
+    if (current) return new Date(todayStart + current[1] * 60000);
+  }
+  // 谷中：向前逐日找下一个真正的峰起点，跳过周六周日与中国法定节假日。
+  // 旧写法只算当天的窗口，于是周五晚上会报"13 小时后转峰"，而周末全天都是谷、真正的下一次在周一 09:00。
+  for (let dayOffset = 0; dayOffset <= 10; dayOffset++) {
+    const dayStart = todayStart + dayOffset * 86400000;
+    const dayShifted = new Date(dayStart + PEAK_TZ_OFFSET_MINUTES * 60000);
+    const weekday = dayShifted.getUTCDay();
+    if (weekday < 1 || weekday > 5) continue;
+    if (PEAK_HOLIDAYS.has(dayShifted.toISOString().slice(0, 10))) continue;
+    for (const [from] of PEAK_WINDOWS) {
+      const at = dayStart + from * 60000;
+      if (at > now) return new Date(at);
+    }
+  }
+  return new Date(now + 86400000);
+};
+
+const peakCountdown = (target, now = new Date()) => {
+  let ms = Math.max(0, target.getTime() - now.getTime());
+  const days = Math.floor(ms / 86400000); ms -= days * 86400000;
+  const hours = Math.floor(ms / 3600000); ms -= hours * 3600000;
+  const minutes = Math.floor(ms / 60000);
+  return days > 0 ? `${days}天${hours}小时${minutes}分` : hours > 0 ? `${hours}小时${minutes}分` : `${minutes}分`;
+};
+const peakReadMode = () => { try { const raw = window.localStorage?.getItem?.(PEAK_KEY); return raw === 'on' || raw === 'off' ? raw : 'auto'; } catch { return 'auto'; } };
+let peakMode = peakReadMode();
+const peakListeners = new Set();
+const peakSubscribe = listener => {
+  peakListeners.add(listener);
+  // The settings menu lives in another module of this bundle and writes the same key directly, so it announces
+  // the change on a DOM event instead: without this the badge only picked the new mode up after a reload.
+  const onMode = () => { peakMode = peakReadMode(); for (const l of peakListeners) l(); };
+  const target = typeof window !== 'undefined' ? window : undefined;
+  try { target?.addEventListener?.('dsh-codex-ui:peak-mode', onMode); } catch { /* 无 DOM 的环境（组件测试替身）直接跳过 */ }
+  return () => {
+    try { target?.removeEventListener?.('dsh-codex-ui:peak-mode', onMode); } catch { /* 同上 */ }
+    peakListeners.delete(listener);
+  };
+};
+const peakModeSnapshot = () => peakMode;
+const peakSetMode = next => { peakMode = next === 'on' || next === 'off' ? next : 'auto'; try { window.localStorage?.setItem?.(PEAK_KEY, peakMode); } catch { /* 存储不可用时退回内存 */ } for (const listener of peakListeners) listener(); };
+const peakModeLabel = mode => mode === 'on' ? '总是显示' : mode === 'off' ? '隐藏' : '跟随模型';
+const peakDirectories = new Map();
+// sessionId -> 首次判定出的"是否 DeepSeek"，避免目录晚到时把已经画出来的徽标又撤掉。
+const peakVerdict = new Map();
+const peakIsDeepSeek = provider => typeof provider === 'string' && provider.startsWith('deepseek');
+
+
 // The directory is shared with the native /model command and session projection.
 function registerModelUI(ctx) {
   // Tier labels follow the model menu's own convention: an English word, a capital and
@@ -700,6 +787,69 @@ function registerModelUI(ctx) {
         error && h('p', { className: 'cg-model-error', role: 'alert' }, error),
         state.status === 'error' && h('button', { className: 'cg-model-choice', type: 'button', onClick: () => { setActionError(null); load(); }, disabled: busy }, '重新加载')))
   }
+  // Peak/off-peak badge for the session header row. Registered here because this block already holds the
+  // model directory, which is where the current provider comes from.
+  ctx.inject(['slots', 'modelDirectories'], scope => {
+    function PeakBadge({ sessionId }) {
+      const mode = React.useSyncExternalStore(peakSubscribe, peakModeSnapshot);
+      const [, tick] = React.useState(0);
+      const [peakTip, setPeakTip] = React.useState(false);
+      React.useEffect(() => { const timer = setInterval(() => tick(value => value + 1), 30000); return () => clearInterval(timer); }, []);
+      // The directory is created lazily per session, so cache it (a fresh one on every render would re-fetch the
+      // model list every frame), kick off its load once, and subscribe: a bare getSnapshot() never re-renders
+      // once the projection lands. An unknown provider must not hide the badge — 跟随模型 only hides when we
+      // positively know the current model is not DeepSeek.
+      const directory = React.useMemo(() => {
+        if (typeof sessionId !== 'string' || sessionId.length === 0) return undefined;
+        try {
+          const existing = peakDirectories.get(sessionId);
+          if (existing) return existing;
+          const created = scope.modelDirectories.directoryFor(sessionId);
+          peakDirectories.set(sessionId, created);
+          created.load?.().catch(() => {});
+          return created;
+        } catch { return undefined; }
+      }, [sessionId, scope]);
+      const modelState = React.useSyncExternalStore(
+        React.useCallback(listener => directory ? directory.store.subscribe(listener) : () => {}, [directory]),
+        React.useCallback(() => directory ? directory.store.getSnapshot() : undefined, [directory]),
+      );
+      const provider = modelState?.current?.provider;
+      // First paint runs before the model directory has reported, so the gate would flip the moment it arrives
+      // (visible pop, then it vanishes). Latch the first verdict that actually knows the provider.
+      // 有值就更新、没值就沿用上一次判定：既不会因为目录晚到而闪一下，也不会在换模型后卡住旧结论。
+      if (provider !== undefined) peakVerdict.set(sessionId, peakIsDeepSeek(provider));
+      const verdict = provider !== undefined ? peakIsDeepSeek(provider) : peakVerdict.get(sessionId);
+      if (mode === 'off') return null;
+      if (mode !== 'on' && verdict === false) return null;
+      const now = new Date();
+      const isPeak = peakLocal(now).peak;
+      const next = peakNextSwitch(now);
+      const hint = `${isPeak ? '峰' : '谷'} · 还有 ${peakCountdown(next, now)}转${isPeak ? '谷' : '峰'}`;
+      // A native title tooltip is a white system box with a visible delay, which reads as foreign next to the
+      // harness chrome — so the popover is drawn in-page and toggled on the very first pointer event.
+      return h('span', {
+        className: 'cg-peak-wrap',
+        role: 'status',
+        tabIndex: 0,
+        'aria-label': `峰谷时段：${hint}`,
+        onMouseEnter: () => setPeakTip(true),
+        onMouseLeave: () => setPeakTip(false),
+        onFocus: () => setPeakTip(true),
+        onBlur: () => setPeakTip(false),
+      },
+        h('span', { className: 'cg-peak', 'data-peak': isPeak ? 'peak' : 'offpeak' }, isPeak ? '峰' : '谷'),
+        peakTip && h('div', { className: 'cg-peak-tip', role: 'tooltip' },
+          h('div', { className: 'cg-peak-tip-title' }, isPeak ? '峰时段' : '谷时段'),
+          h('div', { className: 'cg-peak-tip-row' },
+            h('svg', { className: 'cg-peak-tip-icon', viewBox: '0 0 16 16', width: 12, height: 12, 'aria-hidden': true },
+              h('circle', { cx: 8, cy: 8, r: 6.2, fill: 'none', stroke: 'currentColor', strokeWidth: 1.3 }),
+              h('path', { d: 'M8 4.6V8l2.4 1.6', fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round' })),
+            h('span', null, hint))));
+    }
+    scope.slots.inject('conversation.session.header.actions', () => scope.slots.register({ name: 'conversation.session.header.actions', id: 'chatgpt.peak', order: 0, inject: sessionId => ({ sessionId }) }, PeakBadge));
+  });
+
   ctx.inject(['slots', 'modelDirectories', 'sessions', 'remote', 'remote.session'], scope => {
     const models = scope.modelDirectories;
     const sessions = scope.sessions;

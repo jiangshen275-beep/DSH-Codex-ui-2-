@@ -1280,19 +1280,21 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="t
 .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="xhigh"],
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="max"],
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="xhigh"] { color: #f0b429; }
-/* 超快: one fill colour per tier. Medium is deliberately left on the blue→gold ramp, since the brief named only Low,
-   High, Max and Ultra. Light theme first, then the dark counterpart. */
+/* 超快: one fill colour per tier, except Max, which runs a wide amber ramp — bright gold on the left falling to
+   muted amber on the right — so it reads as a gradient at a glance instead of as one flat tone, and the ramp
+   passes through xhigh's flat #d9a534 rather than ending on it, which is what keeps the two distinguishable.
+   Medium is deliberately left on the blue→gold ramp, since the brief named only Low, High, Max and Ultra. */
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="low"] .cg-model-slider-fill { background: #e6cb97; }
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="minimal"] .cg-model-slider-fill { background: #e6cb97; }
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="high"] .cg-model-slider-fill { background: #dfb662; }
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="xhigh"] .cg-model-slider-fill { background: #d9a534; }
-.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="max"] .cg-model-slider-fill { background: #d9a534; }
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="max"] .cg-model-slider-fill { background: linear-gradient(90deg, #f7c948 0%, #d9a534 52%, #c08d28 100%); }
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill { background: linear-gradient(90deg, #dfb662 0%, #dcae55 12%, #d9a534 42%, #e8b622 74%, #f7c948 100%); }
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="low"] .cg-model-slider-fill { background: #e8d09f; }
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="minimal"] .cg-model-slider-fill { background: #e8d09f; }
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="high"] .cg-model-slider-fill { background: #e0b766; }
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="xhigh"] .cg-model-slider-fill { background: #d9a534; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="max"] .cg-model-slider-fill { background: #d9a534; }
+html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="max"] .cg-model-slider-fill { background: linear-gradient(90deg, #ffd45e 0%, #d9a534 52%, #c08d28 100%); }
 html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill { background: linear-gradient(90deg, #e0b766 0%, #ddb258 12%, #d9a534 42%, #eab820 74%, #f7c948 100%); }
 
 /* 超快 must not paint the empty tier. The superfast base fill rule is (0,4,0), one class deeper than the shared
@@ -1367,3 +1369,42 @@ html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="t
   .cg-model-root[data-lightning="true"] .cg-model-popover,
   .cg-model-root[data-superfast="true"] .cg-model-popover { animation: cg-model-enter 120ms ease-out; }
 }
+
+/* 峰谷徽标：只占一个字，细节放在悬停提示里，字号跟状态行其余项一致。 */
+.cg-peak {
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 6px;
+  cursor: default;
+  color: var(--cg-muted, #8b8b8b);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.cg-peak[data-peak="peak"] { color: #d98324; }
+.cg-peak[data-peak="offpeak"] { color: #3f9c6a; }
+
+/* 峰谷徽标的悬停气泡：用页面自己画，避免系统白框；悬停即显，无延迟。 */
+.cg-peak-wrap { position: relative; display: inline-flex; align-items: center; outline: none; }
+.cg-peak-tip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 152px;
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 8px 10px 9px;
+  border-radius: 10px;
+  border: 1px solid var(--cg-border-soft, rgba(255, 255, 255, 0.12));
+  background: var(--cg-tooltip-bg, #24262b);
+  color: var(--cg-tooltip-fg, #f2f3f5);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.34);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+  pointer-events: none;
+  z-index: 60;
+}
+.cg-peak-tip-title { font-weight: 600; margin-bottom: 4px; white-space: nowrap; }
+.cg-peak-tip-row { display: flex; align-items: center; gap: 6px; opacity: 0.88; white-space: nowrap; }
+.cg-peak-tip-icon { flex: none; }
+

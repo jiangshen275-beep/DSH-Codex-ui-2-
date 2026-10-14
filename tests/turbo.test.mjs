@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { policyText, OFF_NOTICE, LIGHTNING_POLICY, tokenMultiplier, ULTRA_POLICY, SUBAGENT_GUARD } from '../src/turbo-policy.js';
+import { policyText, OFF_NOTICE, LIGHTNING_POLICY, lightningNudge, tokenMultiplier, ULTRA_POLICY, SUBAGENT_GUARD } from '../src/turbo-policy.js';
 import { createPolicyInjector, registerTurbo, TURBO_EVENT, TURBO_PATH } from '../src/turbo.js';
 
 function fakeCtx() {
@@ -50,16 +50,18 @@ test('policy text is empty only when both switches are off', () => {
   assert.equal(policyText({ ultra: false, lightning: false }), '');
   const both = policyText({ ultra: true, lightning: true });
   assert.ok(both.includes(ULTRA_POLICY) && both.includes(LIGHTNING_POLICY));
-  // The guard must be last so it can override every fan-out rule above it.
-  assert.ok(both.endsWith(SUBAGENT_GUARD));
+  // The tail block closes the contract for a delegated child, and only for one.
+  assert.ok(policyText({ ultra: true, lightning: true, subagent: true }).endsWith(SUBAGENT_GUARD));
+  assert.doesNotMatch(both, /Ignore every rule above about fan-out/, 'a parent must not be told to ignore fan-out');
 });
 
 test('lightning demands at least two children dispatched in one message', () => {
   const text = policyText({ lightning: true });
   assert.match(text, /at least two subagents/);
   assert.match(text, /ONE assistant message/);
-  // The recursion guard is what keeps a child from fanning out again.
-  assert.match(text, /delegated sub-agent/);
+  // The recursion guard keeps a child from fanning out again; the parent-side text must not carry it.
+  assert.doesNotMatch(text, /delegated sub-agent/);
+  assert.match(policyText({ lightning: true, subagent: true }), /delegated sub-agent/);
 });
 
 test('Ultra demands a wider read of the request, not just stricter reporting', () => {
@@ -137,13 +139,25 @@ test('Lightning discloses its cost, keeps delegation purposeful, and never shrin
   const numbers = [...LIGHTNING_POLICY.matchAll(/^(\d+)\./gm)].map(match => Number(match[1]));
   assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 'one numbering, no collisions');
   // The self-check is what makes the mandate enforceable rather than advisory.
-  assert.match(LIGHTNING_POLICY, /Self-check before you send: count the delegation calls you made this turn/);
+  assert.match(LIGHTNING_POLICY, /Self-check before you send: count how many children you dispatched or continued this turn/);
   assert.match(LIGHTNING_POLICY, /if you cannot name which one applies, you owe this turn two children/);
   // Waiting on children is silent work, not a reason to speak.
   assert.match(LIGHTNING_POLICY, /While relevant children run, keep working — reading, checking, verifying — and send nothing to the user/);
   assert.doesNotMatch(LIGHTNING_POLICY, /never keep more than six in flight/, 'concurrency is limited by the harness, not by price');
+  // The reminder is the ONLY copy of the exemption the model sees each turn, so it must carry the contract's
+  // thresholds verbatim. Nothing asserted this before — which is exactly how the two texts drifted apart:
+  // a shortened paraphrase of an exemption is not a summary, it is a different (and wider) rule.
+  const reminder = lightningNudge(1, 1);
+  assert.ok(reminder.includes('you can settle with one command or one file read'), '(a) quantified threshold must appear in the reminder verbatim');
+  assert.ok(reminder.includes('whole content') && reminder.includes('earlier') && reminder.includes('THIS session'), '(c) whole content / earlier / THIS must appear verbatim');
+  assert.ok(reminder.includes('Nothing else qualifies'), 'the exemption list must stay closed in the reminder');
+  assert.ok(reminder.includes('continues earlier work') && reminder.includes('small correction') && reminder.includes('I already read that file'), 'long-running work is not an exemption: all three self-justifications must be named');
   // The figure the interface advertises must stay readable out of the contract.
   assert.deepEqual(tokenMultiplier(), { value: 1.5, exact: true });
+  // Reuse-first: the check must be in the contract, and the per-turn reminder must repeat it, or every turn
+  // keeps pushing toward new children regardless.
+  assert.match(LIGHTNING_POLICY, /one list_agents call, nothing more/);
+  assert.match(lightningNudge(1, 1), /that check is not delegation/);
 });
 
 test('Chinese is the default for every armed session, and yields when another plugin or the host sets a language', () => {
@@ -447,13 +461,18 @@ test('Superfast builds a two-tier tree, stamps the tier in every child prompt, a
   assert.match(tree, /## Lightning Mode/);
   // The ordinary guard would forbid the very delegation the tree is built from, so it must be gone.
   assert.doesNotMatch(tree, /Ignore every rule above about fan-out/);
-  assert.match(tree, /your prompt's first line decides whether you fan out/);
+  assert.doesNotMatch(tree, /your prompt's first line decides whether you fan out/, 'the tier-aware note belongs to the child');
+  assert.match(policyText({ persona: 'work', superfast: true, subagent: true }), /your prompt's first line decides whether you fan out/);
 });
 
-test('a plain Lightning session still ends with the guard that forbids child fan-out', () => {
+test('only a delegated child ends with the guard that forbids child fan-out', () => {
   const flat = policyText({ persona: 'work', lightning: true });
   assert.doesNotMatch(flat, /## Superfast Mode/, 'Lightning alone must not promise a tree');
-  assert.match(flat, /Ignore every rule above about fan-out/);
+  // This is the defect the old assertion pinned shut: the guard says "ignore every rule above about fan-out",
+  // so a parent that received it had its own mandate cancelled by the tail of its own contract.
+  assert.doesNotMatch(flat, /Ignore every rule above about fan-out/, 'a parent must not be told to ignore fan-out');
+  const child = policyText({ persona: 'work', lightning: true, subagent: true });
+  assert.match(child, /Ignore every rule above about fan-out/, 'a delegated child still needs the guard');
 });
 
 test('the turbo endpoint arms and persists the superfast flag on its own', async () => {

@@ -1,6 +1,6 @@
 {
   "name": "dsh-codex-ui",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Codex-style interface and prompt modes for DeepSeek Harness",
   "type": "module",
   "main": "./lib/index.js",
@@ -23,7 +23,8 @@
     "README.md",
     "README.zh.md",
     "start-ui.ps1",
-    "RESOURCE-REFERENCE.zh.md","tests",
+    "RESOURCE-REFERENCE.zh.md",
+    "tests",
     "SYSTEM-PROMPT-PLAN.zh.md",
     "locale",
     "THIRD-PARTY-NOTICES.md"
