@@ -1,5 +1,7 @@
 # 从 1.1.0 升到 2.0.2
 
+> **前提已变（2026-10-18 更正）。** 本文描述的是 2.0.2 那次发布时的拆包态，与当前主干不一致：主包后来把整套模型面板合了回来（`src/client.js:600` 无条件调用 `registerModelUI(ctx)`，`src/style.css` 仍有 365 行 `.cg-model-*`、596 处），而 `dsh-codex-ui-reasoning` 也已自带样式表、根属性 `data-chatgpt-ui` 与整套注入层，可以单独安装。因此下面「主包不再注册 `conversation.input.model`」「主包单独装会缺块」「必须一起装」「要给副包配 `promptInjection: false`」这几条都不再成立。现行关系是：**主包完整；副包是给只需要强度条、不想要整套 Codex 界面的人准备的可选独立件；两者都向单种类槽位 `conversation.input.model` 注册，同装必有一个被拒，二选一。** 本文其余部分保留为历史的升级与回滚记录，不要照它安装。
+
 ## 一句话
 
 输入框右下角那一整块（**模型选择器 + 推理强度条 + 流星**）已经从本包拆出去，成为独立插件 `dsh-codex-ui-reasoning`。主包不再注册 `conversation.input.model` 槽位，也不再带那批样式。
