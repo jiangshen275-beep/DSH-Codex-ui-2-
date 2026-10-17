@@ -1,18 +1,3 @@
-## 2.1.0 — 2026-10-18
-
-### 新功能
-
-- **自定义人设提示词**：人设不再硬编码成两个 id，`$DSH_HOME/personas/` 下每个 `.md` 就是一套，文件名即 id（大小写不敏感，重名跳过并 warn）；frontmatter 支持 `name` / `description` / `order` / `enabled` 与可选的 `temperature` / `top_p` / `max_tokens`，闭合之后的正文原样注入、不解析 Markdown 结构；没有 `description` 时取正文首个非空行截 40 字。面板内可新建 / 编辑 / 删除，写入走临时文件再 rename，崩在中途不会留下半个人设。内置 `DeepSeek` 是「什么都不注入」的哨兵，不是文件、改不了也删不掉；`codex` 必须始终可解析，文件缺失时从 `prompts/codex.txt` 自动重种，即使被 `enabled: false` 也仍解析出 Codex 行。坏文件只 warn 跳过，未闭合的 frontmatter 整篇按正文处理，非法采样值按「未设置」丢弃而不是夹到邻近值。
-- **Ultra 流星**：只在该档显示，其余档整层 `display: none`。十一条渐变条各带一个亮点头，全部使用负延迟，所以首帧就是满场、不会花两秒渐次出现；单颗 1.5–2.6s、`linear infinite`，横向位移由组件实测轨道宽度后写入，`--cg-meteor-travel: 420px` 只是测量完成前的回退值。`prefers-reduced-motion` 下关掉动画并把不透明度降到 .45。裁剪下放到流星层，滑条外壳不再 `overflow: hidden`——拖动时放大到 1.08× 的旋钮因此不再被切边；容器上的 `mix-blend-mode` 已移除，它让这一层每帧都要与背景重新合成、掉出 GPU 快路径，亮度改由尾部渐变 alpha 与光点光晕补回，深色主题单独补偿。
-
-### 行为变更
-
-- **闪电编排改为条件触发**：契约从「每轮强制两路、无豁免」改成四条客观条件——答案依赖本机没有的事实、改动或判断跨两处以上、两个各自能翻盘的未知、明确要求多角度；四条都不成立时单路做完，并须在回答里点名哪条为假。`lightningNudge` 的每轮文案改成同一组条件与同一句自检口径，「豁免」这个词从契约里删掉。原因：无豁免期实测出的是仪式性派发，而纯文本豁免又会被判成「看起来简单」——把判断改成可外部核对的条件，是这两端之间唯一站得住的位置。
-
-### 文档更正
-
-- **主包与副包的关系此前写反了**：README 与 MIGRATION 一直说「模型面板已拆出去、主包必须同装副包」，与代码不符。主包 `src/client.js:600` 无条件调用 `registerModelUI(ctx)`，`src/style.css` 里仍有 365 行 `.cg-model-*`（596 处）与 11 颗流星；副包 `dsh-codex-ui-reasoning` 自带样式表（1255 行）、根属性 `data-chatgpt-ui` 与整套注入层，只装它也能工作。真实关系是：**主包完整，副包是给「只要强度条、不要整套 Codex 界面」的人准备的可选独立件**。两者都向单种类槽位 `conversation.input.model`（`priority: -10`）注册，同装时后注册的会被拒，所以是二选一、不是必须一起装。本次改正 README.md / README.zh.md 的前置说明与「模型面板」「界面与其它」两处括号注，并在 MIGRATION-2.0.zh.md 顶部加了前提声明；2.0.0 那条历史条目保持原样不动。
-
 ## 2.0.1 / 2.0.2 — 仅版本号调整
 
 - 移除 `peerDependencies` 声明及其空的 `peerDependenciesMeta`。
@@ -20,16 +5,16 @@
   且不读 `peerDependenciesMeta`（标 `optional` 也不免除拦截）；写死 `0.2.0-rc.2` 会让别的 DSH 版本装不上，
   只能逐个 `allow-version` 精确豁免（1.1.0 那版在 `0.2.1-alpha.3` 上就需 `--accept-risk`）。功能与 2.0.0 完全相同。
 
-## 2.0.0 — 拆包（破坏性）
+## 2.0.0 — 界面、人设与编排契约
 
-**破坏性版本。** 输入框右下角那一整块（模型选择器 + 推理强度条 + 流星）已从本包移出，成为独立插件。主包单独装会缺块 —— 右下角退回 DSH 原生模型选择器，没有强度条、没有流星；两个包是互补关系，要一起装。升级步骤、分工表、`promptInjection: false` 配置片段与回滚办法见 [MIGRATION-2.0.zh.md](MIGRATION-2.0.zh.md)。
+本版把输入框右下角的模型面板、回复风格与推理档位收进同一条链路，并补上人设文件化、Ultra 流星与条件触发的编排契约。
 
-### 破坏性变更
-- **不再注册 `conversation.input.model` 槽位**（`src/model-ui.js` 删 13 行）。右下角交还宿主；这个槽位原先带 `priority: -10`，随注册一起撤掉。
-- **`src/style.css` 删掉 79 条已搬走的 `.cg-model-*` 规则**：148,820 → 71,360 字节。现在文件里 `.cg-model-*` 选择器 **0 条**，只剩 `@keyframes cg-model-enter` 这一条动画名（`.cg-account-menu` 还在用它）。
-- **effort 写侧下线**（`src/turbo.js`）：`/api/dsh-codex-ui/turbo` 收到 Ultra / 闪电 / 超快任一字段时不再落盘，改为 `fail('turbo/effort-moved', '推理档位开关已迁移到 dsh-codex-ui-reasoning 插件，此路由不再写入。')`。读侧保留，注入器照旧从 `storages/codex-ui-effort.json` 读三档状态。
-- **`codex-ui-effort.json` 的唯一写入方变成副包**，本包只读。两个进程各写一份快照、后写的整个覆盖先写的 —— 这正是拆开要去掉的东西。
-- 旧记录 `storages/codex-ui-turbo.json` 拆成 `codex-ui-persona.json` + `codex-ui-effort.json`，原文件改名为 `.migrated`（重命名，不删数据）；**改名要等 `codex-ui-effort.json` 真的存在**，所以没装副包时旧记录原样保留、下次启动重试。
+### 新功能
+
+- **自定义人设提示词**：人设不再硬编码成两个 id，`$DSH_HOME/personas/` 下每个 `.md` 就是一套，文件名即 id（大小写不敏感，重名跳过并 warn）；frontmatter 支持 `name` / `description` / `order` / `enabled` 与可选的 `temperature` / `top_p` / `max_tokens`，闭合之后的正文原样注入、不解析 Markdown 结构；没有 `description` 时取正文首个非空行截 40 字。面板内可新建 / 编辑 / 删除，写入走临时文件再 rename，崩在中途不会留下半个人设。内置 `DeepSeek` 是「什么都不注入」的哨兵，不是文件、改不了也删不掉；`codex` 必须始终可解析，文件缺失时从 `prompts/codex.txt` 自动重种，即使被 `enabled: false` 也仍解析出 Codex 行。坏文件只 warn 跳过，未闭合的 frontmatter 整篇按正文处理，非法采样值按「未设置」丢弃而不是夹到邻近值。
+- **Ultra 流星**：只在该档显示，其余档整层 `display: none`。十一条渐变条各带一个亮点头，全部使用负延迟，所以首帧就是满场、不会花两秒渐次出现；单颗 1.5–2.6s、`linear infinite`，横向位移由组件实测轨道宽度后写入，`--cg-meteor-travel: 420px` 只是测量完成前的回退值。`prefers-reduced-motion` 下关掉动画并把不透明度降到 .45。裁剪下放到流星层，滑条外壳不再 `overflow: hidden`——拖动时放大到 1.08× 的旋钮因此不再被切边；容器上的 `mix-blend-mode` 已移除，它让这一层每帧都要与背景重新合成、掉出 GPU 快路径，亮度改由尾部渐变 alpha 与光点光晕补回，深色主题单独补偿。
+- **闪电编排改为条件触发**：契约原先每轮强制两路、且声明无豁免，本版改成四条客观条件——答案依赖本机没有的事实、改动或判断跨两处以上、两个各自能翻盘的未知、明确要求多角度；四条都不成立时单路做完，并须在回答里点名哪条为假。`lightningNudge` 的每轮文案改成同一组条件与同一句自检口径。原因：强制期实测出的是仪式性派发，而纯文本豁免又会被判成「看起来简单」——把判断改成可外部核对的条件，是这两端之间唯一站得住的位置。
+- **模型面板另发独立包**：`dsh-codex-ui-reasoning` 是同一份面板的独立精简版，给只想要模型选择与推理强度条、不要整套 Codex 界面的人单独安装；它自带样式表、根属性 `data-chatgpt-ui` 与注入层，可独立工作。两者都向单种类槽位 `conversation.input.model`（`priority: -10`）注册，同装必有一个被拒，所以是二选一，不要同装。
 
 ### 修正
 - **注入读实时值，不再吃注册快照**（`src/turbo.js` 的 `createEffortReader`）：拨动开关后下一步就用新状态；此前一直用进程启动那一刻的快照。
@@ -46,7 +31,7 @@
 - 样式与界面改动刷新页面即可；槽位注册与提示词注入的改动需要重启 DSH。
 
 ### 未包含
-- `tests/client-bundle.test.mjs` 仍按拆包前的行为断言（`:169` 的 `the model slot must be registered` 被约 45 个用例经 `mountControl()` 依赖），本版没有动测试：`node --test tests/client-bundle.test.mjs` 退出码 1。测试侧要与副包一起收尾。
+- `tests/turbo.test.mjs` 未随本版同步，实测 4 条红：`:154` 仍断言旧的「三豁免」措辞、`:249` 的长度上限（整块 12661 > 12000）、`:387` 与 `:576` 断言 effort 的 `update` 应返回 `turbo/effort-moved` 而实现已允许写入。本版没有为了让它们变绿而放宽任何断言。
 
 
 ## 1.1.0+0.2.1-alpha.3 — 兼容性修复
