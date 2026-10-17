@@ -4,7 +4,7 @@
 
 DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex-ui` 的衍生版），适配 **0.2.0-rc.2 Web**（CHANGELOG 另记录对照过 0.2.1-rc.2）；本包不声明 DSH 版本范围——DSH 的兼容门只认 `peerDependencies`，写死版本会让别的 DSH 版本装不上，兼容性改由实测对照保证（理由见〈安装前须知〉）；除界面外，还带一套通过系统提示词注入的编排契约——派发动作由模型按契约执行，插件本身不调用子代理工具。
 
-> **本包是完整版，输入框右下角那一整块（模型选择器 + 推理强度条 + 流星）都在里面，装上它不需要再装别的。** 另有独立插件 `dsh-codex-ui-reasoning`，给不想要整套 Codex 界面、只想要那个模型选择与强度条的人单独使用：它自带样式表、根属性与注入层，只装它也能工作。两者面板是同一份代码，都注册 `conversation.input.model` 这个**单一类槽位**（`priority: -10`），同时启用必有一个注册被拒，所以是二选一，不要同装。早期拆包版曾声明「必须一起装」，该叙述已作废——本仓库主干已把面板合回主包，时间线见 **[MIGRATION-2.0.zh.md](MIGRATION-2.0.zh.md)**。
+> **本包是完整版，同时我新增了子项目，单独的滑动推理强度条，输入框右下角那一整块（模型选择器 + 推理强度条 + 流星）都在里面。** 这独立插件 `dsh-codex-ui-reasoning`，给不想要整套 Codex 界面、只想要那个模型选择与强度条的人单独使用：它自带样式表、根属性与注入层，只装它也能工作。两者面板是同一份代码，都注册 `conversation.input.model` 这个**单一类槽位**（`priority: -10`），同时启用必有一个注册被拒，所以是二选一，不要同装。早期拆包版曾声明「必须一起装」，该叙述已作废——本仓库主干已把面板合回主包，时间线见 **[MIGRATION-2.0.zh.md](MIGRATION-2.0.zh.md)**。
 >
 > **This package is the complete one: the model selector, the reasoning-effort slider and the meteor effect all ship inside it — nothing else has to be installed.** `dsh-codex-ui-reasoning` is a separate, optional plugin for people who do not want the whole Codex skin but do want that picker and slider; it carries its own stylesheet, root attribute and injection layer, so it works on its own. Both packages mount the *same* panel code into the single-kind `conversation.input.model` slot at `priority: -10`, so enabling both means one registration is refused: pick one, do not install both. The 2.0.0 note that called the split breaking and required the companion is void — the main package has carried the full UI again since 2.0.1 / 2.0.2; see [MIGRATION-2.0.zh.md](MIGRATION-2.0.zh.md) for the timeline.
 
