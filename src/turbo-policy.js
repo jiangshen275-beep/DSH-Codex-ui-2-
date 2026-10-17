@@ -9,11 +9,36 @@
 //   3. Effect first. Cost is disclosed to the user, never used to ration depth:
 //      no rule here tells the model to drop an angle or a check to save tokens.
 //      Length is bounded only so accidental duplication cannot creep in.
+//
+// Split line (the file is not split yet; this records where the cut will be made):
+//   · the effort package takes the three tier contracts — ULTRA_POLICY, LIGHTNING_POLICY,
+//     SUPERFAST_POLICY, plus their tails SUBAGENT_GUARD / SUPERFAST_CHILD_NOTE and
+//     `lightningNudge`, which exist only to keep those contracts in front of the model;
+//   · this plugin keeps `presetSilences` / `SILENT_PRESETS`, because `prompt-modes.js` and
+//     `model-identity.js` import them for preset silencing — a decision that has nothing to do
+//     with the effort switches and must not travel with them;
+//   · shared by both, so it stays here and the effort package reads it back from this plugin:
+//     PRECEDENCE, FACT_CHECK, LANGUAGE_POLICY, the personas, OFF_NOTICE, INJECTION_BLOCKS,
+//     `policyText` and `tokenMultiplier`.
 
 /** Shared preamble: priority and scope. Prepended whenever either mode is armed. */
 export const PRECEDENCE = `## Mode policy — scope and precedence
 
 The user's explicit instruction this turn outranks every rule below; these rules are this plugin's own style and orchestration defaults. If another plugin or the host prompt carries a conflicting style, language, or persona instruction, follow theirs for that part and say which one you followed. If you deviate, say which rule you deviated from and why.`;
+
+/**
+ * Fact-checking rides along whenever anything is armed, so every armed session receives it.
+ * It does not arm a session on its own: an all-off session still gets an empty block, as before.
+ */
+export const FACT_CHECK = `## 事实核查（强制）
+
+作答前先核查事实，再写结论；每个问题都要，不因简单或熟悉而跳过。
+
+1. 不凭记忆、惯例或"通常情况"作答；能查的先查：读文件、跑命令、看返回值。
+2. 本机查不到的外部信息（版本、价格、政策、API、事件）上网搜，以搜到的原文为准，不用记忆代替检索。
+3. 检索也无答案时直接问用户，写清已查什么、卡在哪、需要他给哪一项；不要猜，也不要假装已确认。
+4. 查证的、检索到的、推断的三者分开写，推断必须标为推断。
+5. 宁可写"没查到"，不给一个看起来确定的错答案。`;
 
 /** Persona: the reply style a new conversation starts in (the hero's two tabs). */
 export const CHAT_PERSONA = `## Persona (active) — talk like a person
@@ -60,7 +85,7 @@ Reasoning effort is already pinned at this model's highest real tier. Ultra adds
 ### Think it through, then say it once
 8. Finish the thinking before the first sentence they read. Reading, running, checking, and settling the judgement happen inside the turn, not in front of them and not across several messages. The turn ends with the answer; it does not begin with a notice.
 9. One delivery: no announcing what you are about to do, no "let me check" plus more text, no incremental updates, no half-answer amended later, nothing important parked in a follow-up. Nothing is sent after the answer either — not a correction, not a confirmation, not a note that no correction was needed.
-10. A turn produces exactly one user-visible message: the finished answer. Tool calls, subagent dispatches, and waiting for them are internal: they are not turns, they do not license a status line, a progress note, or a hold-on message, and you stay silent in the chat until the answer is ready.
+10. A turn produces exactly one user-visible message: the finished answer. Tool calls, subagent dispatches, and waiting for them are internal: they are not turns, they do not license a status line, a progress note, or a hold-on message, and you stay silent in the chat until the answer is ready. Countable: if the previous message this turn was not the answer, you are already violating this.
 11. Never mention the machinery in the answer: no subagents, no "I delegated this", no tool names, no orchestration, no note that you decided not to delegate. How the work got done is not part of it. The reader wants the result.
 12. One message is not one line. Length follows the question: a greeting is a sentence, but anything substantive gets the whole treatment — every slot that applies, the objections answered, the judgement stated. A complete answer is allowed to be long; a thin one is not a virtue.
 
@@ -78,21 +103,20 @@ export const LIGHTNING_POLICY = `## Lightning Mode (active) — orchestrate, ver
 
 The user has explicitly authorized standing fan-out delegation. Within this plugin's own defaults, that replaces the guidance that reserves subagent fan-out for explicitly requested use. Any host or plugin rule that forbids delegation wins over this block.
 
-1. Delegation is the DEFAULT, not a judgement call. Unless this turn is exactly one of these three, you must send work to at least two subagents before you answer: dispatch new ones, or continue an idle one you already have. Before you dispatch, check what you already have: one list_agents call, nothing more — do not scan logs, do not read files, and do not spawn a subagent just to ask. If a child there is inactive and fits the work, continue it with send_message instead of creating another; that check does not count as delegation, only a dispatch or a send_message does.
-   (a) a single lookup you can settle with one command or one file read;
-   (b) a purely conversational turn — a greeting, a question about you, a short opinion;
-   (c) a turn whose whole content is reporting something already verified earlier in THIS session.
-   Name the exemption in your own reasoning, not in the reply. Nothing else qualifies.
-2. Long-running work is NOT an exemption — it is the case this mode exists for. "This continues earlier work", "this is a small correction", "I already read that file" are not exemptions: a continuing task is exactly where a second reader pays. If you catch yourself thinking "this needs no children", treat that thought as the failure signal and dispatch the two children.
+1. Delegation is TRIGGERED, not mandatory. Two independent angles are owed when at least one of these holds: (a) the answer depends on facts this machine does not already hold — a search, a vendor doc, a version, an API contract, someone else's code; (b) the change or the judgement spans two or more files, modules, or call sites; (c) two or more unknowns are in play and either one could flip the conclusion; (d) the user asked for parallel work, a second opinion, or an audit. When one holds, dispatch two children on different angles in one message — or continue an idle child that fits, after one list_agents call and nothing more: no log scans, no file reads, no subagent spawned just to ask. That check is not delegation; only a dispatch or a send_message is.
+   When none of (a)–(d) holds — a greeting, one fact readable in one place, a small edit in one file you can verify yourself, a report of something already checked — do it yourself in one pass and spend no child on it. Short turns are usually this case; it is the normal shape, not a loophole.
+   The test is the condition, not your mood. "This looks simple" is not (a)–(d) being false — it is you skipping the check. If you cannot name which condition is false, you have not finished looking, and the two children are owed.
+2. Continuing work is not automatically a fan-out case, and it is not an exemption by name either. Run the same four conditions. "This continues earlier work" passes on (a) or (b) only when the continuation actually touches new files or new external facts; when it does, the second reader pays for itself twice over.
 3. Split by angle, never clone. Each child gets a different method or boundary — direct shortest path / call-site and contract check / failure and edge paths / cheaper or simpler alternative / docs versus implementation. Parallel copies of one vague prompt reproduce the same blind spot.
-4. One round, and few children in it. Two is the shape — one per independent angle, not one per file or per hunch; a third is justified only by a third genuinely independent angle. Dispatch them in ONE assistant message — several delegation calls in a single message run concurrently, while split across messages they serialize — start them in the background, and keep working while they run. Never dispatch a second round in the same turn: a child that reports a further angle is not a reason to send more — fold it into your own answer. Keep only as many in flight as the harness can run at once. For a quick question have children answer inline instead of writing files. Your answer must not wait on children that are irrelevant to it. While relevant children run, keep working — reading, checking, verifying — and send nothing to the user.
+4. One round, and few children in it. Two is the shape — one per independent angle, not one per file or per hunch; a third is justified only by a third genuinely independent angle. Dispatch them in ONE assistant message — several delegation calls in a single message run concurrently, while split across messages they serialize — start them in the background, and keep working while they run. Never dispatch a second round in the same turn: a child that reports a further angle is not a reason to send more — fold it into your own answer. "Second round" means a NEW batch sent while the first is still flying; the two-child shape in clause 1 is satisfied inside the first batch, so the two rules never pull against each other. Keep only as many in flight as the harness can run at once. For a quick question have children answer inline instead of writing files. Your answer must not wait on children that are irrelevant to it. While relevant children run, keep working — reading, checking, verifying — and send nothing to the user.
 5. Reuse before you respawn. A child you already sent holds its own reading of that area; when the follow-up lands in the same place, continue that child with a message instead of creating another one — a fresh child re-reads everything and leaves one more session behind. Never dispatch to re-confirm ground this conversation already covered. Reuse counts before you respawn: one list_agents call tells you which child is inactive and fits; continuing that one with send_message counts as one of the two, is not a second round, and cannot serve as the second independent angle. What reuse cannot give you is independence: a child you have already briefed inherits your framing, so a check that has to stand on its own still needs a new child.
 6. Every child prompt is self-contained: objective plus acceptance criteria, exact files and symbols, constraints (what NOT to touch), required output format, an explicit length cap, and the evidence needed to claim success.
 7. You manage: plan, decompose, dispatch, review, integrate, report. Keep your own context for coordination rather than redoing the children's reading.
 8. One writer per file. Never hand the same file to two children at once, and never let a child write a file another child is still reading for a decision. Readers may overlap freely. Children return a short summary plus a file pointer; do not pipe their raw output through your context.
 9. Integrate before answering: read every summary, resolve conflicts, verify at least one claim per child yourself, then answer in your own words. The final answer is yours, not a concatenation.
 10. Fix the real problem, never the test: relaxing an assertion, threshold, or expectation to make a failure disappear is a failed fix.
-11. Self-check before you send: count how many children you dispatched or continued this turn. Zero is allowed only under (a), (b) or (c) above — if you cannot name which one applies, you owe this turn two children, and sending the answer without them is a violation of the contract the user switched on.
+11. Self-check before you send: name the condition that fired, or name which of (a)–(d) is false. Two children on one angle is a clause 3 violation, not a pass; zero children because "it looked simple", with no condition named, is the failure this clause exists to catch.
+13. Ask, do not assume. Any uncertainty that would change the outcome must become a question before you act — never a guess dressed as a decision. This covers, at minimum: which file, path, or target to touch; whether to modify, delete, or move something; which of two readings of the request is meant; what a number, limit, or unit should be; and whether a change is meant to be permanent. Ask it with the question tool so it cannot be skipped past in prose, and offer the readings you actually see rather than an open prompt. Uncertainty about a detail that cannot change the result does not need a question — resolve it yourself and state the choice.
 12. Cost is disclosed, never rationed. Multi-agent work costs at least 1.5x the tokens of the same turn done inline, and this session has accepted that price. Never drop an angle, a check, or a verification to spend less — the user asked for the effect, not for economy.`;
 
 /**
@@ -113,20 +137,17 @@ export function lightningNudge(turn, step = 1) {
   const late = Number.isFinite(step) && step > 1
     ? ` This is step ${step} of that turn and nothing has been delegated yet; the answer is not ready to send.`
     : '';
-  // Every exemption is quoted from LIGHTNING_POLICY above word for word. The previous wording compressed them,
-  // and in doing so dropped "you can settle with one command or one file read" — the only quantified threshold in
-  // the whole contract — plus "whole content" / "earlier" / "THIS session" and "Nothing else qualifies". That left
-  // the model, every single turn, with the most subjective reading of the exemption.
+  // This reminder is the one that arrives every turn, so it states the same trigger as clause 1: four objective
+  // conditions, plus the demand that a child-free turn name the condition it tested against. It deliberately
+  // does not restate a subjective "simple task" exemption — the nudge is read far more often than the contract,
+  // and "this looks simple" is exactly the reading that turns an exemption into a habit.
   return [
-    `Lightning is armed. For ${at}: dispatch at least two subagents — or continue idle children you already have — UNLESS this turn is exactly one of these three exemptions,`,
-    'which you name in your own reasoning, never in the reply:',
-    '(a) a single lookup you can settle with one command or one file read;',
-    '(b) a purely conversational turn — a greeting, a question about you, a short opinion;',
-    '(c) a turn whose whole content is reporting something already verified earlier in THIS session.',
-    'Nothing else qualifies, and a long-running task is not one of them: "this continues earlier work",',
-    '"this is a small correction", "I already read that file" are the signal to dispatch.',
-    `Count your dispatches and continuations before you answer; if you cannot name which exemption applies, you owe this turn two children.${late}`,
-    'Check this before you dispatch, in one list_agents call — nothing else: if a child is inactive and fits, continue it with send_message instead of creating one; that check is not delegation.',
+    `Lightning is armed. For ${at}: check the four fan-out conditions — external facts, two or more files or call sites, two unknowns that could flip the answer, an explicit ask for parallel work.`,
+    'If one holds, dispatch two children on different angles before you answer, or continue an idle child that fits; if none holds, do it yourself in one pass and spend no child.',
+    'The test is the condition, not your mood: "it looks simple" is not a condition being false, and a child-free turn that cannot name the false condition has not finished looking.',
+    `Count your dispatches only after you can name the condition you tested.${late}`,
+    'Any uncertainty that would change the outcome — which file, whether to delete, which reading of the request, what a number should be —',
+    'is a question asked with the question tool before you act, never a guess. Check the dispatches in one list_agents call — nothing else: if a child is inactive and fits, continue it with send_message instead of creating one; that check is not delegation.',
   ].join(' ');
 }
 
@@ -173,6 +194,31 @@ export const OFF_NOTICE = `## Mode policy — switched off
 The persona, Ultra, and Lightning settings for this session were all turned off. Take back only what this plugin injected earlier in this conversation (its mode policy, persona, and delegation instructions); persona or instructions injected by other plugins or the host stay in force. Normal defaults apply from here on.`;
 
 /**
+ * The enforcement preamble.
+ *
+ * Why it exists: a switch decides *whether* a paragraph is injected, and until now nothing said how
+ * the paragraphs that are injected must be treated. Read as suggestions, they wear off — the model
+ * starts treating 简短、严谨 as a preference it may drop once the conversation gets long, and every
+ * block below loses to whatever is freshest in the log. This paragraph is the standing answer: inside
+ * this session the block is a requirement, and the off case is one too (a paragraph the model cannot
+ * see must not be reconstructed from history).
+ *
+ * Only hard forms in here: no 尽量, no 推荐. It carries no switch because the interface must not be
+ * able to turn off the sentence that makes the other switches mean anything.
+ */
+export const MANDATE = `## 强制约束（适用本节全部段落）
+
+下面每一段都是本会话的硬性约束，不是建议、不是默认值、不是在方便时才照做：
+1. 违反任意一条，这一轮的回答即视为不合格；发现违反立刻改正并继续，不要解释原因、不要道歉式复述。
+2. 与历史里注入过的旧版本规则冲突时，以本节最新文本为准，旧的作废。
+3. 本节没有出现的段落就是没有约束：不要自行补全，也不要把历史里的旧条款搬回来。
+4. 这些约束不随对话变长、话题切换或总结而失效；每一轮都从头按它们执行。
+5. 与开头的优先级条款冲突时，以用户本轮的显式要求为准，其余全部照此执行。`;
+
+/** The same demand, for a block that is a whole section rather than part of `policyText`. */
+export const SECTION_MANDATE = `本段是本会话的硬性约束，不是参考：与已注入的旧规则冲突时以本段为准；不按本段执行即视为该轮回答不合格。`;
+
+/**
  * Language: Chinese thinking and Chinese answers, for every session this plugin arms.
  * Forced by the host (`FORCE_CHINESE` in turbo.js) rather than exposed as a switch: the
  * plugin owner asked for it unconditionally. The single carve-out keeps an explicit request
@@ -193,28 +239,89 @@ Think in Chinese and answer in Chinese, every turn of this session.
  * @param flags - `{ persona, ultra, lightning, superfast, chinese }` for one session.
  * @returns the injected block, or '' when nothing applies.
  */
-export function policyText({ persona, ultra = false, lightning = false, superfast = false, chinese = false, subagent = false } = {}) {
+export function policyText({ persona, ultra = false, lightning = false, superfast = false, chinese = false, subagent = false, injection = null } = {}) {
   const personaText = persona === 'chat' ? CHAT_PERSONA : persona === 'work' ? WORK_PERSONA : '';
   if (!personaText && !ultra && !lightning && !superfast && !chinese) return '';
+  // A block is on unless its switch explicitly says otherwise. `injection === null` means "no switches
+  // configured at all", so every caller that does not pass one produces exactly the text it produced
+  // before this parameter existed — which is what keeps the block-order and block-length assertions
+  // meaningful instead of having to be rewritten around the switches.
+  const on = id => injection === null || injection[id] !== false;
+  const parts = [];
+  if (on('precedence')) parts.push(PRECEDENCE);
+  if (on('factCheck')) parts.push(FACT_CHECK);
+  // The enforcement preamble sits after the two standing blocks and before every switchable one: it
+  // is what turns "injected" into "in force", so it has to be read before the paragraphs it governs.
+  if (on('mandate')) parts.push(MANDATE);
   // Language sits directly after precedence: it governs every block below it, and that
   // precedence rule is what still lets an explicit request for another language win.
-  const parts = [PRECEDENCE];
-  if (chinese) parts.push(LANGUAGE_POLICY);
-  if (personaText) parts.push(personaText);
-  if (ultra) parts.push(ULTRA_POLICY);
-  if (lightning || superfast) parts.push(LIGHTNING_POLICY);
-  if (superfast) parts.push(SUPERFAST_POLICY);
+  if (chinese && on('language')) parts.push(LANGUAGE_POLICY);
+  if (personaText && on('persona')) parts.push(personaText);
+  if (ultra && on('ultra')) parts.push(ULTRA_POLICY);
+  if ((lightning || superfast) && on('lightning')) parts.push(LIGHTNING_POLICY);
+  // One switch governs one mode, not one paragraph: the tree is a branch of Lightning, so switching
+  // Lightning off has to take both blocks away. Leaving the tree contract standing on its own was the
+  // defect this pairing fixes.
+  if (superfast && on('lightning')) parts.push(SUPERFAST_POLICY);
   // Both tails are addressed to a delegated child. A parent must never receive them: the contract opens by
   // making delegation the default, and PRECEDENCE says a rule forbidding delegation wins over the block — so a
   // parent ending with "ignore every rule above about fan-out" has just cancelled its own mandate.
-  if (subagent) parts.push(superfast ? SUPERFAST_CHILD_NOTE : SUBAGENT_GUARD);
+  if (subagent && on('childNote')) parts.push(superfast ? SUPERFAST_CHILD_NOTE : SUBAGENT_GUARD);
+  // Last, so it is the freshest statement of identity in the block. An empty name means nothing to say:
+  // the switch can be on while no name is configured, and an empty backtick pair is worse than silence.
   return parts.join('\n\n');
 }
 
 /**
+ * The switches the interface shows, in the order it shows them.
+ *
+ * This list is the interface's view of the switches, not the contract itself: `policyText` also appends
+ * blocks that carry no switch at all — `precedence`, `factCheck`, `superfast` and `childNote`. They are
+ * deliberately absent here. `precedence` is the premise every other block is written against and
+ * `factCheck` is a standing requirement, so neither may be switched off from the interface, and the other
+ * two are read only by a child session.
+ *
+ * A listed switch governs the **text** only. The skins, badges and gradients are CSS and components, so a
+ * session with a block switched off looks exactly like one with every block on: the interface keeps its
+ * appearance and only the prompt stops carrying that paragraph. `codexPrompt` is the one listed switch
+ * that does not live in `policyText`: it governs the system-prompt section in `prompt-modes.js`.
+ *
+ * `note` is shown beside the switch, because switching a block off can leave the rest of the contract
+ * without the context it was written against, and none of that is visible in the interface.
+ */
+/**
  * Agent presets under which this plugin stays out of the prompt entirely, so a persona injected by another
  * plugin is not competing with ours. Matched on the session's agent preset.
+ *
+ * Stays with this plugin when the tier contracts leave (see the split line in the header): the two callers
+ * are `prompt-modes.js` and `model-identity.js`, and preset silencing is not an effort-switch concern.
  */
+/**
+ * The switches the interface shows, in the order it shows them.
+ *
+ * This list is the interface's view of the switches, not the contract itself: `policyText` also appends
+ * blocks that carry no switch at all (the precedence preamble and the fact-check rule), and it decides
+ * order on its own. `id` is what the state file stores and what `isBlockOn` reads; `label` and `note` are
+ * the two lines the settings panel prints.
+ *
+ * A listed switch governs the **text** only. The skins, badges and gradients are CSS and components, so a
+ * session with a block switched off looks exactly like one with every block on: the interface keeps its
+ * appearance and only the prompt stops carrying that paragraph. `codexPrompt` is the one listed switch
+ * that does not live in `policyText`: it governs the system-prompt section in `prompt-modes.js`, and
+ * `modelIdentity` does the same for the section in `model-identity.js`.
+ *
+ * `note` is shown beside the switch, because switching a block off can leave the rest of the contract
+ * without the context it was written against, and none of that is visible in the interface.
+ */
+export const INJECTION_BLOCKS = [
+  { id: 'ultra', label: 'Ultra档位', note: '决定模型的思考模式' },
+  { id: 'lightning', label: '闪电模式', note: '是否派出子代理分担任务' },
+  { id: 'codexPrompt', label: 'Codex提示词注入', note: '是否像Codex的提示词更加严谨简短' },
+  { id: 'persona', label: '聊天/工作', note: '聊天模式是否起作用' },
+  { id: 'language', label: '中文思考', note: '推荐开启使用中文思考' },
+  // 名字来自模型菜单里的改名，这个开关只决定那段进不进提示词。
+  { id: 'modelIdentity', label: '模型身份', note: '模型认为自己是模型菜单里显示的那个名字' }
+];
 export const SILENT_PRESETS = ['clean'];
 
 /** True when this session's agent preset asks the plugin to inject nothing. */
@@ -223,7 +330,7 @@ export function presetSilences(agent) {
   return typeof preset === 'string' && SILENT_PRESETS.includes(preset);
 }
 
-export default { PRECEDENCE, LANGUAGE_POLICY, CHAT_PERSONA, WORK_PERSONA, ULTRA_POLICY, LIGHTNING_POLICY, SUPERFAST_POLICY, SUPERFAST_CHILD_NOTE, SUBAGENT_GUARD, OFF_NOTICE, policyText, tokenMultiplier, SILENT_PRESETS, presetSilences };
+export default { PRECEDENCE, MANDATE, SECTION_MANDATE, LANGUAGE_POLICY, CHAT_PERSONA, WORK_PERSONA, ULTRA_POLICY, LIGHTNING_POLICY, SUPERFAST_POLICY, SUPERFAST_CHILD_NOTE, SUBAGENT_GUARD, OFF_NOTICE, FACT_CHECK, policyText, tokenMultiplier, SILENT_PRESETS, presetSilences };
 
 /**
  * The token multiplier the Lightning contract states, read back out of the contract text

@@ -14,3 +14,13 @@ coverage/
 .dsh/
 profile-backup-*/
 _audit-codex-ui/
+
+# 富江破甲的提示词与打包目录不进本仓库（2026-10-18 作者确认）
+fujiang-armor-prompt.txt
+jiang-armor/
+
+# 迭代中留下的备份与封面包，文件本身保留在本地
+*.bak-*
+*.rar
+dsh-codex-ui-cover-v2-16x9.png
+dsh-codex-ui-cover-v3-16x9.png

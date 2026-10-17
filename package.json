@@ -1,6 +1,6 @@
 {
   "name": "dsh-codex-ui",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Codex-style interface and prompt modes for DeepSeek Harness",
   "type": "module",
   "main": "./lib/index.js",
@@ -13,21 +13,20 @@
   },
   "files": [
     "lib",
-    "assets",
     "src",
-    "scripts",
+    "assets",
+    "locale",
     "prompts",
+    "scripts",
     "cordis.patch.yml",
     "CHANGELOG.md",
     "LICENSE",
     "README.md",
     "README.zh.md",
-    "start-ui.ps1",
+    "MIGRATION-2.0.zh.md",
+    "THIRD-PARTY-NOTICES.md",
     "RESOURCE-REFERENCE.zh.md",
-    "tests",
-    "SYSTEM-PROMPT-PLAN.zh.md",
-    "locale",
-    "THIRD-PARTY-NOTICES.md"
+    "SYSTEM-PROMPT-PLAN.zh.md"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -54,14 +53,6 @@
   },
   "dependencies": {
     "zod": "4.6.5"
-  },
-  "peerDependencies": {
-    "@deepseek-ai/dsh": "0.2.0-rc.2"
-  },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/dsh": {
-      "optional": true
-    }
   },
   "license": "MIT",
   "author": "jiangshen275-beep",

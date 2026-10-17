@@ -1,22 +1,123 @@
-import { presetSilences } from './turbo-policy.js';
+import { presetSilences, SECTION_MANDATE } from './turbo-policy.js';
+import { isBlockOn } from './injection-state.js';
+import { BUILTIN_ID, deletePersona, ensurePersonasDir, listPersonas, readPersonaFile, resolvePersonaId, textFor, writePersona } from './personas.js';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 
 export const MODE_KEY = 'cgPromptMode';
 export const MODE_EVENT = 'chatgpt-ui/prompt-mode';
+export const PERSONA_EVENT = 'chatgpt-ui/personas';
+export const PERSONA_PATH = '/api/chatgpt-ui/personas';
+/**
+ * The prompt this plugin used to hard-code. Still exported because `tests/prompt-modes.test.mjs` and
+ * older consumers import it, and still the seed source: `apply` hands it to `ensurePersonasDir`, so
+ * the first `codex.md` on a machine is written from exactly this text.
+ */
 export const CODEX_PROMPT = readFileSync(new URL('../prompts/codex.txt', import.meta.url), 'utf8').trim();
-const modeSchema = z.enum(['DeepSeek', 'Codex']);
+// A persona id is now any file stem, so the stored value can no longer be an enum. What keeps a
+// stale or mistyped value out is the whitelist in `selectMode`, not the schema: the projection has to
+// parse whatever an older build persisted (`DeepSeek`, `Codex`), or one bad row would stop every
+// `apply` that follows this one from ever registering.
+const modeSchema = z.string().min(1).max(64);
 const selectionSchema = z.object({ sessionId: z.string().min(1).max(256), mode: modeSchema.optional(), action: z.enum(['read', 'select']).default('select') }).strict();
 const requestSchema = z.object({ type: z.literal('client-request'), rpcId: z.string().min(1).max(256), method: z.literal(MODE_EVENT), payload: z.unknown() }).strict();
+// The persona endpoint accepts the same envelope but does not pin `method`: the client half of this
+// feature is shipped separately and a mismatch there would 404 the whole menu.
+const personaRequestSchema = z.object({ type: z.literal('client-request'), rpcId: z.string().min(1).max(256), method: z.string().min(1).max(128).optional(), payload: z.unknown() });
+const personaPayloadSchema = z.object({
+  action: z.enum(['create', 'delete', 'list', 'read', 'update']),
+  id: z.string().min(1).max(128).optional(),
+  name: z.string().max(80).optional(),
+  description: z.string().max(2000).optional(),
+  text: z.string().max(200000).optional(),
+  // Sampling parameters belong to the persona, so they travel with its file rather than with the
+  // session. Numbers only: `writePersona` does the range checking and drops a bad value with a warning
+  // instead of failing the request, because one out-of-range number must not cost the whole edit.
+  temperature: z.number().nullable().optional(),
+  top_p: z.number().nullable().optional(),
+  max_tokens: z.number().nullable().optional(),
+});
+
+/** `name` -> file stem: lowercase, spaces to dashes, and the characters a Windows file name rejects. */
+function slugify(name) {
+  return String(name ?? '')
+    .toLowerCase()
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/^[\s-]+|[\s-]+$/g, '');
+}
+
+/**
+ * The row in the `sessions` table that remembers the persona the user picked last.
+ *
+ * Why a row and not a global key: this unit is declared `hasGlobal: false`, and that declaration is
+ * not a lever — the storage layer builds the unit from it, so flipping it would discard every stored
+ * mode. Why not "take the newest session row instead": a row is only `id -> mode`, there is no
+ * timestamp to sort by, and stamping one would change the value shape `stateVersion: 1` promises to
+ * keep readable for the rows already on disk. Collision: every Session id the host mints carries a
+ * `session-` segment (`session-<n>` from the store, `session-<uuid>` on disk), the purge route's own
+ * `SESSION_ID` guard requires a leading alphanumeric, and the workspace UI only reuses ids it already
+ * holds — nothing in the product names a Session `__last__`. Pollution: every reader of this table
+ * looks a row up by Session id, so the row is dropped at load and never reaches the `modes` map.
+ */
+const LAST_MODE_KEY = '__last__';
+/** The id every unset path has always fallen back to; `codex` always resolves. */
+const DEFAULT_MODE = 'Codex';
+
+/**
+ * The persona the user picked last, mirrored from `sessions[LAST_MODE_KEY]`, or null before `apply`
+ * has read the unit — being null is what makes a brand-new profile answer `Codex`.
+ *
+ * Module-level because `init` is synchronous and is called while the registry builds a Session's cell,
+ * long after `apply` loaded the row, and without a handle to the unit.
+ */
+let lastMode = null;
+
+/**
+ * The persona one live Session resolves to, or null before `apply` has run. Exported as a function
+ * rather than as the `modes` map: that map is activation state, and handing it out would let a
+ * reader mutate the record the plugin writes.
+ */
+let modeLookup = null;
+export function currentModeOf(session) {
+  if (typeof modeLookup !== 'function' || !session) return null;
+  try { return modeLookup(session); } catch { return null; }
+}
+
+/**
+ * `init`'s answer: a new Session continues on the persona the user chose last.
+ *
+ * The stored id is re-resolved rather than trusted. The persona it names may have been deleted or
+ * disabled since it was chosen, and answering with such an id would both inject nothing (it is not in
+ * the offered set) and make the menu display a persona that no longer exists. `resolvePersonaId` is
+ * the same whitelist `selectMode` checks on the way in and it is synchronous; `Codex` is the fallback
+ * because it is the one id that always resolves, so this function cannot itself fail.
+ */
+function defaultMode() {
+  if (typeof lastMode !== 'string' || lastMode.length === 0) return DEFAULT_MODE;
+  try {
+    // The projection's own view schema caps an id at 64 characters, while `resolvePersonaId` returns
+    // the stem of whatever markdown file is on disk — including one the user named by hand with more
+    // than 64. A value that long would make `snapshot()` throw, and the query layer wraps that into
+    // SESSION_QUERY_CORRUPT_SESSION for the entire session list, so the length is checked here rather
+    // than trusted from the filename.
+    const resolved = resolvePersonaId(lastMode);
+    if (typeof resolved !== 'string' || resolved.length === 0 || resolved.length > 64) return DEFAULT_MODE;
+    return resolved;
+  } catch {
+    return DEFAULT_MODE;
+  }
+}
 
 // Read legacy mode events; all new choices use a dedicated durable KV unit.
-// The default mode is Codex: a session with no stored choice (neither the KV record nor a legacy
-// event) resolves to Codex, so the Codex prompt section is appended from the first turn on.
+// The default mode is the last persona the user picked, and Codex while none has been picked: a
+// session with no stored choice of its own (neither the KV record nor a legacy event) resolves to it,
+// so its prompt section is appended from the first turn on.
 export const modeProjection = {
   key: MODE_KEY,
   stateSchema: modeSchema,
   stateVersion: 1,
-  init: () => 'Codex',
+  init: () => defaultMode(),
   apply: (state, event) => event.type === MODE_EVENT ? modeSchema.parse(event.data.mode) : state,
   wire: { viewSchema: modeSchema, view: state => state },
 };
@@ -24,12 +125,38 @@ export const modeProjection = {
 export const inject = ['systemPrompt', 'sessionProjections', 'sessionController', 'sessions', 'connection', 'storage', 'storage.backend.json'];
 
 export async function apply(ctx) {
+  // First, because the section below reads the directory on every turn: create it and write the
+  // Codex seed once. A failure here only costs the files; the fallback row in `loadPersonas` keeps
+  // the default style working, so it must never stop the rest of `apply` from running.
+  try {
+    await ensurePersonasDir(CODEX_PROMPT);
+  } catch (error) {
+    console.warn(`[dsh-codex-ui] personas directory unavailable: ${String(error)}`);
+  }
   const unit = await ctx.storage.backend.get('json').kv.open({ name: 'chatgpt_ui_modes', version: 1, tables: ['sessions'], hasGlobal: false });
   const saved = (await unit.loadAll()).tables.sessions;
-  const modes = new Map(Object.entries(saved).map(([id, mode]) => [id, modeSchema.parse(mode)]));
+  // The last-used row seeds `init`. Read here and skipped below, because `modes` holds Sessions and
+  // every reader of that map looks an entry up by a real Session id. A missing, malformed or
+  // over-long row leaves `lastMode` null, which `defaultMode` answers with `Codex` — a first boot
+  // must never hand the projection an undefined state.
+  const storedLast = modeSchema.safeParse(saved[LAST_MODE_KEY]);
+  lastMode = storedLast.success ? storedLast.data : null;
+  // One unreadable row is skipped rather than thrown: `lib/index.js` awaits this function before it
+  // registers balance, turbo, purge and identity, so a single bad value would disable all of them.
+  const modes = new Map(Object.entries(saved).flatMap(([id, mode]) => {
+    if (id === LAST_MODE_KEY) return [];
+    const parsed = modeSchema.safeParse(mode);
+    if (parsed.success) return [[id, parsed.data]];
+    console.warn(`[dsh-codex-ui] prompt mode row ignored: ${id} -> ${String(mode).slice(0, 64)}`);
+    return [];
+  }));
   let writes = Promise.resolve();
   ctx.effect(() => async () => { await writes.catch(() => {}); await unit.close(); });
   const modeFor = session => modes.get(session.id) ?? ctx.sessionProjections.stateOf(session, MODE_KEY) ?? 'Codex';
+  // Hand the same resolution to `persona-notice.js`: it has to answer "which persona is in force
+  // for this session right now" on every pre-step, and duplicating the lookup would let the two
+  // answers drift (the durable row and the projection are updated by different callers).
+  modeLookup = modeFor;
   ctx.sessionProjections.register(modeProjection);
   ctx.on('session/created', session => {
     const parent = session.header.isSeeded && session.header.parentSession;
@@ -43,8 +170,22 @@ export async function apply(ctx) {
     name: 'chatgpt-ui:codex-style',
     order: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_SUFFIX') + 1,
     interpolate: false,
-    // An empty section renders no bytes: only a session explicitly on DeepSeek uses the native prompt.
-    text: ({ agent }) => agent && !presetSilences(agent) && modeFor(agent.session) === 'Codex' ? CODEX_PROMPT : '',
+    // An empty section renders no bytes. The body comes from the persona the session resolved to:
+    // the built-in `DeepSeek` row carries the empty string, which is exactly "use the native prompt".
+    // The `codexPrompt` switch can hold the section back as well. That switch is published by
+    // `turbo.js` and reads off only when it is explicitly off, so a host that never loaded the
+    // switches keeps this text.
+    text: ({ agent }) => {
+      if (!agent || presetSilences(agent) || !isBlockOn('codexPrompt')) return '';
+      // A persona file is somebody's prose, so on its own it reads as advice. The enforcement line is
+      // prefixed rather than appended: it has to be read before the style it demands. An empty body
+      // still renders no bytes — the built-in `DeepSeek` row is exactly "use the native prompt".
+      // A persona file that cannot be read must leave the native prompt alone, never fail assembly.
+      try {
+        const body = textFor(modeFor(agent.session));
+        return body === '' ? '' : `${SECTION_MANDATE}\n\n${body}`;
+      } catch { return ''; }
+    },
   });
 
   // Use DSH's authenticated Connection carrier; no extra HTTP server or token.
@@ -63,6 +204,10 @@ export async function apply(ctx) {
         return { ok: true, value: { sessionId, mode: modes.get(sessionId) ?? modeSchema.parse(legacy ?? 'Codex') } };
       }
       if (mode === undefined) return fail('prompt-mode/invalid', '缺少模式参数。');
+      // The id has to name a persona this build can inject. Rejecting it here — before `resolveAgent`,
+      // before the KV write — is what keeps a stale or mistyped value out of both the session row and
+      // the durable record, while the schema itself stays permissive enough to read what 1.x stored.
+      if (resolvePersonaId(mode) === null) return fail('prompt-mode/unknown', '未知的回复模式。');
       const resolved = await ctx.sessionController.resolveAgent(sessionId);
       if (resolved.error) return fail(resolved.error.code, resolved.error.message, resolved.error.details);
       const { agent } = resolved;
@@ -74,6 +219,13 @@ export async function apply(ctx) {
         const write = writes.catch(() => {}).then(async () => {
           await unit.putRecord('sessions', sessionId, mode);
           modes.set(sessionId, mode);
+          lastMode = mode;
+          // The row above is what this Session answers with; the last-used row only tells the next
+          // new Session where to start, so its failure is logged instead of turned into an error —
+          // the switch has already committed, and reporting failure here would leave the menu
+          // disagreeing with the host about a mode that is in fact in force.
+          await unit.putRecord('sessions', LAST_MODE_KEY, mode)
+            .catch(error => ctx.logger?.warn?.(`prompt mode last-used save failed: ${error.message}`));
         });
         writes = write;
         await write;
@@ -83,6 +235,60 @@ export async function apply(ctx) {
       return fail('prompt-mode/failed', error.message || String(error));
     }
   }
+  /**
+   * The persona menu: one route for list / create / update / delete. Every failure is a value, never a
+   * throw, so a bad payload cannot take the carrier down with it.
+   */
+  function handlePersonas(payload) {
+    const fail = (code, message) => ({ ok: false, error: { code, message } });
+    const parsed = personaPayloadSchema.safeParse(payload);
+    if (!parsed.success) return fail('persona/invalid', '人设参数无效。');
+    const { action, id, name, description, text, temperature, top_p, max_tokens } = parsed.data;
+    try {
+      if (action === 'list') return { ok: true, value: { personas: listPersonas() } };
+      // Editing a persona needs its body, and a persona body can be thousands of characters — far
+      // too much to ship inside every `list`. The editor reads the one it is about to open, and it
+      // reads it from the file rather than from the list: `resolvePersonaId`/`textFor` answer "what
+      // gets injected", so they hide a disabled persona, and being disabled is not being deleted —
+      // a hidden persona still has to open in the editor, or the user can never re-enable it. The
+      // file read also returns the stem the file really has on disk, which is the id the menu knows.
+      if (action === 'read') {
+        const found = readPersonaFile(id ?? '');
+        if (found === null) return fail('persona/not-found', '人设不存在。');
+        return { ok: true, value: found };
+      }
+      if (action === 'create') {
+        const label = (name ?? '').trim();
+        if (label === '') return fail('persona/invalid', '缺少人设名称。');
+        const stem = slugify(label);
+        if (stem === '') return fail('persona/invalid', '人设名称无法生成标识。');
+        // The id travels back as the `mode` value, whose schema caps at 64: a longer one would be
+        // creatable and unselectable at the same time.
+        if (stem.length > 64) return fail('persona/invalid', '人设标识过长（最多 64 字符）。');
+        // Case-insensitive on purpose: `Codex` and `codex.md` are the same persona.
+        if (resolvePersonaId(stem) !== null) return fail('persona/exists', '同名或同标识的人设已存在。');
+        return { ok: true, value: { id: writePersona({ id: stem, name: label, description, text, temperature, top_p, max_tokens }).id } };
+      }
+      if (action === 'update') {
+        // Protection before existence: the built-in row has no file, so a file lookup would report it
+        // missing and the caller would never learn that it is protected.
+        if (String(id ?? '').trim().toLowerCase() === BUILTIN_ID.toLowerCase()) return fail('persona/protected', '内置 DeepSeek 人设不可修改。');
+        const target = readPersonaFile(id ?? '');
+        if (target === null) return fail('persona/not-found', '人设不存在。');
+        return { ok: true, value: { id: writePersona({ id: target.id, name, description, text, temperature, top_p, max_tokens }).id } };
+      }
+      // Explicit rather than a fallthrough: this arm used to be the tail of the function, so any
+      // action it did not recognise arrived here and deleted the persona it was given.
+      if (action === 'delete') {
+        deletePersona(id ?? '');
+        return { ok: true };
+      }
+      return fail('persona/invalid', '未知的人设操作。');
+    } catch (error) {
+      return fail(error?.code ?? 'persona/failed', error?.message || String(error));
+    }
+  }
+
   ctx.connection.fetch.register({
     path: '/api/chatgpt-ui/prompt-mode', methods: ['POST'], requestBody: 'buffered',
     async fetch(request) {
@@ -93,4 +299,17 @@ export async function apply(ctx) {
       return Response.json({ type: 'server-response', rpcId: envelope.rpcId, result });
     },
   });
+  // The persona menu rides a second route. It is registered through the soft `connection` dependency
+  // rather than directly: the carrier is already hard-required above, and a host that composes none
+  // must keep working with the menu simply unrouted (a bare `ctx.inject` check costs nothing).
+  ctx.inject?.(['connection'], scope => scope.connection.fetch.register({
+    path: PERSONA_PATH, methods: ['POST'], requestBody: 'buffered',
+    async fetch(request) {
+      let envelope;
+      try { envelope = personaRequestSchema.parse(await request.json()); }
+      catch { return Response.json({ error: 'Invalid persona request' }, { status: 400 }); }
+      const result = handlePersonas(envelope.payload);
+      return Response.json({ type: 'server-response', rpcId: envelope.rpcId, result });
+    },
+  }));
 }

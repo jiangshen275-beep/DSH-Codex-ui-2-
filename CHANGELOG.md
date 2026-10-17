@@ -1,3 +1,70 @@
+## 2.0.1 / 2.0.2 — 仅版本号调整
+
+- 移除 `peerDependencies` 声明及其空的 `peerDependenciesMeta`。
+  原因不是声明无效，而是它有效、且是一道硬门槛：DSH 的兼容门只读 `peerDependencies`、按 `includePrerelease` 判 semver，
+  且不读 `peerDependenciesMeta`（标 `optional` 也不免除拦截）；写死 `0.2.0-rc.2` 会让别的 DSH 版本装不上，
+  只能逐个 `allow-version` 精确豁免（1.1.0 那版在 `0.2.1-alpha.3` 上就需 `--accept-risk`）。功能与 2.0.0 完全相同。
+
+## 2.0.0 — 拆包（破坏性）
+
+**破坏性版本。** 输入框右下角那一整块（模型选择器 + 推理强度条 + 流星）已从本包移出，成为独立插件。主包单独装会缺块 —— 右下角退回 DSH 原生模型选择器，没有强度条、没有流星；两个包是互补关系，要一起装。升级步骤、分工表、`promptInjection: false` 配置片段与回滚办法见 [MIGRATION-2.0.zh.md](MIGRATION-2.0.zh.md)。
+
+### 破坏性变更
+- **不再注册 `conversation.input.model` 槽位**（`src/model-ui.js` 删 13 行）。右下角交还宿主；这个槽位原先带 `priority: -10`，随注册一起撤掉。
+- **`src/style.css` 删掉 79 条已搬走的 `.cg-model-*` 规则**：148,820 → 71,360 字节。现在文件里 `.cg-model-*` 选择器 **0 条**，只剩 `@keyframes cg-model-enter` 这一条动画名（`.cg-account-menu` 还在用它）。
+- **effort 写侧下线**（`src/turbo.js`）：`/api/dsh-codex-ui/turbo` 收到 Ultra / 闪电 / 超快任一字段时不再落盘，改为 `fail('turbo/effort-moved', '推理档位开关已迁移到 dsh-codex-ui-reasoning 插件，此路由不再写入。')`。读侧保留，注入器照旧从 `storages/codex-ui-effort.json` 读三档状态。
+- **`codex-ui-effort.json` 的唯一写入方变成副包**，本包只读。两个进程各写一份快照、后写的整个覆盖先写的 —— 这正是拆开要去掉的东西。
+- 旧记录 `storages/codex-ui-turbo.json` 拆成 `codex-ui-persona.json` + `codex-ui-effort.json`，原文件改名为 `.migrated`（重命名，不删数据）；**改名要等 `codex-ui-effort.json` 真的存在**，所以没装副包时旧记录原样保留、下次启动重试。
+
+### 修正
+- **注入读实时值，不再吃注册快照**（`src/turbo.js` 的 `createEffortReader`）：拨动开关后下一步就用新状态；此前一直用进程启动那一刻的快照。
+- **文件身份比对再重读**：每次取值前做一次 `statSync`（只读元数据，不读内容），以 `` `${stats.ino}:${stats.mtimeMs}:${stats.size}` `` 判断文件是否真的变了，变了才重新解析。带 `ino` 是因为写入方用「临时文件 + rename」整份替换，同一毫秒内两次写也会换 inode；`mtimeMs` 在 NTFS 上粒度是 100 ns，两者互补。没用 `fs.watch`：它的回调是异步的，步骤仍可能取到旧缓存，而且监听器附加失败会永久失效。
+- **模型身份段落去掉"厂商"**（`src/model-identity.js`）：段落标题由 `## 模型身份（运行环境指定）` 改为 `## 你是谁`，"厂家"这个信息位不再出现（它只能靠猜测或检索填上，填出来的也没人核对过），自我介绍写成「我是「名字」」+ 一段能力说明；"不要把检索过程、搜索结果清单、报道标题或链接写进正文"这句保留。
+
+### 保留
+侧边栏与工作区导航、人设 / 回复模式（`CHAT_PERSONA` / `WORK_PERSONA`）、强制中文、`OFF_NOTICE`、`presetSilences`、余额、会话清理、模型身份提示词段落、峰谷徽标（仍注册 `conversation.session.header.actions`）、皮肤（`data-chatgpt-ui`）。
+
+### 兼容性
+- 对照 DSH **0.2.0-rc.2 / 0.2.1-rc.2**；CSS 依赖这两版的类名，换版本需要重新校验。
+- `package.json` 已无 `peerDependencies`（只剩空对象 `peerDependenciesMeta`），安装不再被版本门拦下 —— 兼容性由上一条的实测对照保证，不由声明保证。
+- 副包 `dsh-codex-ui-reasoning` 单独发版、单独升级，不在本包的 `files` 里。
+- 样式与界面改动刷新页面即可；槽位注册与提示词注入的改动需要重启 DSH。
+
+### 未包含
+- `tests/client-bundle.test.mjs` 仍按拆包前的行为断言（`:169` 的 `the model slot must be registered` 被约 45 个用例经 `mountControl()` 依赖），本版没有动测试：`node --test tests/client-bundle.test.mjs` 退出码 1。测试侧要与副包一起收尾。
+
+
+## 1.1.0+0.2.1-alpha.3 — 兼容性修复
+
+> 版本号里的 `+` 是 semver 的**构建元数据**：它不参与版本比较，`1.1.0+0.2.1-alpha.3` 与 `1.1.0` 等价。
+> 因此这个包**不能作为新版本发布到 npm 注册表**（会被判为版本已存在），只能作为 Release 资产分发。
+
+针对 **dsh 0.2.1-alpha.3** 的兼容性修复。宿主在这一版换了 CSS 模块哈希前缀（`Jd07YW_*` → `wSkVaW_*`），
+本插件按旧前缀写的那批规则因此从"静默"变成"全部命中"，把宿主的新布局按旧假设重排。
+
+### 修正
+- **删除 18 条引用 `wSkVaW_*` 的规则**。它们在 0.2.0-rc.2 上匹配不到任何元素（那一版用 `Jd07YW_*`），
+  所以删掉不影响既有表现；在 0.2.1-alpha.3 上却会命中并产生一条浮在输入卡片外的灰带
+  （工作区行被强制 `order:5` + 铺底 + 下圆角）。删除后两侧均回到宿主原生布局。
+- **补回 `.cg-tabs` 的深色底**。它原本与宿主类名并列写在同一条规则里，剔除宿主那半时被连坐删掉；
+  现单独保留：`html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-tabs { background: #292929; }`。
+
+### 验证方式
+以 0.2.0-rc.2 的 hero 子树为基准，逐项比对 0.2.1-alpha.3 上的同一子树：
+
+| 项 | rc.2 基准 | 修复后 0.2.1-alpha.3 |
+| --- | --- | --- |
+| hero 宽 | 744 | 744 |
+| 工作区行 | 744×28 · 透明 · radius 0 | 744×28 · 透明 · radius 0 |
+| 卡片 | 712 · `rgb(33,33,33)` · radius 24px | 712 · `rgb(33,33,33)` · radius 24px |
+| `.cg-tabs` 深色底 | `#292929` | `#292929` |
+
+### 注意
+- `peerDependencies` 仍为 `0.2.0-rc.2`。在 0.2.1-alpha.3 上安装需显式豁免：
+  `dsh plugin --profile <名> allow-version dsh-codex-ui@1.1.0+0.2.1-alpha.3 --dsh-version 0.2.1-alpha.3 --accept-risk`
+- 该版本为**预发布**（semver 里排在 `1.1.0` 之后、`1.1.1` 之前），不会顶掉 1.1.0。
+
+
 ## 1.1.0 — 2026-10-14
 
 版本号进位到 **1.1.0**。本批含一项新功能与四处行为修正，无破坏性接口变更（`policyText` 只新增可选参数 `subagent`）。**契约类改动在宿主侧，需重启 DSH；界面类改动刷新页面即可。**

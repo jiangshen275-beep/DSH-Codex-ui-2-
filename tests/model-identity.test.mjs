@@ -13,9 +13,28 @@ test('the identity section names the running model, owner name first and catalog
   const catalog = identityText({ provider: 'other', model: 'gpt-6-astra' });
   assert.match(catalog, /你就是「GPT-6 Astra」/);
   // The wording has to outrank the harness's own identity line, which is what the assistant kept
-  // repeating instead: it must say the other identifiers are not its identity.
-  assert.match(catalog, /不是你的身份/);
+  // repeating instead: it must say the other identifiers are not its name.
+  assert.match(catalog, /不是你的名字/);
   assert.match(catalog, /不要用它们回答/);
+  // A name stated as a constant is not narrated as an event. These words were once *in* the prompt as a
+  // negative list and a model echoed them straight back ("运行环境本轮更新的身份指定覆盖了上一条回答"),
+  // so their absence is the contract now, not a style preference.
+  for (const word of ['变更', '更新', '覆盖', '此前的名字', '身份指定', '运行环境指定', '配置', '注入']) {
+    assert.doesNotMatch(catalog, new RegExp(word), `身份段不应出现事件化措辞：${word}`);
+  }
+  // Introducing itself is one path and one shape: a self-introduction, never a search log. The maker
+  // used to be a required lookup; it is gone now, because the only ways to fill that slot were to guess
+  // or to search, and both produced a maker nobody had verified. So the absence of the search demand is
+  // the contract now, pinned here beside the template it belongs to.
+  assert.doesNotMatch(catalog, /联网搜索/);
+  assert.doesNotMatch(catalog, /必须执行的一步/);
+  assert.doesNotMatch(catalog, /<厂家>|旗下的模型/);
+  assert.match(catalog, /第一句「我是「[^」]+」」/);
+  assert.match(catalog, /我能做的事：/);
+  assert.match(catalog, /不要把检索过程、搜索结果清单、报道标题或链接写进正文/);
+  // The one-sentence path must stay separate from the introduce-yourself path, or "你是什么模型"
+  // gets stretched into the full template.
+  assert.match(catalog, /只问"你是什么模型"（不问厂家、不问能力）时/);
   // The reasoning trace is on screen too, so the rule has to cover it: a model that names its real route
   // id while thinking has leaked exactly what the rename hides.
   assert.match(catalog, /思考过程中同样适用/);

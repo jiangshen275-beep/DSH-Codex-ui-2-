@@ -3,11 +3,11 @@
 // the workspace (the profile's node_modules resolves `zod`; the workspace does not).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { policyText, OFF_NOTICE, LIGHTNING_POLICY, lightningNudge, tokenMultiplier, ULTRA_POLICY, SUBAGENT_GUARD } from '../src/turbo-policy.js';
+import { policyText, OFF_NOTICE, LIGHTNING_POLICY, lightningNudge, tokenMultiplier, ULTRA_POLICY, SUBAGENT_GUARD, FACT_CHECK, SUPERFAST_POLICY, PRECEDENCE, WORK_PERSONA, CHAT_PERSONA, LANGUAGE_POLICY } from '../src/turbo-policy.js';
 import { createPolicyInjector, registerTurbo, TURBO_EVENT, TURBO_PATH } from '../src/turbo.js';
 
 function fakeCtx() {
@@ -45,6 +45,34 @@ function fakeCtx() {
   };
 }
 
+/**
+ * Write the effort record the way its owner (`dsh-codex-ui-reasoning`) does, because this plugin never
+ * writes it any more.
+ *
+ * Shape: `parseEffort` (src/turbo.js:109-123) is the reader, so `{ sessions: { [id]: { lightning, ultra,
+ * superfast, at } } }` with three booleans and a finite stamp — and no `pending` field, because
+ * `emptyEffortState` (src/turbo.js:66-68) has none. Bytes: `writeRecordFile` (src/turbo.js:194-200)
+ * writes `JSON.stringify(payload, null, 2)` plus a trailing newline to a temp file in the same directory
+ * and renames it into place. The rename is load-bearing here too: the reader caches on
+ * `ino:mtimeMs:size` (src/turbo.js:179), so an in-place rewrite of the same length could land inside one
+ * mtime tick and be served stale, while a rename always yields a new inode.
+ */
+function writeEffortRecord(home, rows) {
+  const dir = join(home, 'storages');
+  const file = join(dir, 'codex-ui-effort.json');
+  mkdirSync(dir, { recursive: true });
+  const sessions = Object.fromEntries(Object.entries(rows).map(([id, flags]) => [id, {
+    lightning: flags.lightning === true,
+    ultra: flags.ultra === true,
+    superfast: flags.superfast === true,
+    at: Date.now(),
+  }]));
+  const temp = `${file}.test.tmp`;
+  writeFileSync(temp, `${JSON.stringify({ sessions }, null, 2)}\n`, 'utf8');
+  renameSync(temp, file);
+  return file;
+}
+
 test('policy text is empty only when both switches are off', () => {
   assert.equal(policyText(), '');
   assert.equal(policyText({ ultra: false, lightning: false }), '');
@@ -55,9 +83,9 @@ test('policy text is empty only when both switches are off', () => {
   assert.doesNotMatch(both, /Ignore every rule above about fan-out/, 'a parent must not be told to ignore fan-out');
 });
 
-test('lightning demands at least two children dispatched in one message', () => {
+test('lightning triggers two children when a condition holds', () => {
   const text = policyText({ lightning: true });
-  assert.match(text, /at least two subagents/);
+  assert.match(text, /dispatch two children on different angles/);
   assert.match(text, /ONE assistant message/);
   // The recursion guard keeps a child from fanning out again; the parent-side text must not carry it.
   assert.doesNotMatch(text, /delegated sub-agent/);
@@ -129,7 +157,7 @@ test('Lightning discloses its cost, keeps delegation purposeful, and never shrin
   assert.match(LIGHTNING_POLICY, /Name the exemption in your own reasoning, not in the reply\. Nothing else qualifies/);
   // "Continues earlier work" was the exemption that ate the mode; it must be named as a non-exemption.
   assert.match(LIGHTNING_POLICY, /Long-running work is NOT an exemption/);
-  assert.match(LIGHTNING_POLICY, /treat that thought as the failure signal and dispatch the two children/);
+  assert.match(LIGHTNING_POLICY, /If you cannot name which condition is false, you have not finished looking/);
   assert.doesNotMatch(LIGHTNING_POLICY, /needs no children at all/, 'the blanket exemption must not return');
   // Reuse beats respawn: a continued child keeps its reading, a new one re-reads and leaves a session.
   assert.match(LIGHTNING_POLICY, /Reuse before you respawn/);
@@ -139,7 +167,7 @@ test('Lightning discloses its cost, keeps delegation purposeful, and never shrin
   const numbers = [...LIGHTNING_POLICY.matchAll(/^(\d+)\./gm)].map(match => Number(match[1]));
   assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 'one numbering, no collisions');
   // The self-check is what makes the mandate enforceable rather than advisory.
-  assert.match(LIGHTNING_POLICY, /Self-check before you send: count how many children you dispatched or continued this turn/);
+  assert.match(LIGHTNING_POLICY, /Self-check before you send: name the condition that fired/);
   assert.match(LIGHTNING_POLICY, /if you cannot name which one applies, you owe this turn two children/);
   // Waiting on children is silent work, not a reason to speak.
   assert.match(LIGHTNING_POLICY, /While relevant children run, keep working — reading, checking, verifying — and send nothing to the user/);
@@ -187,6 +215,25 @@ test('Chinese is the default for every armed session, and yields when another pl
   assert.equal(policyText(), '');
 });
 
+test('the fact-check block rides along with any arming, and only then', () => {
+  // It must reach every armed session — the user asked for it on every question — without
+  // arming a session by itself, which would contradict the empty-block contract above.
+  assert.equal(policyText(), '', 'an unarmed session still gets nothing');
+  for (const flags of [{ chinese: true }, { ultra: true }, { lightning: true }, { superfast: true }, { persona: 'work' }, { persona: 'chat' }]) {
+    assert.ok(policyText(flags).includes(FACT_CHECK), `missing with ${JSON.stringify(flags)}`);
+  }
+  const block = FACT_CHECK;
+  assert.ok(block.includes('上网搜'), 'names the web search step');
+  assert.ok(block.includes('直接问用户'), 'names the ask-the-user step');
+  assert.ok(block.includes('不要猜'), 'forbids guessing');
+  // Duplication alarm: no >40-char sentence of this block may appear verbatim in a sibling block.
+  const sentences = s => s.split(/(?<=\.)\s+/).map(x => x.trim()).filter(x => x.length > 40);
+  for (const other of [ULTRA_POLICY, LIGHTNING_POLICY, SUPERFAST_POLICY, PRECEDENCE, LANGUAGE_POLICY, WORK_PERSONA, CHAT_PERSONA]) {
+    const shared = sentences(block).filter(x => sentences(other).includes(x));
+    assert.equal(shared.length, 0, `shared with another block: ${shared[0]}`);
+  }
+});
+
 test('the injected contract stays free of accidental duplication', () => {
   // The cap is a duplication alarm, not a ration: the session deliberately trades tokens for
   // effect, so it sits well above what the rules need. It moves only when rules are added on
@@ -194,9 +241,12 @@ test('the injected contract stays free of accidental duplication', () => {
   // and 10_000 -> 11_000 when the delegation mandate became the default (measured 10_223): the
   // mandate plus its self-check are rules added on purpose, after an armed session produced zero
   // delegations across 539 tool calls.
+  // 10_000 -> 12_000 when the mandatory fact-check block landed: rules added on purpose at the user's
+  // request (check the fact, search the web when the machine cannot answer, ask the user when the
+  // search cannot), measured 11_182 with the block at 246 chars. The pre-block weight was 10_934.
   assert.ok(ULTRA_POLICY.length < 4_400, `Ultra block is ${ULTRA_POLICY.length} chars`);
   const heaviest = policyText({ persona: 'chat', ultra: true, lightning: true });
-  assert.ok(heaviest.length < 11_000, `full block is ${heaviest.length} chars`);
+  assert.ok(heaviest.length < 12_000, `full block is ${heaviest.length} chars`);
   // The superfast combination is the largest a session can carry; it had no cap before.
   const largest = policyText({ persona: 'chat', ultra: true, lightning: true, superfast: true });
   assert.ok(largest.length < 13_500, `superfast block is ${largest.length} chars`);
@@ -330,18 +380,32 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     const empty = await call({ sessionId: 's1', action: 'read' });
     assert.deepEqual(empty.result, { ok: true, value: { persona: '', lightning: false, ultra: false, superfast: false, tokenMultiple: 1.5, tokenExact: true } });
 
+    // The effort write side moved to `dsh-codex-ui-reasoning` (src/turbo.js:600-608): naming one of the
+    // three switches is refused with a code of its own. `ok: true` that wrote nothing was the silent
+    // failure the move was meant to end, so the refusal — not a new state — is the contract asserted here.
     const armed = await call({ sessionId: 's1', action: 'update', lightning: true, ultra: true });
-    assert.deepEqual(armed.result.value, { persona: '', lightning: true, ultra: true, superfast: false, tokenMultiple: 1.5, tokenExact: true });
+    assert.equal(armed.result.ok, false, 'the effort write side is gone');
+    assert.equal(armed.result.error.code, 'turbo/effort-moved');
+    assert.equal(armed.result.error.message, '推理档位开关已迁移到 dsh-codex-ui-reasoning 插件，此路由不再写入。');
+    // A refusal, not a write that went nowhere: the read still answers the defaults, and this route
+    // created no record at all.
+    const afterRefusal = await call({ sessionId: 's1', action: 'read' });
+    assert.deepEqual(afterRefusal.result.value, { persona: '', lightning: false, ultra: false, superfast: false, tokenMultiple: 1.5, tokenExact: true });
+    assert.equal(existsSync(join(home, 'storages', 'codex-ui-effort.json')), false, 'a refused update must not create the effort record');
 
-    // The read above the patch must reflect the new state, and it must persist.
+    // The record has one writer now, the other plugin, so the test writes it the same way and the read
+    // route has to serve it — including a rewrite that lands while this process is already running.
+    writeEffortRecord(home, { s1: { lightning: true, ultra: true } });
     const reread = await call({ sessionId: 's1', action: 'read' });
     assert.deepEqual(reread.result.value, { persona: '', lightning: true, ultra: true, superfast: false, tokenMultiple: 1.5, tokenExact: true });
-    const stored = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-turbo.json'), 'utf8'));
+    const stored = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-effort.json'), 'utf8'));
     assert.deepEqual(stored.sessions.s1.lightning, true);
 
-    // One flag without the other must not disturb the other.
+    // One flag without the other is refused the same way: the field named is the field that is not
+    // this route's to write, whatever its value.
     const partial = await call({ sessionId: 's1', action: 'update', lightning: false });
-    assert.deepEqual(partial.result.value, { persona: '', lightning: false, ultra: true, superfast: false, tokenMultiple: 1.5, tokenExact: true });
+    assert.equal(partial.result.ok, false);
+    assert.equal(partial.result.error.code, 'turbo/effort-moved');
 
     // The hero arms the persona for the conversation that starts next: an empty id reads
     // the picker's current value and writes it as pending, without touching session rows.
@@ -352,10 +416,14 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     // Superfast travels the same path: set, read back, and persisted.
     // State writes are queued; await the chain rather than guessing at a delay.
     await turbo.settled();
-    const afterPick = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-turbo.json'), 'utf8'));
+    const afterPick = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-persona.json'), 'utf8'));
     assert.equal(afterPick.pendingPersona, 'chat');
     assert.ok(afterPick.pendingAt > 0, 'the pick records when it was made');
-    assert.deepEqual(Object.keys(afterPick.sessions), ['s1'], 'a pending pick must not add a session row');
+    // `s1` never stamped a style, so the persona record holds no row for it — and the pick must not
+    // add one. The switches that test armed earlier live in the effort record, untouched by this write.
+    assert.deepEqual(Object.keys(afterPick.sessions), [], 'a pending pick must not add a session row');
+    const effortAfterPick = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-effort.json'), 'utf8'));
+    assert.deepEqual(Object.keys(effortAfterPick.sessions), ['s1'], 'and the pick does not disturb the effort record');
     // A session that already existed never receives a later pick.
     const beforePick = await call({ sessionId: 's1', action: 'read' });
     assert.equal(beforePick.result.value.persona, '', 'an existing session carries no persona');
@@ -417,28 +485,39 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     assert.equal(second.messages[0].content[0].text, OFF_NOTICE);
     inject();
 
-    // Invalid input is rejected without touching state. An empty id is the "next
-    // session" scope, so the composer-only switches may not be written through it.
+    // A switch named on the "next session" scope is refused for the same reason: there is no writer
+    // left here, so the scope no longer changes the answer.
     const bad = await call({ sessionId: '', action: 'update', lightning: true });
     assert.equal(bad.result.ok, false);
+    assert.equal(bad.result.error.code, 'turbo/effort-moved');
     const noChange = await call({ sessionId: 's1', action: 'update' });
     assert.equal(noChange.result.ok, false);
+    assert.equal(noChange.result.error.code, 'turbo/invalid', 'a named session that names no owned field is still invalid');
 
     // Eviction must not cost the user a switch. Lightning stamps a row for every child it fans
     // out, so a file filled with recent persona-only rows used to push an older armed row out —
     // the conversation silently lost Ultra/Lightning while its composer went on showing them off.
-    // Armed first, then the fan-out storm, which is the order that actually happens.
-    const armedEarly = await call({ sessionId: 'session-armed', action: 'update', lightning: true, ultra: true });
-    assert.equal(armedEarly.result.ok, true);
+    // Armed first, then the fan-out storm, which is the order that actually happens. Both rows go in
+    // through the other plugin's file, because this process cannot arm a session any more — the point
+    // of the test is that a persona write can never evict them.
+    const effortFile = writeEffortRecord(home, { s1: { lightning: true, ultra: true }, 'session-armed': { lightning: true, ultra: true } });
+    const armedEarly = await call({ sessionId: 'session-armed', action: 'read' });
+    assert.equal(armedEarly.result.value.lightning, true, 'the read serves the record the other plugin wrote');
+    const effortBytes = readFileSync(effortFile, 'utf8');
     const stepOf = id => ({ agent: { id }, turn: 1, step: 1, signal: { aborted: false } });
     for (let index = 0; index < 41; index += 1) await ctx.fire('agent/pre-step', stepOf(`child-${index}`));
     await new Promise(resolve => setTimeout(resolve, 60));
-    const pruned = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-turbo.json'), 'utf8'));
-    assert.equal(Object.keys(pruned.sessions).length, 40, 'the file stays bounded');
+    // The storm writes persona rows only, so it cannot evict a switch: the effort record holds the
+    // two armed sessions and nothing else.
+    assert.equal(readFileSync(effortFile, 'utf8'), effortBytes, 'this process never writes the effort record, so a storm cannot even reorder it');
+    const pruned = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-effort.json'), 'utf8'));
+    assert.deepEqual(Object.keys(pruned.sessions).sort(), ['s1', 'session-armed'], 'the effort record stays free of persona rows');
     assert.deepEqual(pruned.sessions['session-armed'], { lightning: true, ultra: true, superfast: false, at: pruned.sessions['session-armed'].at }, 'the armed row survives the storm');
     assert.equal(pruned.sessions.s1.ultra, true, 'and so does the armed row this test set up earlier');
-    assert.equal('child-0' in pruned.sessions, false, 'the oldest persona-only rows are the ones that go');
-    assert.equal(Object.entries(pruned.sessions).filter(([, value]) => !value.ultra && !value.lightning).length, 38, 'the rest of the bound is spent on persona-only rows');
+    // The persona record is the one that grows with the fan-out, so it is the one that is bounded.
+    const personaRows = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-persona.json'), 'utf8'));
+    assert.equal(Object.keys(personaRows.sessions).length, 40, 'the persona record stays bounded');
+    assert.equal('child-0' in personaRows.sessions, false, 'the oldest persona-only rows are the ones that go');
   } finally {
     if (previous === undefined) delete process.env.DSH_HOME;
     else process.env.DSH_HOME = previous;
@@ -490,16 +569,25 @@ test('the turbo endpoint arms and persists the superfast flag on its own', async
     }))).json();
     const before = await call({ sessionId: 'tree', action: 'read' });
     assert.equal(before.result.value.superfast, false, 'a session starts with the tree off');
-    const armed = await call({ sessionId: 'tree', action: 'update', superfast: true });
+    // This test asks one thing — is the flag read back correctly and does it persist — so the arming
+    // step moves to the record's owner, `dsh-codex-ui-reasoning`, which writes the whole file. The
+    // route's half of the contract is the refusal, asserted once here so it cannot regress silently.
+    const refused = await call({ sessionId: 'tree', action: 'update', superfast: true });
+    assert.equal(refused.result.ok, false);
+    assert.equal(refused.result.error.code, 'turbo/effort-moved');
+    writeEffortRecord(home, { tree: { superfast: true } });
+    const armed = await call({ sessionId: 'tree', action: 'read' });
     assert.equal(armed.result.value.superfast, true);
     assert.equal(armed.result.value.lightning, false, 'arming the tree must not flip the flat switch');
     assert.equal((await call({ sessionId: 'tree', action: 'read' })).result.value.superfast, true);
     await turbo.settled();
-    const stored = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-turbo.json'), 'utf8'));
+    const stored = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-effort.json'), 'utf8'));
     assert.equal(stored.sessions.tree.superfast, true, 'the flag must survive a reload');
-    // A non-boolean is refused rather than coerced.
+    // A malformed value is refused on the same code, not coerced: "this switch is not mine" is the
+    // accurate answer for every shape of the field (src/turbo.js:604-608).
     const bad = await call({ sessionId: 'tree', action: 'update', superfast: 'yes' });
     assert.equal(bad.result.ok, false);
+    assert.equal(bad.result.error.code, 'turbo/effort-moved');
     // And the hero's "next session" scope never carries it: the tree is armed per conversation.
     const hero = await call({ sessionId: '', action: 'read' });
     assert.equal(hero.result.value.superfast, false);
@@ -528,12 +616,16 @@ test('Lightning re-asserts its mandate once per turn, and only for an armed sess
     const cold = await ctx.fire('agent/pre-step', stepOf('s-cold', 3));
     assert.deepEqual(disarm(cold), [], 'an unarmed session gets no reminder');
 
-    await call({ sessionId: 's-armed', action: 'update', lightning: true });
+    // The reminder stayed in this file with the injector (src/turbo.js:471-511); only the arming moved,
+    // so the record is written the way its owner writes it. Every assertion below is unchanged: this
+    // measures the reminder, not the retired route.
+    writeEffortRecord(home, { 's-armed': { lightning: true } });
+    assert.equal((await call({ sessionId: 's-armed', action: 'read' })).result.value.lightning, true, 'the read serves the armed record');
     const first = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 1));
     const firstNudges = nudges(first);
     assert.equal(firstNudges.length, 1, 'the first step of a turn carries exactly one reminder');
     assert.match(firstNudges[0], /turn 3/);
-    assert.match(firstNudges[0], /dispatch at least two subagents/);
+    assert.match(firstNudges[0], /check the four fan-out conditions/);
     // Steps 2 and 3 repeat it — the opener alone was measured to leave turns with zero delegations,
     // because by the time the model is ready to answer the opener is several tool results behind it.
     const second = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 2));
@@ -553,8 +645,10 @@ test('Lightning re-asserts its mandate once per turn, and only for an armed sess
     assert.equal(nextNudges.length, 1, 'each new turn re-asserts the mandate');
     assert.match(nextNudges[0], /turn 4/);
     assert.notEqual(nextNudges[0], firstNudges[0], 'never the same text twice');
-    // Disarming stops it again.
-    await call({ sessionId: 's-armed', action: 'update', lightning: false });
+    // Disarming is a write to the same record: `currentEffort()` revalidates it on every step, so the
+    // very next one already sees the row switched off.
+    writeEffortRecord(home, { 's-armed': { lightning: false } });
+    assert.equal((await call({ sessionId: 's-armed', action: 'read' })).result.value.lightning, false);
     const afterOff = await ctx.fire('agent/pre-step', stepOf('s-armed', 5, 1));
     assert.deepEqual(nudges(afterOff), [], 'turning the switch off stops the reminder');
   } finally {

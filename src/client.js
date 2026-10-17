@@ -412,6 +412,9 @@ function hideHoverCard() {
 const STYLE_ID = 'dsh-codex-ui-style';
 let styleWatcher = null;
 let styleTimer = null;
+/** Handle of the one-shot token-colour sweep scheduled by startStyleWatch, so a re-entry replaces it
+ *  instead of stacking another. */
+let initialScanFrame = 0;
 
 /**
  * Open an external page.
@@ -430,15 +433,67 @@ function openExternal(url) {
   try { window.open(url, '_blank', 'noopener,noreferrer'); } catch { /* nothing left to try */ }
 }
 
+/**
+ * Install the stylesheet, and repair it when a previous build's copy is still in the document.
+ *
+ * Testing only for the element's absence was a real bug. A host that hot-reloaded an older build left
+ * a `style#dsh-codex-ui-style` behind; the new build found the element, skipped the write, and the page
+ * kept rendering with the old sheet — or with an empty one, if the earlier instance had been disposed
+ * between clearing and refilling it. The symptom is easy to misread: all the markup is present and
+ * completely unstyled, including this plugin's own chrome, which looks like a broken bundle rather than
+ * a stale stylesheet.
+ *
+ * The element is therefore not treated as "already done". Its text is compared against the sheet this
+ * build carries and replaced when they differ: a page can only ever hold one build's CSS, so a mismatch
+ * means the document is stale, never that the new sheet should be skipped.
+ */
 function installStyle() {
-  if (document.getElementById(STYLE_ID) === null) {
-    const style = document.createElement('style');
+  let style = document.getElementById(STYLE_ID);
+  if (style === null) {
+    style = document.createElement('style');
     style.id = STYLE_ID;
     style.dataset.pluginCss = 'dsh-codex-ui';
-    style.textContent = STYLE;
     (document.head ?? document.documentElement).appendChild(style);
   }
+  if (style.textContent !== STYLE) style.textContent = STYLE;
   if (!document.documentElement.hasAttribute('data-chatgpt-ui')) document.documentElement.setAttribute('data-chatgpt-ui', '');
+}
+
+/**
+ * Give shiki's token colours back.
+ *
+ * The host ships `.compact pre, .compact pre :is(code, span) { color: inherit !important }` in
+ * `MarkdownText.module.css`. `pre` itself matches that rule, so its own inline
+ * `color: var(--shiki-foreground)` is overridden to `inherit`, and every token span inherits that one
+ * value. Redefining `--shiki-foreground` on `pre` therefore changes nothing — the variable is no longer
+ * read once the declaration that reads it has lost the cascade. The block renders in
+ * `--dsw-alias-label-tertiary`, which is the unreadable grey.
+ *
+ * No stylesheet can undo this: a declaration overridden by an author `!important` cannot be revived by
+ * another author declaration of any specificity. One rule per token type would work only until shiki adds
+ * a token type.
+ *
+ * An inline `!important` outranks every stylesheet `!important`, so the fix re-applies each span's own
+ * declared colour through `style.setProperty(..., 'important')`. The original is still readable from
+ * `span.style.color` — losing the cascade does not erase a declaration — so this restores exactly what
+ * shiki wrote, for every token type, without knowing any of their names.
+ */
+function restoreTokenColors(root) {
+  if (!root || root.nodeType !== 1) return;
+  // The added node may itself be the span (streaming text arrives as individual runs).
+  if (typeof root.matches === 'function' && root.matches('pre span[style]')) {
+    reassertColor(root);
+  }
+  // Every other case is a subtree that may contain a block. Bailing when there is no <pre> keeps the
+  // common mutation — a chat message with no code in it — down to one cheap query.
+  if (typeof root.querySelector !== 'function' || root.querySelector('pre') === null) return;
+  for (const span of root.querySelectorAll('pre span[style]')) reassertColor(span);
+}
+/** Re-apply one span's own declared colour at inline `!important` priority. */
+function reassertColor(span) {
+  const declared = span.style.color;
+  if (declared === '' || span.style.getPropertyPriority('color') === 'important') return;
+  span.style.setProperty('color', declared, 'important');
 }
 /** Re-attach to the live <head>/<html>: a replaced head would orphan an observer bound to the old one. */
 function observeStyleTargets() {
@@ -454,6 +509,48 @@ function startStyleWatch() {
   observeStyleTargets();
   // Belt and braces: one lookup per second also recovers when every observer target was torn down.
   styleTimer = setInterval(installStyle, 1000);
+  // The transcript streams in and virtualisation recreates rows, so a one-shot pass would miss every
+  // block that arrives after mount. Two decisions here, both measured:
+  //
+  // 1. Incremental, not a full sweep. A full `document.querySelectorAll('pre span[style]')` costs 12.8 ms
+  //    of query time alone on a 45k-span transcript, and ~98 ms per pass once the per-span CSSOM reads
+  //    are included — against a 16.7 ms frame budget that is 6-10 fps, paid on every frame while text
+  //    streams. Consuming `addedNodes` instead brings a 50-span batch to 0.3 ms, because the common
+  //    mutation is a message with no code in it at all.
+  // 2. `attributes: ['style']` is watched too. React writes style through the IDL property, which resets
+  //    the priority back to normal and silently undoes the fix; without this the colours would drop back
+  //    to grey the first time a row re-renders.
+  const pending = new Set();
+  let frame = 0;
+  const flush = () => {
+    frame = 0;
+    const roots = [...pending];
+    pending.clear();
+    for (const node of roots) restoreTokenColors(node.nodeType === 1 ? node : node.parentElement);
+  };
+  const schedule = node => {
+    if (node) pending.add(node);
+    if (frame !== 0) return;
+    frame = requestAnimationFrame(flush);
+  };
+  const tokenObserver = new MutationObserver(records => {
+    for (const record of records) {
+      if (record.type === 'attributes') { schedule(record.target); continue; }
+      for (const node of record.addedNodes) schedule(node);
+    }
+  });
+  tokenObserver.observe(document.body ?? document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['style'],
+  });
+  // One initial pass over what is already on screen — the observer only sees what arrives later.
+  initialScanFrame = requestAnimationFrame(() => { initialScanFrame = 0; restoreTokenColors(document.body ?? document.documentElement); });
+  // No disposer is returned on purpose. The only caller drops the value, so returning one would read as
+  // "this gets cleaned up" while the observer in fact outlives the call — the same lifetime `styleWatcher`
+  // and `styleTimer` above already have. A guard that looks like cleanup but never runs is worse than no
+  // guard: the next reader would build on it.
 }
 /**
  * The turn rail's active marker, made to travel.
@@ -475,6 +572,18 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
   // stylesheet is far worse than a style element surviving an unload (a real uninstall restarts the
   // host and reloads the page).
   startStyleWatch();
+  // Measure the sheet's host-module assumptions against the live DOM, then twice more as the shell
+  // settles. Deliberately NOT on the 1s style timer below: that sheet is written for a host
+  // generation, which changes on install, not on a page update — a per-second diagnostic would only
+  // add noise to the very signal it exists to provide.
+  // The typeof guard is not defensive padding. `lib/client.js` is one concatenated factory body, so a
+  // helper the build failed to splice in is a ReferenceError *here* — which takes the whole skin down,
+  // not just this diagnostic. The guard keeps the blast radius at zero.
+  typeof runHostContractCheck === 'function' && runHostContractCheck();
+  // Two retries for a slow mount. The check itself refuses to judge anything before the host has
+  // rendered one of its mandatory hooks, so these are not a schedule and the numbers carry no magic.
+  setTimeout(() => { typeof runHostContractCheck === 'function' && runHostContractCheck(); }, 5000);
+  setTimeout(() => { typeof runHostContractCheck === 'function' && runHostContractCheck(); }, 15000);
   startRunningStatusStyle();
   // The display names are client-side state the Host needs for the system prompt, so the map is pushed
   // over the Connection carrier. `wireAliasSender` lives in `src/alias-sync.js`, which the build
@@ -497,6 +606,10 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     try { return ctx.slots.inject(...args); }
     catch (error) { console.warn('dsh-codex-ui: slot registration refused', error); return undefined; }
   };
+  // 注入块设置页：宿主设置弹窗左侧多一项，页面本身是一列开关，逐个控制 `policyText()` 里的段落。
+  // 走同一个容错入口，老宿主只丢这一页；`registerInjectionSection` 由 build 拼进本工厂体
+  // （见 scripts/build.mjs），所以这里没有 import。
+  registerInjectionSection(ctx, mountSlot);
   mountSlot('conversation.session.header.utilities', () => {
     const native = ctx.slots.entries('conversation.session.header.utilities').find(entry => entry.options.id === 'session-log-download');
     const header = ctx.slots.entriesOfSlot('conversation.session.header')[0];
@@ -583,10 +696,11 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
       text.setAttribute('role', 'heading');
       text.setAttribute('aria-level', '1');
       row.append(text);
-      if (project) {
-        const chip = projectChipOf(hero, project);
-        if (chip) row.append(chip);
-      }
+      // No project chip beside the headline. The owner does not want one there, and the clean way to
+      // remove it is to not build it: hiding the clone exposed the host's own chip underneath, and
+      // hiding both took the workspace control away from the composer as well. `project` is still read
+      // and still stored on `data-cg-title` below, so the title row keeps tracking which workspace it
+      // was painted for; nothing is drawn from it.
       group.setAttribute('data-cg-title', project);
       group.append(row);
     };
@@ -603,9 +717,98 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
       decorate(hero, group, project);
     };
     sync();
-    const observer = new MutationObserver(sync);
+    /**
+     * Guarded against self-feeding, which is what made the hero's project chip flicker.
+     *
+     * This observer watches the whole root for `childList`, `subtree` AND `characterData`, and `decorate`
+     * writes into that same subtree — it appends a row and assigns `textContent`. Every one of those
+     * mutations is delivered back to `sync` on the next microtask. The `data-cg-title` check is supposed to
+     * stop the loop, and it does while the host keeps the same title group: the attribute rides on the
+     * group, so the second pass finds it equal and returns.
+     *
+     * It stops working the moment the host re-renders that group. A fresh node arrives with no
+     * `data-cg-title`, and `projectOf` reads the native chip's text from a node the host is rebuilding —
+     * which is empty for a frame, then the project name again. So `project` alternates between '' and
+     * 'DSH', the equality check never holds, and the row is torn down and rebuilt as fast as the
+     * observer fires. That is the flicker.
+     *
+     * Two fixes, both needed: `settling` drops the mutations this effect causes itself, and the project is
+     * latched per group node so a momentarily-empty read cannot flip the chip off and back on. The latch is
+     * keyed on the group so a genuinely new workspace still updates.
+     */
+    let settling = false;
+    let latchedGroup = null;
+    let latchedProject = '';
+    const runSync = () => {
+      settling = true;
+      try { sync(); } finally { settling = false; }
+    };
+    const projectOfStable = hero => {
+      const group = titleGroupOf(hero);
+      const read = projectOf(hero);
+      if (group !== null && group === latchedGroup) {
+        // A blank read is the host mid-rebuild, not the user leaving the workspace.
+        if (read === '') return latchedProject;
+        latchedProject = read;
+        return read;
+      }
+      latchedGroup = group;
+      latchedProject = read;
+      return read;
+    };
+    const syncStable = () => {
+      const hero = heroOf();
+      const group = hero ? titleGroupOf(hero) : null;
+      if (!group) {
+        for (const stale of document.querySelectorAll('.cg-hero-title')) stale.remove();
+        return;
+      }
+      const project = projectOfStable(hero);
+      if (group.getAttribute('data-cg-title') === project) return;
+      group.querySelectorAll('.cg-hero-title').forEach(node => node.remove());
+      decorate(hero, group, project);
+    };
+    latchedGroup = titleGroupOf(heroOf() ?? document.body) ?? null;
+    settling = true;
+    try { syncStable(); } finally { settling = false; }
+    /**
+     * The observer no longer drives `decorate` directly. It schedules one pass per animation frame.
+     *
+     * The previous version called `syncStable()` inside the callback and cleared `settling` in a
+     * `finally`, which cannot work: a `MutationObserver` callback runs *after* the microtask queue, so
+     * by the time the next batch is delivered `settling` has long been reset to false. Every mutation
+     * this effect caused — the appended row, the assigned `textContent`, the removed stale nodes — came
+     * back as fresh input, and the hero's project chip was torn down and rebuilt as fast as the browser
+     * could deliver batches. That is the flicker, and it survived the first attempt at a guard.
+     *
+     * Two changes make the loop impossible rather than unlikely:
+     *
+     * 1. Coalescing. `pending` collapses any number of mutations in one frame into a single pass, so
+     *    the cost is bounded by the frame rate no matter how noisy the host is.
+     * 2. A signature check on the DOM we own. `syncStable` already returns early when the group's
+     *    `data-cg-title` matches, but that attribute lives on a node the host replaces — so the marker
+     *    is compared against the row that is actually on screen (`textContent` of the row plus the
+     *    project name). A pass that would produce the same output writes nothing and therefore causes
+     *    no mutation to come back.
+     */
+    let pending = false;
+    let disposed = false;
+    const schedule = () => {
+      if (pending || disposed) return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        if (disposed) return;
+        try { syncStable(); } catch { /* a torn-down hero must not break the loop */ }
+      });
+    };
+    const observer = new MutationObserver(schedule);
     observer.observe(root, { childList: true, subtree: true, characterData: true });
-    return () => { observer.disconnect(); for (const stale of document.querySelectorAll('.cg-hero-title')) stale.remove(); };
+    return () => {
+      disposed = true;
+      observer.disconnect();
+      for (const stale of document.querySelectorAll('.cg-hero-title')) stale.remove();
+    };
   });
   // Both schemes are provided so Settings → Appearance keeps working.
   const pairs = {
@@ -618,7 +821,7 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     '--dsw-alias-state-business-primary': ['#3982fa', '#6b9fff'],
     '--dsw-alias-button-info-fill': ['#3982fa', '#3982fa']
   };
-  ctx.effect(() => ctx.theme?.overrideTokens?.('dsh-codex-ui', Object.fromEntries(Object.entries(pairs).map(([k, v]) => [k, { light: v[0], dark: v[1] }]))));
+  // 暂时取消宿主 token 覆盖注册：验证它是否为主题切换闪烁的来源（配色已由 style.css 的 --dsw-* 兜底承担）。
 
   const go = id => ctx.layout?.selectPanel?.(id);
   // Typing must not slide the transcript. One frame after each input event the conversation
@@ -641,6 +844,85 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     document.addEventListener('input', compensate, true);
     return () => document.removeEventListener('input', compensate, true);
   });
+  /**
+   * 人设的读取与写入。
+   *
+   * 走的是与 `chatgpt-ui/prompt-mode` 完全相同的一条 Connection 通道：`rpc.call` 自己组装
+   * `{type:'client-request', rpcId, method, payload}` 信封，第三个参数就是内层业务 payload，
+   * 所以这里只传 `{ action, ... }`，不再手工包一层（包了就是双层信封，宿主解析必然失败）。
+   */
+  async function personaRpc(action, change) {
+    const result = await ctx.connection.rpc.call('/api', 'chatgpt-ui/personas', { action, ...(change ?? {}) });
+    if (!result?.ok) throw new Error(result?.error?.message || '人设操作失败，请重试。');
+    return result.value ?? {};
+  }
+  // 宿主列表才是唯一事实来源；这两项只是列表拉不到时菜单显示的内容，与宿主默认值一致。
+  const FALLBACK_PERSONAS = [
+    { id: 'DeepSeek', name: 'DeepSeek', description: '原版提示词', builtin: true },
+    { id: 'Codex', name: 'Codex', description: '严谨、理性、严肃、简短', builtin: true }
+  ];
+  const EMPTY_PERSONA_UI = { list: null, dialog: false, draft: null, error: '', pending: false };
+  /**
+   * 三个采样参数。键名用 `top_p` 而不是 `topP`：`parsePersona` 把 frontmatter 的键小写化后取值
+   * （`meta[match[1].toLowerCase()]`），宿主 `dsh-llm` 的字段也是 `top_p`，两个方向同一个拼写。
+   *
+   * 值一律以**字符串**存在 draft 里：`''` 表示「没设置」，保存时才 `Number(...)`。空串不能变成 `0`
+   * —— 0 是一个合法且完全不同的温度。新建人设时温度与 Top P 预填各自的默认值（`0` / `0.95`），
+   * 所以「没设置」只在用户主动清空数字框之后才出现。`max_tokens` 例外：宿主缺省时会重新填上
+   * 256000，所以清空它的实际含义是「恢复默认」，占位提示也这么写。
+   */
+  const PERSONA_SAMPLING_FIELDS = ['temperature', 'top_p', 'max_tokens'];
+  const PERSONA_SAMPLING_LABELS = { temperature: '温度', top_p: 'Top P', max_tokens: '最大输出' };
+  /** 把一处来源（list 项、read 返回值）里的采样参数收成 draft 用的字符串；没有就是 `''`。 */
+  const personaSamplingDraft = source => {
+    const from = source?.persona ?? source ?? {};
+    const draft = {};
+    for (const key of PERSONA_SAMPLING_FIELDS) {
+      const raw = from?.[key];
+      draft[key] = typeof raw === 'number' && Number.isFinite(raw)
+        ? String(raw)
+        : typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : '';
+    }
+    return draft;
+  };
+  /** `''` → 不发这个键；有值 → `Number(...)`。整个弹窗里只有这里做数字转换。 */
+  const personaSamplingPayload = draft => {
+    const payload = {};
+    const invalid = [];
+    const before = draft?.samplingOriginal ?? {};
+    for (const key of PERSONA_SAMPLING_FIELDS) {
+      const raw = draft?.[key];
+      const text = typeof raw === 'string' ? raw.trim()
+        : typeof raw === 'number' && Number.isFinite(raw) ? String(raw) : '';
+      if (text === '') {
+        if (String(before?.[key] ?? '').trim() !== '') payload[key] = null;
+        continue;
+      }
+      const value = Number(text);
+      if (Number.isFinite(value)) payload[key] = value; else invalid.push(key);
+    }
+    return { payload, invalid };
+  };
+  /**
+   * 范围检查。
+   *
+   * 三个数字框都带 `min` / `max` / `step`，而浏览器的原生表单校验在 `onSubmit` **之前**就把
+   * 越界值拦掉了：用户填了 3、点保存，`savePersona` 根本不会被调用，界面上也不会出现任何提示。
+   * 所以表单整体加了 `noValidate`，范围改在这里判，和「不是有效数字」走同一条红字通道。
+   *
+   * `null` 与缺失表示「清空这一项」（见 `personaSamplingPayload`），不是 0，不参与范围判断。
+   */
+  const personaSamplingLimitError = payload => {
+    // 官方文档：`temperature` 取 0 到 2。
+    const temperature = payload?.temperature;
+    if (typeof temperature === 'number' && !(temperature >= 0 && temperature <= 2)) return '温度要在 0 到 2 之间。';
+    // 官方文档：`top_p` 必须大于 0、不超过 1。
+    const topP = payload?.top_p;
+    if (typeof topP === 'number' && !(topP > 0 && topP <= 1)) return 'Top P 要大于 0、不超过 1。';
+    const maxTokens = payload?.max_tokens;
+    if (typeof maxTokens === 'number' && !(Number.isInteger(maxTokens) && maxTokens >= 1)) return '最大输出要是正整数。';
+    return '';
+  };
   /** Persona read/write over the same turbo route the composer switches use. */
   async function tabTurbo(action, sessionId, change) {
     const result = await ctx.connection.rpc.call('/api', 'dsh-codex-ui/turbo', { action, sessionId, ...(change ?? {}) });
@@ -653,9 +935,9 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     const currentSession = Object.values(sessions).find(session => (session.retainedBy?.mainView ?? 0) > 0);
     const [storedMode, setStoredMode] = React.useState(null);
     const currentMode = storedMode && storedMode.sessionId === currentSession?.id ? storedMode.mode : currentSession?.projectionValues?.cgPromptMode;
-    // Codex is the default mode: anything not explicitly on DeepSeek (including the window before
-    // the projection arrives) reads as Codex, matching the server-side default.
-    const brand = currentMode === 'DeepSeek' ? 'DeepSeek' : 'Codex';
+    // `brand` 的取值推迟到人设列表就绪之后（见下方「人设列表与编辑弹窗」）：自定义人设必须显示
+    // 自己的名字，只有列表里查不到的 id 才退回 Codex —— 那是宿主侧的默认模式，也就是投影到达
+    // 之前这一段窗口里的值。
     const [modePending, setModePending] = React.useState(false);
     const [modeError, setModeError] = React.useState('');
     const modeRequest = React.useRef(false);
@@ -918,6 +1200,305 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     // plugin's own instead, filtering the three lists by title, display name or id.
     const [sessionQuery, setSessionQuery] = React.useState('');
     const [searchOpen, setSearchOpen] = React.useState(false);
+    // ---- 人设列表与编辑弹窗 ----------------------------------------------------------------
+    // 菜单不再写死 DeepSeek/Codex：列表来自宿主 `chatgpt-ui/personas` 的 `list`。列表、弹窗、
+    // 草稿、错误和进行中都收进**一个** state —— 每次新增 `useState` 都会让它之后的槽位整体移位，
+    // 而这条组件里的槽位是被测试按下标读的，所以新增只允许有一个，且必须排在最后。
+    const [personaState, setPersonaState] = React.useState(EMPTY_PERSONA_UI);
+    // 槽位可能拿到 `null`（脚本化的 state 队列没有这一格），所以每次读取都过兜底常量。
+    const personaUi = personaState ?? EMPTY_PERSONA_UI;
+    const personaList = personaUi.list ?? FALLBACK_PERSONAS;
+    /**
+     * The label in the sidebar is the persona's own `name`, resolved from whatever the session recorded.
+     *
+     * `currentMode` is not always an id. A session that has never picked a style persists the literal
+     * string `Codex`, and `cgPromptMode` can carry a display name; so matching on `id` alone missed both
+     * and fell through to the hardcoded `'Codex'`. That is the "改完提示词就自动变成 Codex" report: the
+     * persona was renamed, the stored value no longer matched any id, and the fallback painted `Codex`
+     * over the top — the switch had not happened, only the label had.
+     *
+     * Three lookups, in order of confidence: the id, then the name (a stored display name), then a
+     * case-insensitive match on either. Only when all three miss does the list's first row stand in —
+     * never a hardcoded literal, because a plugin cannot know what the user called their own persona.
+     */
+    const personaNamed = value => {
+      const needle = String(value ?? '').trim();
+      if (!needle) return undefined;
+      const exact = personaList.find(item => item.id === needle) ?? personaList.find(item => item.name === needle);
+      if (exact) return exact;
+      const lower = needle.toLowerCase();
+      return personaList.find(item => String(item.id).toLowerCase() === lower)
+        ?? personaList.find(item => String(item.name).toLowerCase() === lower);
+    };
+    const brand = personaNamed(currentMode)?.name ?? personaList[0]?.name ?? 'Codex';
+    const patchPersona = change => setPersonaState(prev => ({ ...(prev ?? EMPTY_PERSONA_UI), ...change }));
+    // 单个字段的编辑必须基于上一次的值累加，否则一次批处理里的两次输入会互相覆盖（丢字）。
+    const patchDraft = (field, value) => setPersonaState(prev => ({
+      ...(prev ?? EMPTY_PERSONA_UI), error: '', draft: { ...(prev?.draft ?? {}), [field]: value }
+    }));
+    /**
+     * 数字框的写入。
+     *
+     * `-`、`1e` 这类还没打完的输入在 `type=number` 里 `value` 是 `''`，而 `validity.badInput` 为真：
+     * 把它照抄进草稿等于把用户原来的值抹成「没设置」（之后保存就不会再发这个键，静默丢掉）。
+     * 中间态一律不写草稿，等它变成合法数字再说。
+     */
+    const patchNumberInput = (field, event) => {
+      if (event?.target?.validity?.badInput) return;
+      patchDraft(field, event.target.value);
+    };
+    // 只在菜单打开时拉一次，不在每次渲染时拉：人设改动会改变列表，而渲染不会。
+    const loadPersonas = async () => {
+      try {
+        const value = await personaRpc('list');
+        const list = Array.isArray(value?.personas) ? value.personas.filter(item => item && typeof item.id === 'string') : [];
+        patchPersona({ list: list.length > 0 ? list : FALLBACK_PERSONAS });
+      } catch (error) {
+        // 宿主没有这条路由时，菜单退回到内置两项 —— 不能让它把整个侧边栏一起拖垮。
+        console.warn('人设列表读取失败，暂用内置两项。', error);
+        patchPersona({ list: FALLBACK_PERSONAS });
+      }
+    };
+    React.useEffect(() => {
+      if (!brandMenu) return undefined;
+      loadPersonas();
+      return undefined;
+    }, [brandMenu]);
+    // 宿主依赖的两个 id：`DeepSeek` 是内置行（不接受写入），`codex` 是每次加载重新播种的文件。
+    // 后者在宿主的列表里是 `builtin:false`（它来自文件），所以保护判断按 id 做，不按 builtin。
+    const PROTECTED_PERSONA_IDS = new Set(['deepseek', 'codex']);
+    // 新建时生成 id：它就是磁盘上的文件名，所以只剔掉 Windows 拒绝的字符；重名时加序号，
+    // 绝不因为撞名而覆盖别人的文件。id 一旦进入会话就不再改变（改名不动 id）。
+    const makePersonaId = name => {
+      const cleaned = String(name ?? '').trim().replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').replace(/\s+/g, '-').slice(0, 40);
+      const base = cleaned === '' || /^\.+$/.test(cleaned) ? 'persona' : cleaned;
+      const taken = new Set(personaList.map(item => String(item.id).toLowerCase()));
+      if (!taken.has(base.toLowerCase())) return base;
+      for (let index = 2; index < 100; index += 1) {
+        const next = base + '-' + index;
+        if (!taken.has(next.toLowerCase())) return next;
+      }
+      return base + '-' + Date.now();
+    };
+    const openPersonaDialog = item => {
+      setBrandMenu(false);
+      const draft = item
+        ? {
+          id: item.id, name: String(item.name ?? ''), description: String(item.description ?? ''),
+          // `list` 不带正文；只有宿主把 text 也给了，才算已经加载。
+          text: typeof item.text === 'string' ? item.text : '', textLoaded: typeof item.text === 'string',
+          // 采样参数一律以字符串进草稿，`''` 就是「没设置」。`list` 目前不返回它们，所以这里通常是空。
+          // 编辑时**不**用默认值预填：宿主不返回的参数如果被 0 / 0.95 顶上，一保存就会真的写进
+          // 用户文件（`personaSamplingPayload` 只把 `''` 当成「不发这个键」），等于静默改设置。
+          ...personaSamplingDraft(item), samplingOriginal: personaSamplingDraft(item)
+        }
+        // 新建不是「没设置」：两个滑块各有一个真实默认值，直接把它预填进草稿（字符串，因为 draft
+        // 里一律存字符串），打开弹窗就能拖。`max_tokens` 不预填 —— 空串在那里表示「恢复宿主默认」。
+        : {
+          id: null, name: '', description: '', text: '', textLoaded: true,
+          ...personaSamplingDraft(null),
+          temperature: String(SAMPLING_SLIDER.temperature.initial),
+          top_p: String(SAMPLING_SLIDER.top_p.initial)
+        };
+      patchPersona({ dialog: true, draft, error: '' });
+      // 补一次单条读取。读不到时 `textLoaded` 保持 false、保存被禁用 —— 因为宿主的写入是整篇
+      // 覆盖（`text: input?.text ?? ''`），拿空正文去 update 等于把用户写好的提示词清空。
+      if (item?.id && draft.textLoaded === false) {
+        personaRpc('read', { id: item.id }).then(value => {
+          const text = typeof value?.persona?.text === 'string' ? value.persona.text
+            : typeof value?.text === 'string' ? value.text
+              : typeof value?.prompt === 'string' ? value.prompt : '';
+          // 采样参数按同一次读取带回；宿主的 `read` 目前只回 `{ id, text }`，所以这里通常是 `''`
+          // （等于「没设置」）。等宿主开始返回它们，这条链路不用再改。
+          const sampling = personaSamplingDraft(value?.persona ?? value);
+          // 回填只覆盖**用户还没动过**的字段：`read` 是异步的，等它回来这段时间用户完全可能
+          // 已经在温度框里打了字。判据是「当前草稿值仍等于打开时的原值」（`samplingOriginal`），
+          // 每项单独算。`samplingOriginal` 仍然整份更新成宿主给的原值 —— 清空逻辑只看它。
+          setPersonaState(prev => {
+            if (prev?.draft?.id !== item.id) return prev;
+            const draft = prev.draft;
+            const before = draft.samplingOriginal ?? {};
+            const next = {
+              textLoaded: true, samplingOriginal: sampling,
+              // 正文同理：用户已经写进去的内容不回填覆盖。
+              text: String(draft.text ?? '') === '' ? text : draft.text
+            };
+            for (const key of PERSONA_SAMPLING_FIELDS) {
+              const untouched = String(draft[key] ?? '') === String(before[key] ?? '');
+              next[key] = untouched ? sampling[key] : draft[key];
+            }
+            return { ...prev, draft: { ...draft, ...next } };
+          });
+        }).catch(() => {
+          setPersonaState(prev => (prev?.draft?.id === item.id
+            ? { ...prev, error: '正文读取失败。宿主的保存是整篇覆盖，用空正文保存会清空它，所以已禁止保存。' }
+            : prev));
+        });
+      }
+    };
+
+    const closePersonaDialog = () => {
+      if (personaUi.pending) return;
+      patchPersona({ dialog: false, draft: null, error: '' });
+    };
+    // 采样参数的「滑块 + 数字框」。两个控件共用**同一个** draft 值，谁都不另存一份：
+    //   拖滑块 → 滑块的字符串直接写进草稿，数字框随即显示同一个值；
+    //   数字框 → 原始字符串原样写进草稿（`0.` / `-` 这类中间态一律不规范化），滑块只按数字定位，
+    //            `range` 自己会把 0.25 吸到最近的步进点 —— 精确值留在数字框，滑块只是粗略指示器；
+    //   清空   → 草稿回到 `''`（= 没设置），滑块**仍然可用**，只是停在 `initial` 上；`initial`
+    //            绝不回写草稿，否则「没动过」会变成「已设置」。用户一动滑块，第一个 `onChange`
+    //            就把值写回去 —— 清空是显式状态，拖滑块就是显式地重新取值。
+    // 两个滑块的 `step` 都是 0.01，数字框是 `any`：`step` 只决定滑块吸附到哪个网格点，网格越细，
+    // 数字框里的两位小数越能准确落位 —— 0.1 会让 0.25 在滑块上显示成 0.3，两个控件对不上，
+    // 而且用户一碰滑块就把 0.25 覆盖成 0.3。
+    // 数字框仍然是 `any`：`step=0.1` 会让 0.25 变成 stepMismatch，而浏览器的表单校验会在
+    // `onSubmit` 之前静默拦下提交（点了保存没反应）。表单现在另有 `noValidate` 兜底。
+    // 两个滑块各有一个**真实初始值**，`initial` 就是它：新建人设时按它预填草稿（见
+    // `openPersonaDialog`），所以滑块永远有可停靠的位置，不存在「没有值就禁用它」这一档。
+    // Top P 的初始值取 0.95：`top_p` 必须大于 0，0 会被 `personaSamplingLimitError` 拦下并弹红字；
+    // 而 0.95 是思考模式下的有效下界（低于它的值上游一律按 0.95 处理），所以 0.95–1.0 这整段
+    // 行程都有实际效果 —— 取 1（= 不限制）等于没设，滑块拖到底也看不出任何变化。
+    // `min` 仍是 0、不改：保留完整行程，低于 0.95 的值由上游按 0.95 处理，不报错。
+    const SAMPLING_SLIDER = {
+      temperature: { min: 0, max: 2, step: 0.01, initial: 0 },
+      top_p: { min: 0, max: 1, step: 0.01, initial: 0.95 }
+    };
+    // 两条静态提示，不随当前档位变化：要判断档位就得把模型状态传进弹窗，改动面比一句提示大得多。
+    // 依据：官方 API 文档写明 `temperature`「思考模式下不生效」，`top_p`「有效取值范围为 0.95–1.0，
+    // 低于 0.95 的取值会按 0.95 处理」；而宿主适配器默认 `effort="high"`，也就是默认走思考模式。
+    const SAMPLING_NOTE = {
+      temperature: '思考模式下不生效',
+      top_p: '思考模式下低于 0.95 按 0.95 生效'
+    };
+    /** 滑块的停靠点；`set === false` 表示草稿里没有值（停在 `initial`，不产生值，但滑块仍可拖）。 */
+    const samplingSlider = (key, config) => {
+      const raw = personaUi.draft?.[key];
+      const text = typeof raw === 'string' ? raw.trim()
+        : typeof raw === 'number' && Number.isFinite(raw) ? String(raw) : '';
+      const number = text === '' ? Number.NaN : Number(text);
+      if (!Number.isFinite(number)) return { set: false, value: config.initial };
+      return { set: true, value: Math.min(config.max, Math.max(config.min, number)) };
+    };
+    const samplingField = key => {
+      const config = SAMPLING_SLIDER[key];
+      const fieldLabel = PERSONA_SAMPLING_LABELS[key];
+      const draftValue = personaUi.draft?.[key] ?? '';
+      const slider = samplingSlider(key, config);
+      const note = SAMPLING_NOTE[key];
+      const hintId = `cg-persona-${key}-hint`;
+      const noteId = `cg-persona-${key}-note`;
+      // 提示是「补充说明」，不是名字的一部分，所以并进 `aria-describedby`；两个控件都要，
+      // 因为「这个参数在当前模式下没效果」对滑块的读者同样成立。
+      const describedBy = note ? `${hintId} ${noteId}` : hintId;
+      // 一个字段两个控件，所以不能再套一层 `<label>`：`label.control` 只认第一个可标注元素，
+      // 点了只会聚焦滑块，数字框会失去可访问名。改成 group + aria-labelledby，两边各一个名字。
+      return h('div', { className: 'cg-rename-field', role: 'group', 'aria-labelledby': `cg-persona-${key}-label` },
+        h('span', { id: `cg-persona-${key}-label` }, fieldLabel),
+        h('div', { className: 'cg-sampling-row' },
+          h('input', {
+            className: 'cg-sampling-range', type: 'range', min: config.min, max: config.max, step: config.step,
+            value: String(slider.value), disabled: personaUi.pending,
+            'aria-label': `${fieldLabel}滑块`, 'aria-controls': `cg-persona-${key}-value`,
+            'aria-valuetext': slider.set ? String(draftValue) : '未设置',
+            title: slider.set ? undefined : '未设置；拖动滑块即写入取值',
+            'aria-describedby': note ? noteId : undefined,
+            onChange: event => { patchDraft(key, event.target.value); },
+            onKeyDown: event => { if (event.key === 'Escape') { event.stopPropagation(); closePersonaDialog(); } }
+          }),
+          h('input', {
+            className: 'cg-rename-input cg-sampling-number', id: `cg-persona-${key}-value`, type: 'number',
+            min: config.min, max: config.max, step: 'any', value: draftValue, disabled: personaUi.pending,
+            'aria-label': `${fieldLabel}数值`, 'aria-describedby': describedBy, placeholder: '留空',
+            onChange: event => { patchNumberInput(key, event); },
+            onKeyDown: event => { if (event.key === 'Escape') { event.stopPropagation(); closePersonaDialog(); } }
+          })),
+        h('span', { className: 'cg-sampling-hint', id: hintId }, `清空数字框表示不设置；这时滑块停在默认位置，拖动即写入取值。滑块按步进 ${config.step} 吸附，也可以直接输入任意小数。`),
+        note && h('p', { className: 'cg-rename-note', id: noteId }, note));
+    };
+    const savePersona = async event => {
+      event?.preventDefault?.();
+      const draft = personaUi.draft;
+      const name = String(draft?.name ?? '').trim();
+      if (!draft || personaUi.pending) return;
+      // 表单加了 `noValidate`，原生 `required` 不再替我们拦空名（在名称框里按 Enter 也会走到这里），
+      // 所以空名必须给一句话 —— 否则又是一次「点了保存什么都没发生」。
+      if (name === '') { patchPersona({ error: '人设名称不能为空。' }); return; }
+      // 正文没读到时保存会把原文清空，所以这一条比任何按钮态都硬。
+      if (draft.id && draft.textLoaded === false) return;
+      // 采样参数：留空 = 不发这个键（宿主的 `undefined` 与「缺失」等价，所以清空就是删键）；
+      // 填了但不是数字就在本地拦下，别把一个会被静默丢弃的值发出去。
+      const sampling = personaSamplingPayload(draft);
+      if (sampling.invalid.length > 0) {
+        patchPersona({ error: `${sampling.invalid.map(key => PERSONA_SAMPLING_LABELS[key]).join('、')}不是有效数字。` });
+        return;
+      }
+      // 越界的数字同理：原生 `min` / `max` 校验已经被 `noValidate` 关掉，范围只能在这里判。
+      const limitError = personaSamplingLimitError(sampling.payload);
+      if (limitError) { patchPersona({ error: limitError }); return; }
+      patchPersona({ pending: true, error: '' });
+      try {
+        // `writePersona` 的字段名是 `text`（不是 prompt），且 id 必填 —— 新建时由这里生成。
+        const id = draft.id ?? makePersonaId(name);
+        await personaRpc(draft.id ? 'update' : 'create', {
+          id,
+          name,
+          description: String(draft.description ?? '').trim(),
+          text: String(draft.text ?? ''),
+          ...sampling.payload
+        });
+        patchPersona({ pending: false, dialog: false, draft: null });
+        await loadPersonas();
+      } catch (error) {
+        patchPersona({ pending: false, error: error?.message || String(error) });
+      }
+    };
+
+    const removePersona = async item => {
+      if (typeof window.confirm === 'function' && !window.confirm(`删除人设「${item.name ?? item.id}」？`)) return;
+      patchPersona({ pending: true });
+      try {
+        await personaRpc('delete', { id: item.id });
+        patchPersona({ pending: false });
+        await loadPersonas();
+      } catch (error) {
+        patchPersona({ pending: false });
+        // 菜单里没有报错的位置，复用模式切换那条提示。
+        setModeError(error?.message || String(error));
+      }
+    };
+    // 菜单内容：内置项就是那个单选行；自定义项在行尾多两个动作。`<button>` 里不能再套
+    // `<button>`，所以自定义项由「单选行 + 动作区」两个兄弟节点组成，单选行保留 menuitemradio，
+    // 两个动作是 menuitem —— 两者都在同一个 Tab 序里，不存在被跳过的问题。
+    const personaMenuNodes = personaList.flatMap(item => {
+      const name = item.name ?? item.id;
+      const option = h(Button, {
+        key: item.id, label: name + ' 模式', role: 'menuitemradio', 'aria-checked': currentMode === item.id,
+        disabled: modePending || !currentSession || currentSession.running,
+        onClick: () => chooseMode(item.id), className: 'cg-brand-option',
+        children: [
+          h('span', { key: 'copy', className: 'cg-brand-copy' },
+            h('span', { key: 'name', className: 'cg-brand-name' }, name),
+            item.description ? h('span', { key: 'description', className: 'cg-brand-description' }, item.description) : null),
+          currentMode === item.id && h(Icon, { key: 'check', name: 'check', size: 16 })
+        ]
+      });
+      if (item.builtin) return [option];
+      // 宿主对 `DeepSeek` 与 `codex` 会以 persona/protected 拒绝删除，所以那两项不摆删除按钮：
+      // 一个点下去必然失败的菜单项比没有这一项更糟。
+      const removable = !PROTECTED_PERSONA_IDS.has(String(item.id).toLowerCase());
+      return [h('div', { key: item.id, className: 'cg-brand-custom' }, option,
+        h('span', { className: 'cg-brand-custom-actions' },
+          h(Button, { label: '编辑人设 ' + name, icon: 'edit', role: 'menuitem', className: 'cg-brand-custom-action', disabled: personaUi.pending, onClick: () => openPersonaDialog(item) }),
+          removable && h(Button, { label: '删除人设 ' + name, icon: 'trash', role: 'menuitem', className: 'cg-brand-custom-action', disabled: personaUi.pending, onClick: () => removePersona(item) })))];
+    });
+    const personaAddNode = [
+      h('div', { key: 'separator', className: 'cg-brand-separator', 'aria-hidden': true }),
+      h(Button, {
+        key: 'add', label: '增加自定义人设', role: 'menuitem', className: 'cg-brand-option cg-brand-add',
+        disabled: modePending, onClick: () => openPersonaDialog(null),
+        children: [h('span', { key: 'copy', className: 'cg-brand-copy' }, h('span', { key: 'name', className: 'cg-brand-name' }, '＋ 增加自定义人设'))]
+      })
+    ];
     const sessionSearchRef = React.useRef(null);
     const matchesQuery = id => {
       const query = sessionQuery.trim().toLowerCase();
@@ -1108,10 +1689,32 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
       const groups = openable ? childGroupsOf.get(id) : undefined;
       const childCount = (groups?.subagents.length ?? 0) + (groups?.branches.length ?? 0);
       const panelOpen = openable && childPanelOpen(id);
+      // Mirror the host's own derivation instead of inventing a second one: a pending interaction
+      // outranks running, a running child counts as the parent running, and the completion edge is
+      // only consulted when nothing is active.
+      //
+      // Only agent-spawned Sessions are skipped, and the test for that is `origin`, not `depth`.
+      // Depth is a rendering level rather than an identity: `renderGroup` passes the same value for
+      // both child groups, and the pinned and archived lists render at depth 0 whatever the row is —
+      // so a depth test would quietly mark agent rows in those two lists. `origin` is the field the
+      // grouping above already keys on, so the two can never drift apart.
+      const statusOf = key => (typeof status?.get === 'function' ? status.get(key) : status?.[key]);
+      const own = statusOf(id);
+      const runningChildren = (groups?.subagents ?? [])
+        .filter(child => (statusOf(child)?.running ?? sessions[child]?.running) === true).length;
+      const state = entry?.origin === 'subagent' || !openable
+        ? null
+        : own?.pendingInteraction !== undefined
+          ? 'waiting'
+          : (own?.running ?? entry?.running) === true || runningChildren > 0
+            ? 'running'
+            : own?.completionUnread === true
+              ? 'done'
+              : null;
       const row = h('div', {
         key: id,
         'data-session-id': id,
-        className: 'cg-task-row' + (depth > 0 ? ' cg-task-child' : '') + (childCount > 0 ? ' cg-task-with-children' : '') + (isArchived ? ' cg-task-archived' : '') + ((currentSession?.id ?? selectedTask) === id ? ' cg-task-current' : ''),
+        className: 'cg-task-row' + (depth > 0 ? ' cg-task-child' : '') + (childCount > 0 ? ' cg-task-with-children' : '') + (isArchived ? ' cg-task-archived' : '') + (state !== null ? ' cg-task-stated' : '') + ((currentSession?.id ?? selectedTask) === id ? ' cg-task-current' : ''),
         style: depth > 0 ? { '--cg-branch-indent': (depth * 12) + 'px' } : undefined,
         onMouseEnter: event => { const rect = event.currentTarget.getBoundingClientRect(); setTaskHover({ title, right: rect.right, top: rect.top }); },
         onMouseLeave: () => setTaskHover(null)
@@ -1125,6 +1728,7 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
           title: `${panelOpen ? '收起' : '展开'}子会话（子代理 ${groups?.subagents.length ?? 0} / 分支 ${groups?.branches.length ?? 0}）`,
           onClick: event => { event.stopPropagation(); toggleChildren(id); }
         }, h(Icon, { name: 'chevron', size: 11 })),
+        state !== null && h('span', { key: 'state', className: 'cg-task-status', 'data-state': state, 'aria-hidden': 'true' }),
         h(Button, { label: title, className: 'cg-pinned-row', disabled: !openable, onClick: () => { if (!openable) return; openSession(id); }, children: title }),
         h('div', { className: 'cg-task-actions' },
           openable && h(Button, { icon: 'pin', active: isPinned, label: (isPinned ? '取消置顶 ' : '置顶 ') + title, className: isPinned ? 'cg-pin-action cg-pin-on' : 'cg-pin-action', onClick: () => setPinned(id, !isPinned) }),
@@ -1177,7 +1781,7 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
         null),
       scheduled ? h('div', { className: 'cg-navigation cg-schedule-nav' }, h('div', { className: 'cg-brand-row' }, h('strong', null, '定时任务'), h(Button, { icon: 'search', label: '搜索任务', onClick: () => document.querySelector('.cg-task-search')?.focus() })), h(Button, { icon: 'plus', label: '新建任务', onClick: () => window.dispatchEvent(new CustomEvent('cg-new-task')), children: '新建任务' }), h('div', { className: 'cg-task-upcoming' }, '即将执行'), h('p', { className: 'cg-task-empty' }, '暂无已安排的任务'), h('p', { className: 'cg-task-empty' }, '草稿可在右侧查看')) : h('div', { className: 'cg-navigation' },
         h('div', { className: 'cg-brand-row' },
-          h('div', { className: 'cg-brand-anchor' }, h(Button, { label: '切换模式', className: 'cg-brand', 'data-menu-trigger': true, 'aria-haspopup': 'menu', 'aria-expanded': brandMenu, onClick: () => setBrandMenu(!brandMenu), children: [brand, h(Icon, { key: 'down', name: 'down', size: 12 })] }), brandMenu && h('div', { className: 'cg-brand-menu', role: 'menu', 'aria-label': '回复模式', 'aria-busy': modePending }, ...['DeepSeek', 'Codex'].map(name => h(Button, { key: name, label: name + ' 模式', role: 'menuitemradio', 'aria-checked': currentMode === name, disabled: modePending || !currentSession || currentSession.running, onClick: () => chooseMode(name), className: 'cg-brand-option', children: [h('span', { key: 'copy', className: 'cg-brand-copy' }, h('span', { className: 'cg-brand-name' }, name), h('span', { className: 'cg-brand-description' }, name === 'DeepSeek' ? '原版提示词' : '严谨、理性、严肃、简短')), currentMode === name && h(Icon, { key: 'check', name: 'check', size: 16 })] })), (modePending || currentSession?.running || !currentSession) && h('p', { className: 'cg-mode-status', role: 'status' }, modePending ? '正在保存…' : currentSession?.running ? '回复完成后可切换模式' : '新建或打开会话后可切换'))),
+          h('div', { className: 'cg-brand-anchor' }, h(Button, { label: '切换模式', className: 'cg-brand', 'data-menu-trigger': true, 'aria-haspopup': 'menu', 'aria-expanded': brandMenu, onClick: () => setBrandMenu(!brandMenu), children: [brand, h(Icon, { key: 'down', name: 'down', size: 12 })] }), brandMenu && h('div', { className: 'cg-brand-menu', role: 'menu', 'aria-label': '回复模式', 'aria-busy': modePending }, ...personaMenuNodes, ...personaAddNode, (modePending || currentSession?.running || !currentSession) && h('p', { className: 'cg-mode-status', role: 'status' }, modePending ? '正在保存…' : currentSession?.running ? '回复完成后可切换模式' : '新建或打开会话后可切换'))),
           h('div', { className: 'cg-brand-actions' }, h(Button, { icon: 'bell', label: '会话通知', onClick: () => setNotice(!notice) }), h(Button, { icon: 'search', label: '搜索会话', onClick: searchSessions }))),
         notice && h('div', { className: 'cg-notice', role: 'status' }, waiting ? `${waiting} 个会话有待确认请求或新的完成消息。` : '暂无待确认请求或新的完成消息。'),
         modeError && h('div', { className: 'cg-notice', role: 'alert' }, modeError),
@@ -1221,7 +1825,64 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
             renameError && h('p', { className: 'cg-rename-error', role: 'alert' }, renameError),
             h('div', { className: 'cg-rename-actions' },
               h('button', { type: 'button', className: 'cg-rename-cancel', disabled: renamePending, onClick: closeRename }, '取消'),
-              h('button', { type: 'submit', className: 'cg-rename-save', disabled: renamePending || renameTrimmed === '' }, renamePending ? '保存中…' : '保存')))));
+              h('button', { type: 'submit', className: 'cg-rename-save', disabled: renamePending || renameTrimmed === '' }, renamePending ? '保存中…' : '保存')))),
+        // 人设编辑器：结构照抄上面的重命名弹窗 —— 背板关闭、Escape、自动聚焦第一个输入、取消/保存。
+        // 字段换成名称 / 描述 / 正文；正文沿用同一个 .cg-rename-input，只补一条可拉伸的规则。
+        personaUi.dialog && h('div', { className: 'cg-rename-backdrop', onPointerDown: closePersonaDialog },
+          h('form', {
+            className: 'cg-rename-dialog', role: 'dialog', 'aria-modal': true, 'aria-label': '自定义人设',
+            // 关掉浏览器对整张表的原生校验：只要还有 `min` / `max` / `step`，它随时会在 `onSubmit`
+            // 之前把提交吞掉，而用户看不到任何原因。范围检查已经在 `savePersona` 里用红字接住。
+            noValidate: true,
+            onSubmit: savePersona, onPointerDown: event => event.stopPropagation()
+          },
+            h('h2', null, personaUi.draft?.id ? '编辑人设' : '增加自定义人设'),
+            h('label', { className: 'cg-rename-field' }, h('span', null, '名称'),
+              h('input', {
+                className: 'cg-rename-input', value: personaUi.draft?.name ?? '', autoFocus: true, required: true,
+                disabled: personaUi.pending, 'aria-label': '人设名称', placeholder: '例如：严谨审阅',
+                onChange: event => { patchDraft('name', event.target.value); },
+                onKeyDown: event => {
+                  if (event.key === 'Escape') { event.stopPropagation(); closePersonaDialog(); return; }
+                  // 输入法里回车是选词，不是提交。
+                  if (event.key === 'Enter' && (event.isComposing || event.nativeEvent?.isComposing)) event.preventDefault();
+                }
+              })),
+            h('label', { className: 'cg-rename-field' }, h('span', null, '描述'),
+              h('input', {
+                className: 'cg-rename-input', value: personaUi.draft?.description ?? '', disabled: personaUi.pending,
+                'aria-label': '人设描述', placeholder: '菜单里那一行小字，可留空',
+                onChange: event => { patchDraft('description', event.target.value); },
+                onKeyDown: event => {
+                  if (event.key === 'Escape') { event.stopPropagation(); closePersonaDialog(); return; }
+                  if (event.key === 'Enter' && (event.isComposing || event.nativeEvent?.isComposing)) event.preventDefault();
+                }
+              })),
+            h('label', { className: 'cg-rename-field' }, h('span', null, '提示词正文'),
+              h('textarea', {
+                className: 'cg-rename-input cg-rename-textarea', rows: 9, value: personaUi.draft?.text ?? '', disabled: personaUi.pending,
+                'aria-label': '人设提示词正文', placeholder: '发送给模型的完整提示词',
+                onChange: event => { patchDraft('text', event.target.value); },
+                onKeyDown: event => { if (event.key === 'Escape') { event.stopPropagation(); closePersonaDialog(); } }
+              })),
+            // 采样参数三件套。温度和 Top P 用「滑块 + 数字框」（见 samplingField）：两个控件共用
+            // 同一个草稿值，`onChange` 只把原始字符串写进草稿，转换留到保存。
+            samplingField('temperature'),
+            samplingField('top_p'),
+            // 宿主在 `max_tokens` 缺省时会重新填上 256000，所以清空这个框是「恢复默认」，不是「不设」。
+            h('label', { className: 'cg-rename-field' }, h('span', null, '最大输出'),
+              h('input', {
+                className: 'cg-rename-input', type: 'number', min: 1, step: 1,
+                value: personaUi.draft?.max_tokens ?? '', disabled: personaUi.pending,
+                'aria-label': '人设最大输出 token', placeholder: '默认 256000',
+                onChange: event => { patchNumberInput('max_tokens', event); },
+                onKeyDown: event => { if (event.key === 'Escape') { event.stopPropagation(); closePersonaDialog(); } }
+              })),
+            personaUi.draft?.id && personaUi.draft?.textLoaded === false && !personaUi.error && h('p', { className: 'cg-rename-note', role: 'status' }, '正在读取原有正文…（读到之前不能保存，避免把它清空）'),
+            personaUi.error && h('p', { className: 'cg-rename-error', role: 'alert' }, personaUi.error),
+            h('div', { className: 'cg-rename-actions' },
+              h('button', { type: 'button', className: 'cg-rename-cancel', disabled: personaUi.pending, onClick: closePersonaDialog }, '取消'),
+              h('button', { type: 'submit', className: 'cg-rename-save', disabled: personaUi.pending || String(personaUi.draft?.name ?? '').trim() === '' || Boolean(personaUi.draft?.id && personaUi.draft?.textLoaded === false) }, personaUi.pending ? '保存中…' : '保存')))));
 
   }
   // This bundle disables the shipped sidebar before declaring its replacement.
@@ -1489,3 +2150,20 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
   }
   mountSlot('conversation.input.overlay', () => ctx.slots.register({ name: 'conversation.input.overlay', id: 'chatgpt.agent-picker', order: 40 }, AgentPicker));
 }
+
+// 主题切换时冻结动画：宿主在运行时切换浅/深是把 CSS 变量内联改到 body 上并 toggle
+// `data-ds-dark-theme`，插件大量深色规则依赖该属性 —— 属性一变，浏览器会把所有受影响的
+// 入场动画（cg-soft-in / cg-model-enter）重播一遍，观感就是"切换时闪一下"。
+// 这里在属性真正变化前后各 260ms 内，把插件作用域内的过渡与动画静默掉；切换完成即恢复。
+(() => {
+  if (typeof document === 'undefined') return;
+  const shell = document.body;
+  let timer;
+  const settle = () => {
+    document.documentElement.classList.add('cg-settling');
+    clearTimeout(timer);
+    timer = setTimeout(() => document.documentElement.classList.remove('cg-settling'), 260);
+  };
+  settle();
+  new MutationObserver(settle).observe(shell, { attributes: true, attributeFilter: ['data-ds-dark-theme'] });
+})();

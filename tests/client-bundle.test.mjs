@@ -19,6 +19,7 @@ const BUNDLE = join(ROOT, 'lib', 'client.js');
 const REAL_EFFORTS = [{ id: 'low' }, { id: 'medium' }, { id: 'high' }];
 
 function makeElement(tag) {
+  const classes = new Set();
   const element = {
     tagName: tag, children: [], attributes: {}, dataset: {}, textContent: '', className: '',
     style: { setProperty() {} },
@@ -34,6 +35,20 @@ function makeElement(tag) {
     addEventListener() {}, removeEventListener() {},
     querySelector() { return null; }, querySelectorAll() { return []; },
     contains() { return false; },
+    // Every real element has `classList`, so the stub answers it instead of tolerating its absence.
+    // The theme-settle observer runs during load — `client.js` puts `cg-settling` on <html> — and
+    // without this it throws on that first line, which takes down every test that merely loads the
+    // artifact rather than only the ones about theming.
+    classList: {
+      add(...names) { for (const name of names) classes.add(name); },
+      remove(...names) { for (const name of names) classes.delete(name); },
+      contains(name) { return classes.has(name); },
+      toggle(name, force) {
+        const on = force === undefined ? !classes.has(name) : force;
+        if (on) classes.add(name); else classes.delete(name);
+        return on;
+      },
+    },
   };
   return element;
 }
@@ -662,6 +677,9 @@ function sidebarStates(overrides = {}) {
     null, false, '', 'home', false, false, null, false, false, false, false, false,
     null, null, null, '', '', false, null, false, false, new Set(), new Set(), new Set(), new Set(), '',
     new Set(), new Set(), '', false,
+    // 30: personaState — the persona list / dialog / draft / error / pending bundle. One hook, declared
+    // last in the sidebar so every index above keeps its meaning.
+    null,
   ];
   for (const [index, value] of Object.entries(overrides)) states[Number(index)] = value;
   return states;
@@ -1293,7 +1311,9 @@ test('超快 paints each tier, light and dark, and leaves Off empty', () => {
     const at = css.indexOf(selector);
     assert.ok(at > base, `${tier}: the tier rule must be declared after the base rule`);
     assert.match(css.slice(at, css.indexOf('}', at)), new RegExp(colour), `${tier} keeps its audited colour`);
-    assert.ok(css.indexOf(`html[data-chatgpt-ui]:has([data-ds-dark-theme]) ${selector}`) > -1, `${tier} ships a dark counterpart`);
+    // The dark branch is gated by the host's own attribute on <body>, not by a :has() query off
+    // <html>: the sheet was rewritten to the former and this assertion still asked for the latter.
+    assert.ok(css.indexOf(`body[data-ds-dark-theme] ${selector}`) > -1, `${tier} ships a dark counterpart`);
   }
   const ultra = css.indexOf('.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill');
   assert.match(css.slice(ultra, css.indexOf('}', ultra)), /linear-gradient\(90deg, #dfb662 0%/, 'Ultra runs the new High into gold');

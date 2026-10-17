@@ -1,1410 +1,3586 @@
 /* Target: dsh 0.2.0-rc.2. Stable data attributes first; pinned CSS modules only
+
    where that release exposes no semantic hook. All rules are fiber-scoped. */
+
 @font-face { font-family: "OpenAI Sans"; src: url("__OPENAI_SANS_REGULAR__") format("woff2"); font-style: normal; font-weight: 400; font-display: swap; }
+
 @font-face { font-family: "OpenAI Sans"; src: url("__OPENAI_SANS_MEDIUM__") format("woff2"); font-style: normal; font-weight: 500; font-display: swap; }
+
 @font-face { font-family: "OpenAI Sans"; src: url("__OPENAI_SANS_SEMIBOLD__") format("woff2"); font-style: normal; font-weight: 600; font-display: swap; }
-html[data-chatgpt-ui] { --cg-rail: 48px; --cg-sidebar: 288px; --cg-page: #fff; --cg-nav: #fbfbfb; --cg-chrome: #f3f3f3; --cg-text: #202123; --cg-muted: #999; --font-sans-default: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; --font-openai-sans: "OpenAI Sans", var(--font-sans-default); --dsw-font-family: var(--font-sans-default); font-family: var(--font-sans-default); }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) { --cg-page: #212121; --cg-nav: #171717; --cg-chrome: #171717; --cg-text: #ececec; --cg-muted: #929292; --cg-hover: #303030; }
+
+html[data-chatgpt-ui] { --cg-rail: 48px; --cg-sidebar: 288px; --cg-page: #ffffff; --dsw-alias-bg-base: #ffffff; --cg-nav: #f6f6f6; --dsw-specific-sidebar-fill: #fbfbfb; --cg-chrome: #f6f6f6; --cg-text: #2f3134; --dsw-alias-label-primary: #202123; --dsw-alias-label-secondary: #424242; --cg-muted: #82848a; --dsw-alias-label-caption: #999999; --font-sans-default: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; --font-openai-sans: "OpenAI Sans", var(--font-sans-default); --dsw-font-family: var(--font-sans-default); font-family: var(--font-sans-default); }
+
+body[data-ds-dark-theme] { --cg-page: #212121; --dsw-alias-bg-base: #212121; --cg-nav: #171717; --dsw-specific-sidebar-fill: #171717; --cg-chrome: #171717; --cg-text: #ececec; --dsw-alias-label-primary: #ececec; --dsw-alias-label-secondary: #d1d1d1; --cg-muted: #929292; --dsw-alias-label-caption: #929292; --dsw-specific-input-major: #303030; --dsw-alias-state-business-primary: #6b9fff; --cg-hover: #303030; }
+
 html[data-chatgpt-ui] body { background: var(--cg-chrome); color: var(--cg-text); font-family: var(--font-sans-default); -webkit-font-smoothing: antialiased; }
+
 /* The desktop shell draws its own title bar into the page (`#__dsh_desktop_chrome__`,
+
    because the main window runs with decorations(false)) and the skin reserves 36px for it
+
    through `html[data-dsh-title-bar-height] body { padding-top: 36px !important }`.
+
    Auto-hide it here: the app gets the full height back, and the bar slides out only while
+
    the pointer is at the top edge, so the drag handle and the window buttons stay reachable
+
    (drag = hover the top strip first, then drag; close/minimize still work). */
+
 html[data-chatgpt-ui][data-dsh-title-bar-height] body { padding-top: 0 !important; }
+
 html[data-chatgpt-ui] #__dsh_desktop_chrome__ {
+
   height: 6px; opacity: 0; overflow: hidden;
+
   transition: height 180ms ease, opacity 160ms ease;
+
 }
+
 html[data-chatgpt-ui] #__dsh_desktop_chrome__:hover,
+
 html[data-chatgpt-ui] #__dsh_desktop_chrome__:focus-within {
+
   height: 36px; opacity: 1;
+
 }
+
 @media (prefers-reduced-motion: reduce) {
+
   html[data-chatgpt-ui] #__dsh_desktop_chrome__ { transition: none; }
+
 }
+
+/* 聊天/工作分段控件的深色底：原本与宿主类名并列写在一条规则里，剔除宿主那半时被连坐删掉。 */
+
+body[data-ds-dark-theme] .cg-tabs { background: #292929; }
+
+
+
 html[data-chatgpt-ui] #root { box-sizing: border-box; padding: 4px 4px 4px 48px !important; height: 100dvh; }
+
 html[data-chatgpt-ui] .pI_x6G_frame { box-sizing: border-box; border: 0; box-shadow: 0 1px 5px #0000000d, 0 0 1px #00000014; border-radius: 13px 13px 4px 13px; background: var(--cg-page); }
+
 html[data-chatgpt-ui] .pI_x6G_frame:not([data-sidebar-collapsed])[data-rightbar-collapsed] { grid-template-columns: 288px minmax(0, 1fr) 0 !important; }
-html[data-chatgpt-ui] .pI_x6G_sidebarCol { background: var(--cg-nav); border-right: 1px solid #e2e2e2; }
+
+html[data-chatgpt-ui] .pI_x6G_sidebarCol { background: var(--cg-nav); border-right: 1px solid #ececec; }
+
 /* The fixed icon rail already supplies collapsed navigation. Reclaim the
+
    native compact sidebar track without changing the right-panel drag math. */
+
 html[data-chatgpt-ui] .pI_x6G_frame[data-sidebar-collapsed] .pI_x6G_sidebarCol { grid-column: 1; grid-row: 1; width: 0; min-width: 0; border-right: 0; overflow: visible; }
+
 html[data-chatgpt-ui] .pI_x6G_frame[data-sidebar-collapsed]:not([data-rightbar-fullscreen]) .pI_x6G_centerCol { grid-column: 1 / 3; grid-row: 1; }
+
 html[data-chatgpt-ui] .pI_x6G_frame[data-sidebar-collapsed] .pI_x6G_rightbarCol { grid-column: 3; grid-row: 1; }
+
 html[data-chatgpt-ui] .pI_x6G_handle[data-side="left"] { display: none; }
+
 html[data-chatgpt-ui] button { font-family: var(--dsw-font-family); }
+
 html[data-chatgpt-ui] button:focus-visible { outline: 2px solid #3982fa; outline-offset: 2px; }
-.cg-button { display: inline-flex; align-items: center; gap: 9px; background: none; border: 0; color: inherit; cursor: pointer; padding: 6px; border-radius: 7px; font-size: 14px; line-height: 20px; }
+
+.cg-button { display: inline-flex; align-items: center; gap: 9px; background: none; border: 0; color: var(--cg-text); cursor: pointer; padding: 6px; border-radius: 7px; font-size: 14px; line-height: 20px; }
+
 .cg-button:hover { background: var(--cg-hover); }
+
 .cg-sidebar { height: 100%; color: var(--cg-text); font-size: 14px; }
-.cg-rail { position: fixed; z-index: 24; left: 0; top: 0; bottom: 0; width: var(--cg-rail); box-sizing: border-box; padding: calc(12px + 3cm) 6px 12px; display: flex; align-items: center; flex-direction: column; gap: 8px; color: #888; }
+
+.cg-rail { position: fixed; z-index: 24; left: 0; top: 0; bottom: 0; width: var(--cg-rail); box-sizing: border-box; padding: calc(12px + 3cm) 6px 12px; display: flex; align-items: center; flex-direction: column; gap: 8px; color: var(--cg-muted); }
+
 .cg-rail > .cg-button { flex: none; width: 36px; height: 36px; padding: 9px; }
-.cg-rail .cg-home { background: #e6e7e8; color: #202123; }
+
+.cg-rail .cg-home { background: var(--cg-nav); color: var(--cg-text); }
+
 .cg-rail-bottom { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 20px; padding-bottom: 10px; }
+
 .cg-navigation { height: 100%; box-sizing: border-box; padding: 10px 14px; display: flex; flex-direction: column; }
+
 .cg-brand-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+
 .cg-brand { padding: 2px; font-size: 18px; font-weight: 600; gap: 7px; height: 30px; }
+
 .cg-brand-actions { display: flex; gap: 4px; color: #929292; }
+
 .cg-brand-actions .cg-button { padding: 6px; }
+
 .cg-brand-actions svg { width: 14px; height: 14px; }
+
 .cg-new { width: 100%; text-align: left; min-height: 32px; padding: 4px 2px; }
+
 .cg-new svg { width: 14px; height: 14px; }
+
 .cg-workspaces { flex: 1; min-height: 0; margin-top: 15px; }
+
 .cg-workspaces[hidden] { display: none; }
+
 .cg-browse { margin-top: 15px; flex: none; }
+
 .cg-pinned-label { color: var(--cg-muted); line-height: 22px; margin-bottom: 6px; }
+
 .cg-pinned-row { width: 100%; display: block; text-align: left; height: 31px; padding: 4px 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
 .cg-section-toggle { display: flex; padding: 5px 2px; color: var(--cg-muted); margin-top: 18px; gap: 5px; }
+
 .cg-projects .cg-button { display: flex; width: 100%; text-align: left; }
+
 .cg-collapsed .cg-browse { display: none; }
+
 .cg-footer { display: none; }
-.cg-menu { position: fixed; left: 48px; top: 195px; min-width: 150px; border: 1px solid #e5e5e5; border-radius: 12px; background: var(--cg-page); padding: 6px; box-shadow: 0 8px 25px #0001; }
+
+.cg-menu { position: fixed; left: 48px; top: 195px; min-width: 150px; border: 1px solid #ececec; border-radius: 12px; background: var(--cg-page); padding: 6px; box-shadow: 0 8px 25px #0001; }
+
 .cg-menu .cg-button { display: flex; width: 100%; }
-.cg-notice { padding: 10px; border: 1px solid #e5e5e5; border-radius: 10px; font-size: 12px; color: var(--cg-muted); }
+
+.cg-notice { padding: 10px; border: 1px solid #ececec; border-radius: 10px; font-size: 12px; color: var(--cg-muted); }
+
 .cg-collapsed .cg-navigation { display: none; }
+
 .cg-collapsed .cg-brand-actions,.cg-collapsed .cg-brand { display: none; }
+
 .cg-collapsed .cg-new { font-size: 0; justify-content: center; }
+
 .cg-header { flex: none; position: relative; height: 60px; }
+
 /* Reply-style tabs. `position: fixed` puts them in viewport coordinates, and the
+
    component writes `left`/`top` inline once it has measured the hero's brand mark, so
+
    neither the stylesheet cascade nor the containing block can swallow the value. Until
+
    then the fallback below centers the row. The sliding pill is one element translating
+
    between the two halves; labels cross-fade on top of it. `pointer-events` must be
+
    re-enabled: the shell overlay hosting this row is a pass-through layer, and the
+
    property is inherited. */
+
 .cg-tabs {
+
   --cg-tab-shift: 0px;
+
   position: fixed; top: 96px; left: 50%; transform: translateX(-50%);
+
   display: flex; gap: 0; width: 212px; height: 36px; padding: 0;
-  border-radius: 22px; background: #f7f7f7;
+
+  border-radius: 22px; background: #f4f4f4;
+
   pointer-events: auto; z-index: 30;
+
 }
+
 .cg-tabs[data-style="chat"] { --cg-tab-shift: 0px; }
+
 .cg-tabs[data-style="work"] { --cg-tab-shift: 106px; }
+
 .cg-tabs-slider {
+
   position: absolute; top: 2px; left: 2px; width: 104px; height: 32px;
-  border-radius: 999px; background: var(--cg-page); border: 1px solid #e8e8e8;
+
+  border-radius: 999px; background: var(--cg-page); border: 1px solid #d8d9de;
+
   box-shadow: 0 2px 4px #00000008;
+
   transform: translateX(var(--cg-tab-shift));
+
   transition: transform 260ms cubic-bezier(.22, .8, .28, 1);
+
 }
+
 .cg-tabs button {
+
   position: relative; z-index: 1; flex: 1; border: 0; background: transparent; cursor: pointer;
+
   font-size: 14px; color: var(--cg-muted); transition: color 200ms ease;
+
 }
+
 .cg-tabs button[aria-selected="true"] { color: var(--cg-text); }
+
 .cg-tabs button:focus-visible { outline: 2px solid #3982fa; outline-offset: 2px; border-radius: 22px; }
+
 .cg-tab-label { display: inline-block; transition: transform 260ms cubic-bezier(.22, .8, .28, 1); }
+
 .cg-tabs button[aria-selected="true"] .cg-tab-label { transform: scale(1.02); }
+
 @media (prefers-reduced-motion: reduce) {
+
   .cg-tabs-slider, .cg-tab-label, .cg-tabs button { transition: none; }
+
 }
-.cg-header-corner { position: absolute; right: 18px; top: 16px; color: #999; }
+
+.cg-header-corner { position: absolute; right: 18px; top: 16px; color: var(--cg-muted); }
+
 .cg-header-corner button { background: none; }
-html[data-chatgpt-ui] .wSkVaW_root { --dsh-composer-card-max-width: 642px !important; --dsh-composer-side-clearance: 0px; }
+
 /* Hero placement. The composer used to be pushed down by a margin on its seat, which lives
+
    inside the scrolling column: that margin was ~245px of scrollable content, so every line
+
    the composer grew while typing scrolled the column further down. Centring places it at
+
    roughly the same height with no extra scrollable content, and `safe` keeps the top
+
    reachable if the composer ever grows past the column. */
+
 html[data-chatgpt-ui] [data-content-phase="hero"] [data-conversation-scroll] { justify-content: safe center; scrollbar-gutter: auto; margin: 0; }
+
 html[data-chatgpt-ui] [data-content-phase="hero"] [data-composer-seat] { margin-top: 0; }
+
 /* Third-party "cost details" entry (dsh-cost-meter's .cm-stat-entry). It ships as a filled
+
    elevated pill (background: var(--dsw-alias-button-elevated-fill) -> #43454a in the dark theme),
+
    which makes it the only bright control among flat siblings in the session header. Flatten it to
+
    match them; the control keeps working, it just stops standing out. */
+
 html[data-chatgpt-ui] .cm-stat-entry {
+
   background: none; border: 0; padding: 2px 8px; border-radius: 8px;
+
   color: var(--cg-muted); font-size: 13px; line-height: 20px;
+
 }
+
 html[data-chatgpt-ui] .cm-stat-entry:hover,
+
 html[data-chatgpt-ui] .cm-stat-entry:focus-visible { background: var(--cg-hover); color: var(--cg-text); }
-html[data-chatgpt-ui] .wSkVaW_composerHero { width: min(642px, calc(100% - 48px)); margin: 0 auto; gap: 0; padding: 0; position: relative; }
-html[data-chatgpt-ui]:not(:has([data-ds-dark-theme])) .wSkVaW_composerHero .wSkVaW_heroWorkspaceRow { order: 5; margin: 0 14px; padding: 4px 10px; min-height: 40px; border-radius: 0 0 18px 18px; background: #f5f5f5; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .wSkVaW_composerHero .wSkVaW_heroWorkspaceRow { background: #2c2c2e; }
-html[data-chatgpt-ui] .wSkVaW_composerHero .wSkVaW_heroWorkspaceRow button { font-size: 13px; }
-html[data-chatgpt-ui] .wSkVaW_composerHero > div:first-child { margin-bottom: 15px; padding: 0; }
+
 html[data-chatgpt-ui] .pXSMma_body { display: none; }
+
 html[data-chatgpt-ui] .uV2eYG_hero { padding: 0; }
+
 /* These selectors stay hash-independent on purpose: the rules below were written against the
+
    author's build, whose CSS-module hashes (wSkVaW_*, uV2eYG_*, pI_x6G_*) this installation never
+
    emits, so every one of them silently missed here. The fish hitbox carries the brand-mark slot
+
    this plugin fills with the DeepSeek whale, so it must stay visible; only the native preview
+
    badge is dropped. */
+
 html[data-chatgpt-ui] [class*="fishHitbox"] { display: inline-flex !important; }
+
+
+
 html[data-chatgpt-ui] [class*="previewBadge"] { display: none !important; }
+
 /* One visible title only: the native headline span goes, the project name is re-drawn from a clone. */
+
 html[data-chatgpt-ui] [class*="titleGroup"] > span:not(.cg-hero-title) { display: none !important; }
+
 /* The DeepSeek mark sits above the headline, not beside it. */
+
 html[data-chatgpt-ui] [class*="headline"] { flex-direction: column; justify-content: center; align-items: center; gap: 8px; }
-html[data-chatgpt-ui] .wSkVaW_composerHero [class*="titleGroup"] { font-size: 0 !important; }
-/* The native headline, its preview badge and the chip's chevron stay in the DOM for
-   accessibility, but the visible title is `.cg-hero-title` (see the hero sync effect).
-   The native chip is hidden with the rest; the project name is re-drawn from a clone. */
-html[data-chatgpt-ui] .wSkVaW_composerHero [class*="titleGroup"] > span { display: none !important; }
-html[data-chatgpt-ui] .wSkVaW_composerHero [class*="titleGroup"]:after { content: none !important; }
-html[data-chatgpt-ui] .wSkVaW_composerHero .cg-hero-title {
-  display: inline-flex; align-items: center; gap: 12px; max-width: 100%;
-  font-size: 28px; line-height: 40px; font-weight: 400; color: var(--cg-text);
-}
+
 html[data-chatgpt-ui] .cg-hero-title-text { white-space: nowrap; }
+
 /* The project chip reuses the hero chip's own markup, so only its size and the parts that
+
    read as a control (background, hit area, chevron) are neutralized here. */
+
 html[data-chatgpt-ui] .cg-hero-title .cg-hero-project {
+
   all: unset; display: inline-flex; align-items: center; gap: 6px; max-width: 260px;
+
   padding: 3px 12px; border-radius: 999px; background: var(--cg-hover);
+
   color: var(--cg-muted); font-size: 14px; line-height: 20px; font-weight: 500;
+
   cursor: default; white-space: nowrap;
+
 }
+
+/* The workspace chip stays VISIBLE. An earlier version hid both the host chip and this plugin's clone
+
+   of it, which removed the control outright — the "工作区消失了" report. Hiding is not the goal: the
+
+   chip was only ever *flickering*, and that was a repaint loop in `client.js`, fixed there by
+
+   coalescing the observer into one pass per animation frame. Nothing about the chip needs hiding now,
+
+   so neither element is suppressed here; the clone is styled below and the host's original is hidden by
+
+   rule :137, which keeps exactly one chip on screen. */
+
 html[data-chatgpt-ui] .cg-hero-title .cg-hero-project [class*="workspaceLabel"] {
+
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+
 }
+
 html[data-chatgpt-ui] .cg-hero-title .cg-hero-project svg { width: 14px; height: 14px; flex: none; }
-html[data-chatgpt-ui] .wSkVaW_composerHero [class*="headline"] { justify-content: center; }
-html[data-chatgpt-ui] [data-composer-card] { border: 1px solid #ededed; border-radius: 24px; background: var(--cg-page); box-shadow: 0 2px 5px #00000005,0 12px 40px #00000003; padding-top: 9px; gap: 3px; }
+
+html[data-chatgpt-ui] [data-composer-card] { border: 0; border-radius: 24px; background: var(--cg-page); box-shadow: 0 2px 5px #00000005,0 12px 40px #00000003; padding-top: 9px; gap: 3px; }
+
 html[data-chatgpt-ui] [data-composer-input] { font-size: 14px; padding: 4px 12px 0; }
+
 /* Typing grows the composer; if the browser picks it as the scroll anchor it compensates by
+
    scrolling the transcript, which reads as the view sliding down a line per keystroke until
+
    it reaches the bottom. Excluding the composer alone stops that, while leaving anchoring
+
    active for messages arriving above the viewport. The app already disables anchoring itself
+
    while it is following the tail, so this only affects the reading-up case. */
+
 html[data-chatgpt-ui] [data-composer-seat],
+
 html[data-chatgpt-ui] [data-composer-card],
+
 html[data-chatgpt-ui] [data-composer-input] { overflow-anchor: none; }
+
 html[data-chatgpt-ui] .uV2eYG_hero [data-composer-input] { min-height: 47px; }
+
 html[data-chatgpt-ui] .uV2eYG_row { padding: 2px 8px 7px; gap: 8px; }
+
 html[data-chatgpt-ui] .uV2eYG_primary { width: 28px; height: 28px; transform: none; }
+
 html[data-chatgpt-ui] .uV2eYG_add { background: transparent; }
+
 html[data-chatgpt-ui] .uV2eYG_trailing,.uV2eYG_tools,.uV2eYG_modes { gap: 8px; }
+
 html[data-chatgpt-ui] .uV2eYG_dock:empty { display: none; }
-.cg-goal { font-size: 13px; padding: 0 8px; height: 26px; color: var(--cg-muted); border-left: 1px solid #eeeeee; border-radius: 0; gap: 5px; }
+
+.cg-goal { font-size: 13px; padding: 0 8px; height: 26px; color: var(--cg-muted); border-left: 1px solid #ececec; border-radius: 0; gap: 5px; }
+
 html[data-chatgpt-ui] .uV2eYG_hero { position: relative; }
+
 html[data-chatgpt-ui] .uV2eYG_hero .uV2eYG_dock { padding: 0; }
+
 html[data-chatgpt-ui] [data-slot="conversation.hero.agentPreset"] { margin-left: auto; }
-/* The picker rides the workspace row's own flex line (the host renders this slot as the last child
-   of `.Jd07YW_heroWorkspaceRow`, a `display:flex; align-items:center` box), so `margin-left:auto` on
-   the slot is what puts it at the right end. It is deliberately NOT absolutely positioned: an
-   absolute picker depends on a measurement landing, and when that measurement missed — a slot that
-   had not been laid out yet — it stayed at the stylesheet origin and showed up under the workspace
-   row. Nothing here needs a measurement, so nothing here can miss one. */
+
+/* The picker is absolutely positioned, but by static offsets (`right: 18px; bottom: 6px`) measured
+
+   against `.uV2eYG_hero`, the `position: relative` box two rules above — never by a value a script
+
+   has to compute. That distinction is the whole guard: an absolute picker whose offsets come from a
+
+   measurement landed at the stylesheet origin whenever the measurement missed (a slot not laid out
+
+   yet) and showed up under the workspace row. Nothing here needs a measurement, so nothing here can
+
+   miss one. */
+
 .cg-agent-picker { position: absolute; right: 18px; bottom: 6px; z-index: 6; display: inline-flex; align-items: center; }
-.cg-agent-trigger { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid #e8e8e8; border-radius: 999px; background: var(--cg-page); color: var(--cg-text); font-size: 13px; line-height: 20px; cursor: pointer; white-space: nowrap; }
+
+.cg-agent-trigger { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid #d7d8dd; border-radius: 999px; background: var(--cg-page); color: var(--cg-text); font-size: 13px; line-height: 20px; cursor: pointer; white-space: nowrap; }
+
 .cg-agent-trigger:hover, .cg-agent-trigger[aria-expanded=true] { background: var(--cg-hover); }
+
 .cg-agent-trigger:disabled { opacity: .6; cursor: default; }
+
 .cg-agent-trigger svg { width: 14px; height: 14px; flex: none; color: var(--cg-muted); }
+
 /* The menu opens downward, as asked: below the trigger, never above it, and it scrolls inside itself
+
    so a longer roster cannot run off the panel. The `data-flip` attribute the picker still sets has no
+
    rule here and never had one — the direction is this rule alone. */
-.cg-agent-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 60; display: flex; flex-direction: column; gap: 2px; width: min(320px, calc(100vw - 96px)); max-height: min(56vh, 380px); overflow-y: auto; overscroll-behavior: contain; padding: 6px; border: 1px solid #e8e8e8; border-radius: 14px; background: var(--cg-page); box-shadow: 0 12px 32px #0000001f; }
+
+.cg-agent-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 60; display: flex; flex-direction: column; gap: 2px; width: min(320px, calc(100vw - 96px)); max-height: min(56vh, 380px); overflow-y: auto; overscroll-behavior: contain; padding: 6px; border: 1px solid #dbdce1; border-radius: 14px; background: var(--cg-page); box-shadow: 0 12px 32px #0000001f; }
+
 .cg-agent-option { display: flex; flex-direction: column; gap: 2px; padding: 7px 10px; border: 0; border-radius: 9px; background: none; color: var(--cg-text); text-align: left; cursor: pointer; }
+
 .cg-agent-option:hover { background: var(--cg-hover); }
+
 .cg-agent-option-name { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 500; line-height: 20px; }
+
 .cg-agent-option-desc { color: var(--cg-muted); font-size: 12px; line-height: 16px; white-space: normal; }
+
 .cg-agent-note { margin: 4px 0 0; color: #d4380d; font-size: 12px; line-height: 16px; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-agent-trigger, html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-agent-menu { border-color: #383838; background: #292929; }
-html[data-chatgpt-ui] .wSkVaW_composerHero .wSkVaW_heroWorkspaceRow { box-sizing: border-box; height: 40px; }
+
+body[data-ds-dark-theme] .cg-agent-trigger, body[data-ds-dark-theme] .cg-agent-menu { border-color: #383838; background: #292929; }
+
 html[data-chatgpt-ui] .cg-workspaces [class*="sectionHeader"] { padding-inline: 0; }
+
 html[data-chatgpt-ui] .cg-workspaces [class*="sectionLabel"] { color: var(--cg-muted); font-weight: 400; }
+
 html[data-chatgpt-ui] .cg-workspaces [class*="treeBody"] { padding-inline: 0; }
+
 html[data-chatgpt-ui] .cg-workspaces [class*="sessionRow"] { min-height: 31px; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-tabs,html[data-chatgpt-ui]:has([data-ds-dark-theme]) .wSkVaW_heroWorkspaceRow { background: #292929; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .pI_x6G_frame,html[data-chatgpt-ui]:has([data-ds-dark-theme]) [data-composer-card],html[data-chatgpt-ui]:has([data-ds-dark-theme]) .pI_x6G_sidebarCol { border-color: #383838; }
-@media (max-width: 720px) { html[data-chatgpt-ui] #root { padding: 4px 4px 4px 48px; } .cg-rail { width: 48px; padding-inline: 6px; } .cg-header { height: 56px; } .cg-tabs { width: 170px; } html[data-chatgpt-ui] .wSkVaW_composerHero { width: calc(100% - 24px); } html[data-chatgpt-ui] [class*="titleGroup"]:after { font-size: 24px; } }
+
+body[data-ds-dark-theme] .pI_x6G_frame,body[data-ds-dark-theme] [data-composer-card],body[data-ds-dark-theme] .pI_x6G_sidebarCol { border-color: #383838; }
+
+@media (max-width: 720px) { html[data-chatgpt-ui] #root { padding: 4px 4px 4px 48px; } .cg-rail { width: 48px; padding-inline: 6px; } .cg-header { height: 56px; } .cg-tabs { width: 170px; }
+
+ html[data-chatgpt-ui] [class*="titleGroup"]:after { font-size: 24px; } }
+
 @media (max-width: 720px) {
+
   html[data-chatgpt-ui] .pI_x6G_frame[data-sidebar-collapsed][data-rightbar-collapsed] { grid-template-columns: 0 minmax(0,1fr) 0 !important; }
+
   html[data-chatgpt-ui] [data-sidebar-collapsed] .cg-tabs { left: 50%; }
-  html[data-chatgpt-ui] .wSkVaW_composerHero .wSkVaW_heroWorkspaceRow { margin-inline: 10px; }
+
 }
+
+
 
 html[data-chatgpt-ui] { --cg-laptop: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%224%22%20y%3D%224%22%20width%3D%2216%22%20height%3D%2212%22%20rx%3D%222%22%2F%3E%3Cpath%20d%3D%22M3%2018h18l1%202H2l1-2Z%22%2F%3E%3C%2Fsvg%3E"); }
+
 .cg-rail > .cg-button svg { width: 18px; height: 18px; flex: none; }
+
 .cg-rail > .cg-home { padding: 10px; }
+
 .cg-goal [data-icon="target"] { width: 16px; height: 16px; }
 
+
+
 html[data-chatgpt-ui] { --cg-corner: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%223%22%2F%3E%3Cpath%20d%3D%22M12%207v10M7%2012h10%22%2F%3E%3C%2Fsvg%3E"); }
+
 html[data-chatgpt-ui] { --cg-folder: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M3%208V6a2%202%200%200%201%202-2h5l3%203h6a2%202%200%200%201%202%202v10a2%202%200%200%201-2%202H5a2%202%200%200%201-2-2V8Zm0%202h18%22%2F%3E%3C%2Fsvg%3E"); }
+
 html[data-chatgpt-ui] [data-slot="conversation.hero.agentPreset"] > .cubgiG_menuAnchor { margin-left: auto; }
+
 html[data-chatgpt-ui] [data-slot="conversation.hero.agentPreset"] .cubgiG_seatLabel { display: none; }
+
 html[data-chatgpt-ui] [data-slot="conversation.hero.agentPreset"] button:after { display: block; flex: 0 0 16px; }
+
 html[data-chatgpt-ui] [data-sidebar-right-expand] svg { display: none; }
-html[data-chatgpt-ui] [data-sidebar-right-expand]:after { content: ''; display: block; width: 14px; height: 14px; background: #999; mask: var(--cg-corner) center / contain no-repeat; }
+
+html[data-chatgpt-ui] [data-sidebar-right-expand]:after { content: ''; display: block; width: 14px; height: 14px; background: #6b6b6b; mask: var(--cg-corner) center / contain no-repeat; }
+
 html[data-chatgpt-ui] .pXSMma_folder { background: currentColor; mask: var(--cg-folder) center / contain no-repeat; }
+
 html[data-chatgpt-ui] .pXSMma_folder > * { display: none; }
+
 html[data-chatgpt-ui] ._7KE1Ra_triggerIcon { display: none; }
-.cg-settings { position: relative; width: 36px; height: 36px; color: #888; }
-.cg-settings button { position: absolute !important; inset: 0; display: flex !important; align-items: center; justify-content: center; border: 0; padding: 9px !important; width: 36px !important; height: 36px !important; border-radius: 7px; color: inherit; background: transparent; }
+
+.cg-settings { position: relative; width: 36px; height: 36px; color: #6b6b6b; }
+
+.cg-settings button { position: absolute !important; inset: 0; display: flex !important; align-items: center; justify-content: center; border: 0; padding: 9px !important; width: 36px !important; height: 36px !important; border-radius: 7px; color: var(--cg-text); background: transparent; }
+
 .cg-settings button:hover { background: var(--cg-hover); }
+
 .cg-settings button svg { width: 18px; height: 18px; }
+
 .cg-native-settings[hidden] { display: none !important; }
-.cg-account-menu { position: fixed; z-index: 1000; left: 8px; bottom: 54px; width: min(228px, calc(100vw - 16px)); box-sizing: border-box; padding: 6px; border: 1px solid #e5e5e5; border-radius: 20px; background: var(--cg-page); color: var(--cg-text); box-shadow: 0 6px 20px #00000012; animation: cg-model-enter 120ms ease-out; }
+
+.cg-account-menu { position: fixed; z-index: 1000; left: 8px; bottom: 54px; width: min(228px, calc(100vw - 16px)); box-sizing: border-box; padding: 6px; border: 1px solid #dbdce1; border-radius: 20px; background: var(--cg-page); color: var(--cg-text); box-shadow: 0 6px 20px #00000012; animation: cg-model-enter 120ms ease-out; }
+
 .cg-account-summary { display: flex; align-items: center; gap: 8px; padding: 6px 5px 4px; min-height: 46px; }
-.cg-account-avatar { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; background: #4d6bfe; color: white; font-size: 11px; }
+
+.cg-account-avatar { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; background: #4a68d8; color: white; font-size: 11px; }
+
 .cg-account-title { font-size: 13px; line-height: 18px; }
+
 .cg-account-balance { font-size: 15px; font-weight: 500; line-height: 21px; overflow-wrap: anywhere; }
-.cg-account-caption { color: #999; font-size: 11px; line-height: 16px; }
+
+.cg-account-caption { color: #6b6b6b; font-size: 11px; line-height: 16px; }
+
 .cg-account-separator { height: 1px; background: color-mix(in srgb, var(--cg-text) 9%, transparent); margin: 5px 6px; }
+
 .cg-settings .cg-account-menu > .cg-button { position: static !important; inset: auto; justify-content: flex-start; width: 100% !important; height: 29px !important; padding: 4px 6px !important; border-radius: 9px; color: var(--cg-text); font-size: 13px; line-height: 20px; gap: 7px; }
+
 .cg-settings .cg-account-menu > .cg-button:hover { background: var(--cg-hover); }
+
 .cg-settings .cg-account-menu > .cg-button:disabled { opacity: .5; cursor: default; }
+
 .cg-settings .cg-account-menu > .cg-button svg { width: 15px; height: 15px; flex: none; }
-.cg-account-hint { margin-left: auto; color: #999; font-size: 12px; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-account-menu { border-color: #383838; }
+
+.cg-account-hint { margin-left: auto; color: #6b6b6b; font-size: 12px; }
+
+body[data-ds-dark-theme] .cg-account-menu { border-color: #383838; }
+
 @media (prefers-reduced-motion: reduce) { .cg-account-menu { animation: none; } }
+
+
 
 html[data-chatgpt-ui]:not([data-cg-setting-goal]) [data-slot="conversation.hero.agentPreset"] > * { display: none; }
 
+
+
 .cg-goal { display: inline-flex; align-items: center; cursor: default; }
+
 html[data-chatgpt-ui]:not([data-cg-setting-goal]) .cg-goal { display: none; }
 
+
+
 .cg-brand-anchor { position: relative; }
+
 .cg-brand { border-radius: 12px; padding: 3px 6px; margin-left: -6px; }
+
 .cg-brand:hover,.cg-brand[aria-expanded="true"] { background: var(--cg-hover); }
+
 .cg-brand-menu { box-sizing: border-box; position: absolute; z-index: 30; top: 36px; left: -2px; width: 240px; padding: 4px; border: 1px solid #e5e5e5; border-radius: 17px; background: var(--cg-page); box-shadow: 0 8px 24px #0000000c; }
+
 .cg-brand-menu .cg-brand-option { display: flex; justify-content: space-between; width: 100%; min-height: 54px; padding: 9px 8px; border-radius: 13px; text-align: left; gap: 12px; font-size: 13px; }
+
 .cg-brand-option:hover,.cg-brand-option:focus-visible { background: #f1f1f1; }
+
 .cg-brand-copy { display: flex; flex-direction: column; gap: 1px; }
+
 .cg-brand-name { line-height: 18px; color: var(--cg-text); }
+
 .cg-brand-description { color: var(--cg-muted); font-size: 12px; line-height: 17px; }
+
 .cg-brand-option > svg { flex: none; color: #555; margin-right: 3px; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-brand-option:hover,html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-brand-option:focus-visible { background: #303030; }
+
+body[data-ds-dark-theme] .cg-brand-option:hover,body[data-ds-dark-theme] .cg-brand-option:focus-visible { background: #303030; }
+
+/* 分隔线把内置人设与「增加自定义人设」分开。1px 的实心线用固定灰，所以两套主题各给一条。 */
+
+.cg-brand-separator { height: 1px; margin: 4px 8px; background: #e5e5e5; }
+
+body[data-ds-dark-theme] .cg-brand-separator { background: #3a3a3a; }
+
+/* 自定义人设这一行：单选行与行尾的编辑/删除是兄弟节点（button 里不能再套 button），
+
+   所以外面多套一层 flex。下面几条只负责排布、不写固定颜色，因此不需要 dark 分支。 */
+
+.cg-brand-custom { display: flex; align-items: center; gap: 2px; }
+
+.cg-brand-custom > .cg-brand-option { flex: 1 1 auto; min-width: 0; }
+
+.cg-brand-custom-actions { display: flex; flex: none; align-items: center; gap: 2px; padding-right: 4px; }
+
+.cg-brand-custom .cg-brand-custom-action { padding: 6px; }
+
+.cg-brand-custom .cg-brand-custom-action svg { width: 14px; height: 14px; }
+
+.cg-brand-add { color: var(--cg-muted); }
+
+
 
 .cg-schedule-nav strong { font-size: 18px; }
+
 .cg-task-upcoming { margin-top: 18px; color: var(--cg-muted); font-size: 14px; }
+
 .cg-task-empty { color: var(--cg-muted); font-size: 13px; margin: 12px 0 0; }
+
 .cg-schedules { height: 100%; overflow: auto; background: var(--cg-page); color: var(--cg-text); }
+
 .cg-schedule-content { max-width: 738px; margin: 0 auto; padding: clamp(70px, 23vh, 245px) 24px 60px; }
+
 .cg-task-clock { font-size: 44px; line-height: 54px; text-align: center; }
+
 .cg-schedule-content h1 { font-size: 18px; font-weight: 500; text-align: center; margin: 10px 0 4px; }
+
 .cg-task-subtitle { text-align: center; color: var(--cg-muted); font-size: 14px; margin: 0 0 46px; }
+
 .cg-task-templates { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
-.cg-task-template { display: flex; align-items: center; gap: 16px; min-height: 110px; padding: 20px; border: 1px dashed #e8e8e8; border-radius: 24px; color: var(--cg-text); background: transparent; text-align: left; cursor: pointer; }
+
+.cg-task-template { display: flex; align-items: center; gap: 16px; min-height: 110px; padding: 20px; border: 1px dashed #d7d8dd; border-radius: 24px; color: var(--cg-text); background: transparent; text-align: left; cursor: pointer; }
+
 .cg-task-template:hover { background: var(--cg-hover); }
+
 .cg-task-template strong { font-size: 16px; font-weight: 400; }
+
 .cg-task-emoji { flex: none; width: 24px; font-size: 26px; }
+
 .cg-task-description { display: block; font-size: 14px; line-height: 21px; color: var(--cg-muted); margin-top: 4px; }
+
 .cg-task-note { font-size: 12px; color: var(--cg-muted); text-align: center; margin-top: 24px; }
+
 .cg-task-drafts { margin-top: 28px; }
+
 .cg-task-drafts h2,.cg-task-modal h2 { font-size: 18px; font-weight: 500; }
+
 .cg-task-drafts article { border-bottom: 1px solid #eee; padding: 16px 0; }
+
 .cg-task-drafts article > span { float: right; font-size: 12px; color: var(--cg-muted); }
+
 .cg-task-drafts article p { font-size: 14px; }
+
 .cg-task-modal-backdrop { position: fixed; inset: 0; z-index: 100; background: #0004; display: grid; place-items: center; }
+
 .cg-task-error { margin: 8px 0 0; color: #c54545; font-size: 12px; line-height: 17px; }
+
 .cg-task-modal { width: min(420px,calc(100vw - 80px)); padding: 24px; border-radius: 20px; background: var(--cg-page); box-shadow: 0 20px 80px #0002; }
+
 .cg-task-modal label { display: block; font-size: 13px; margin: 14px 0; }
+
 .cg-task-modal input,.cg-task-modal textarea,.cg-task-modal select,.cg-task-search,.cg-session-search-input { box-sizing: border-box; display: block; width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 9px; background: var(--cg-page); color: var(--cg-text); margin-top: 6px; font: inherit; }
+
 /* The session search field is the plugin's own: the native one lives in a container this plugin
+
    renders hidden, where it can be neither seen nor focused. */
+
 .cg-session-search { margin: 4px 0 2px; }
+
 .cg-session-search-input { margin-top: 0; padding: 7px 10px; font-size: 13px; }
-.cg-session-search-empty { margin: 6px 2px; font-size: 12px; line-height: 17px; color: #737373; }
+
+.cg-session-search-empty { margin: 6px 2px; font-size: 12px; line-height: 17px; color: var(--cg-muted); }
+
 .cg-task-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
 .cg-task-form-actions > button[type=submit] { background: #3982fa; color: white; border: 0; border-radius: 8px; padding: 8px 16px; cursor: pointer; }
+
 @media(max-width: 850px) { .cg-task-templates { grid-template-columns: 1fr; } .cg-schedule-content { padding-top: 60px; } }
 
+
+
 .cg-model-root { position: relative; min-width: 0; color: var(--cg-text); }
-.cg-model-trigger { display: inline-flex; align-items: center; gap: 4px; max-width: min(300px,38vw); height: 28px; padding: 0 5px; border: 0; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; font-size: 12px; white-space: nowrap; }
+
+.cg-model-trigger { display: inline-flex; align-items: center; gap: 4px; max-width: min(300px,38vw); height: 28px; padding: 0 5px; border: 0; border-radius: 8px; background: transparent; color: var(--cg-text); cursor: pointer; font-size: 12px; white-space: nowrap; }
+
 .cg-model-trigger:hover { background: var(--cg-hover); }
+
 .cg-model-trigger:disabled { opacity: .5; cursor: default; }
+
 .cg-model-trigger-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
 .cg-model-trigger-effort { color: var(--cg-muted); }
+
 .cg-model-trigger-effort[data-ultra="true"] { color: #9b50ff; }
+
 /* Max's label takes the light purple end of the ramp — in the composer label and in the
+
    popover's headline. Only the text: the other accents keep their own colour roles. */
+
 .cg-model-root[data-effort="xhigh"] .cg-model-trigger-effort,
+
 .cg-model-root[data-effort="max"] .cg-model-trigger-effort,
+
 .cg-model-popover[data-effort="xhigh"] .cg-model-summary strong,
+
 .cg-model-popover[data-effort="max"] .cg-model-summary strong { color: #a273f2; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-effort="xhigh"] .cg-model-trigger-effort,
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-effort="max"] .cg-model-trigger-effort,
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-popover[data-effort="xhigh"] .cg-model-summary strong,
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-popover[data-effort="max"] .cg-model-summary strong { color: #c9aaff; }
+
+body[data-ds-dark-theme] .cg-model-root[data-effort="xhigh"] .cg-model-trigger-effort,
+
+body[data-ds-dark-theme] .cg-model-root[data-effort="max"] .cg-model-trigger-effort,
+
+body[data-ds-dark-theme] .cg-model-popover[data-effort="xhigh"] .cg-model-summary strong,
+
+body[data-ds-dark-theme] .cg-model-popover[data-effort="max"] .cg-model-summary strong { color: #c9aaff; }
+
 .cg-model-trigger svg { color: var(--cg-muted); width: 12px; height: 12px; flex: none; }
-.cg-model-popover { --cg-effort-color: #3982fa; box-sizing: border-box; width: 256px; position: absolute; z-index: 60; right: 0; bottom: calc(100% + 10px); padding: 11px 12px 12px; border: 1px solid #e6e6e6; border-radius: 19px; background: var(--cg-page); box-shadow: 0 6px 14px #0000000c; }
+
+.cg-model-popover { --cg-effort-color: #3982fa; color: var(--cg-text); box-sizing: border-box; width: 256px; position: absolute; z-index: 60; right: 0; bottom: calc(100% + 10px); padding: 11px 12px 12px; border: 1px solid #e6e6e6; border-radius: 19px; background: var(--cg-page); box-shadow: 0 6px 14px #0000000c; }
+
 .cg-model-popover[data-ultra="true"] { --cg-effort-color: #9b50ff; }
+
 /* A model row is a selector plus its rename affordance. The button is a sibling of the selector (a
+
    button inside a button is invalid markup) and stays out of the way: its box is always reserved so
+
    nothing shifts, but it only becomes visible under the pointer. It carries no colour of its own —
+
    an accent tinted by the current effort tier looked like it belonged to a different surface — so it
+
    is the row's muted tone, and the row's own text tone under the pointer. */
+
 .cg-model-row { display: flex; align-items: center; gap: 2px; }
+
 .cg-model-row .cg-model-option { flex: 1 1 auto; min-width: 0; }
+
 .cg-model-rename { display: flex; flex: none; width: 20px; height: 20px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 6px; background: transparent; opacity: 0; color: var(--cg-muted); cursor: pointer; transition: opacity 120ms ease; }
+
 .cg-model-row:hover .cg-model-rename, .cg-model-rename:focus-visible { opacity: .45; }
+
 .cg-model-rename:hover, .cg-model-rename:focus-visible { opacity: .9; color: var(--cg-text); }
+
 /* The rename field takes the name's own place inside the row: no frame, the row's type, and it
+
    wraps — a long name makes the box taller instead of running off the edge. The two glyphs at its
+
    ends are the row's muted tone with no fill, so they read as part of the row, not as a form. */
+
 .cg-model-row-editing { gap: 2px; align-items: flex-start; }
+
 .cg-model-alias-input { box-sizing: border-box; flex: 1 1 auto; min-width: 0; margin: 0 2px; padding: 2px 2px 3px; border: 0; border-bottom: 1px solid var(--cg-effort-color); border-radius: 0; background: transparent; color: var(--cg-text); font: inherit; font-size: 13px; line-height: 18px; /* No height cap at all: a long name keeps making the field taller, which is what "no limit" has to mean. The list around it is the only thing that scrolls. */ overflow: hidden; resize: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+
 .cg-model-alias-input:focus { outline: none; }
+
 .cg-model-alias-input::placeholder { color: var(--cg-muted); }
+
 /* The two glyphs are the same weight and the same tone: a bright tick next to a dim cross read as
+
    two different kinds of control, which is what made the pair look foreign in a list of names. */
+
 .cg-model-alias-save, .cg-model-alias-cancel { display: flex; flex: none; width: 20px; height: 20px; margin-top: 1px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--cg-muted); opacity: .75; cursor: pointer; }
+
 .cg-model-alias-save:hover, .cg-model-alias-cancel:hover { color: var(--cg-text); opacity: 1; }
+
 .cg-model-top { position: relative; display: flex; justify-content: center; align-items: center; min-height: 20px; color: var(--cg-effort-color); }
+
 /* Reaching Ultra stands the three controls down for a moment and puts the cost notice in
+
    their row — the same exchange the original client makes. They fade rather than unmount so
+
    the popover keeps its height and nothing jumps when the notice arrives or leaves. */
+
 .cg-model-ultra-notice {
+
   position: absolute; inset: 0; display: grid; place-items: center;
+
   color: #a273f2; font-size: 12px; letter-spacing: .2px; white-space: nowrap;
+
   opacity: 0; visibility: hidden; pointer-events: none;
+
   transition: opacity 180ms ease, visibility 0s linear 180ms;
+
 }
+
 .cg-model-popover[data-notice="true"] .cg-model-ultra-notice {
+
   opacity: 1; visibility: visible;
+
   transition: opacity 180ms ease, visibility 0s linear 0s;
+
 }
+
 .cg-model-popover[data-notice="true"] .cg-model-zap,
+
 .cg-model-popover[data-notice="true"] .cg-model-summary,
+
 .cg-model-popover[data-notice="true"] .cg-model-reset {
+
   opacity: 0; visibility: hidden;
+
   transition: opacity 180ms ease, visibility 0s linear 180ms;
+
 }
+
 .cg-model-popover .cg-model-zap,
+
 .cg-model-popover .cg-model-summary,
+
 .cg-model-popover .cg-model-reset { transition: opacity 180ms ease, visibility 0s linear 0s; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-ultra-notice { color: #c9aaff; }
+
+body[data-ds-dark-theme] .cg-model-ultra-notice { color: #c9aaff; }
+
 @media (prefers-reduced-motion: reduce) {
+
   .cg-model-ultra-notice,
+
   .cg-model-popover .cg-model-zap,
+
   .cg-model-popover .cg-model-summary,
+
   .cg-model-popover .cg-model-reset { transition: none; }
+
 }
+
 .cg-model-top strong { font-size: 14px; font-weight: 600; }
+
 .cg-model-zap { position: absolute; left: 0; top: 1px; width: 16px; height: 16px; color: var(--cg-effort-color); }
-.cg-model-reset { position: absolute; right: -2px; top: -2px; display: grid; place-items: center; width: 24px; height: 24px; padding: 4px; border: 0; border-radius: 50%; background: transparent; color: #999; cursor: pointer; }
+
+.cg-model-reset { position: absolute; right: -2px; top: -2px; display: grid; place-items: center; width: 24px; height: 24px; padding: 4px; border: 0; border-radius: 50%; background: transparent; color: var(--cg-muted); cursor: pointer; }
+
 .cg-model-reset:hover { background: var(--cg-hover); }
+
 .cg-model-reset svg { width: 16px; height: 16px; }
-.cg-model-choice { display: flex; justify-content: center; align-items: center; gap: 2px; width: 100%; height: 20px; padding: 0; margin: 0 0 10px; border: 0; background: none; color: #888; font-size: 12px; cursor: pointer; }
+
+.cg-model-choice { display: flex; justify-content: center; align-items: center; gap: 2px; width: 100%; height: 20px; padding: 0; margin: 0 0 10px; border: 0; background: none; color: var(--cg-muted); font-size: 12px; cursor: pointer; }
+
 .cg-model-choice svg { width: 11px; height: 11px; }
+
 .cg-model-slider-shell { position: relative; height: 28px; margin: 0; border-radius: 20px; background: #e8e6e8; box-shadow: inset 0 0 0 1px #00000004; }
-/* The pill is deliberately thinner than the shell: the knob (26px) has to overhang it, or a circle and a
+
+/* The pill is deliberately thinner than the shell: the knob (24px) has to overhang it, or a circle and a
+
    24px track of the same height read as one flush shape rather than a circle on a track. */
+
 .cg-model-slider-fill { position: absolute; left: 0; top: 4px; height: 20px; border-radius: 10px; pointer-events: none; background: var(--cg-effort-color); }
+
 .cg-model-popover[data-ultra="true"] .cg-model-slider-fill { background: linear-gradient(95deg,#5055f5,#bb74ff); }
+
 .cg-model-slider-dots { position: absolute; inset: 0 12px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
+
 .cg-model-slider-dots span { width: 4px; height: 4px; border-radius: 50%; background: #b7b4b7; }
+
 /* The input is the drag surface and keeps the keyboard behaviour, but it is not the *painted* control:
+
    the plugin draws the track, the fill, the tier dots and the round knob itself.
+
    `opacity: 0` rather than styling the thumb pseudo-element, because that is the only way that does not
+
    depend on the browser honouring `appearance: none` on `::-webkit-slider-thumb`. In the owner's build
+
    it did not: the native widget kept painting a white rounded square at the value position while
+
    ignoring `background: transparent` on that pseudo-element. Opacity affects the whole native widget,
+
    whatever it decides to draw, and it does not affect hit testing — the slider still drags and still
+
    takes arrow keys. Every white box this plugin owns is circular by construction (`.cg-model-thumb` is
-   28x28 with `border-radius: 50%`), so the square was never ours to round.
+
+   24x24 with `border-radius: 50%`), so the square was never ours to round.
+
    The focus ring moves to the shell, since an invisible input cannot show one. */
+
 .cg-model-slider { appearance: none; -webkit-appearance: none; box-sizing: border-box; position: relative; width: 100%; height: 28px; margin: 0; background: transparent; cursor: pointer; display: block; border: 0; padding: 0; opacity: 0; }
+
 .cg-model-slider-shell:has(.cg-model-slider:focus-visible) { outline: 2px solid #3982fa; outline-offset: 4px; }
+
 /* The plugin draws its own knob (`.cg-model-thumb`), so the input's own thumb is made *invisible*
+
    rather than styled. Reason, observed: with `appearance: none` only declared unprefixed, some WebKit
+
    builds never apply it to the `::-webkit-slider-thumb` pseudo-element, and the native control kept
+
    painting a small white rounded square on top of our round knob — the "white square" the owner asked
+
    about. `border-radius` could never have fixed that, because the square was not our element. The
+
    knob itself is still rendered whenever the slider is, so nothing becomes invisible by accident. */
+
 .cg-model-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 24px; height: 24px; border: 0; border-radius: 50%; background: transparent; box-shadow: none; }
+
 .cg-model-slider::-moz-range-thumb { width: 24px; height: 24px; border: 0; border-radius: 50%; background: transparent; box-shadow: none; }
+
 .cg-model-slider:disabled { cursor: default; opacity: .6; }
+
 .cg-model-catalog { display: flex; flex-direction: column; max-height: 260px; overflow: auto; gap: 3px; padding: 2px 0 0; }
+
 .cg-model-provider { color: var(--cg-muted); font-size: 11px; padding: 6px 4px; }
-.cg-model-option { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 7px; border: 0; border-radius: 8px; background: none; color: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+
+.cg-model-option { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 7px; border: 0; border-radius: 8px; background: none; color: var(--cg-text); font-size: 12px; text-align: left; cursor: pointer; }
+
 .cg-model-option:hover,.cg-model-option:focus-visible { background: var(--cg-hover); }
+
 .cg-model-option svg { width: 14px; height: 14px; flex: none; }
+
 .cg-model-error { font-size: 11px; color: #c54545; line-height: 16px; margin: 8px 0 0; }
+
 .cg-model-message { font-size: 12px; color: var(--cg-muted); text-align: center; margin: 8px 0; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-popover { border-color: #444; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-shell { background: #494649; }
+
+body[data-ds-dark-theme] .cg-model-popover { border-color: #444; }
+
+body[data-ds-dark-theme] .cg-model-slider-shell { background: #494649; }
+
 @media(max-width: 720px) { .cg-model-popover { width: min(256px,calc(100vw - 80px)); } .cg-model-trigger { max-width: 40vw; } }
+
+
 
 .cg-model-search { box-sizing: border-box; width: 100%; font-size: 12px; padding: 8px; margin: 4px 0; color: var(--cg-text); background: var(--cg-page); border: 1px solid #ddd; border-radius: 8px; }
 
+
+
 .cg-model-top { min-height: 40px; margin-bottom: 10px; }
+
 .cg-model-summary { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 102px; max-width: 190px; height: 40px; padding: 3px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--cg-effort-color); cursor: pointer; }
+
 .cg-model-summary:hover,.cg-model-summary:focus-visible { background: #f1f1f3; }
-.cg-model-summary-name { display: flex; align-items: center; justify-content: center; max-width: 100%; color: #888; font-size: 12px; line-height: 16px; white-space: nowrap; }
+
+.cg-model-summary-name { display: flex; align-items: center; justify-content: center; max-width: 100%; color: #6b6b6b; font-size: 12px; line-height: 16px; white-space: nowrap; }
+
 .cg-model-summary-name svg { width: 11px; height: 11px; flex: none; }
+
 .cg-model-reset { border-radius: 7px; }
-.cg-model-reset:hover,.cg-model-reset:focus-visible { background: #f1f1f3; }
-.cg-model-tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); padding: 7px 12px; border-radius: 13px; background: #1c1e20; color: #fff; font-size: 12px; line-height: 16px; white-space: nowrap; box-shadow: 0 5px 14px #0002; pointer-events: none; }
+
+.cg-model-reset:hover,.cg-model-reset:focus-visible { background: var(--cg-hover); }
+
+.cg-model-tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); padding: 7px 12px; border-radius: 13px; background: #f2f4f7; color: #33353b; font-size: 12px; line-height: 16px; white-space: nowrap; box-shadow: 0 5px 14px #0002; pointer-events: none; }
+
 .cg-model-reset:hover .cg-model-tooltip,.cg-model-reset:focus-visible .cg-model-tooltip { display: block; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-summary:hover,html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-summary:focus-visible,html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-reset:hover,html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-reset:focus-visible { background: #404043; }
 
-.cg-rail-item { position: relative; justify-content: center; border-radius: 11px; color: #888; }
+body[data-ds-dark-theme] .cg-model-summary:hover,body[data-ds-dark-theme] .cg-model-summary:focus-visible,body[data-ds-dark-theme] .cg-model-reset:hover,body[data-ds-dark-theme] .cg-model-reset:focus-visible { background: #404043; }
+
+
+
+.cg-rail-item { position: relative; justify-content: center; border-radius: 11px; color: #6b6b6b; }
+
 /* The rail's hover growth lives on the *icon*, not on the button box: the name tooltip is a child of
+
    the button, so scaling the box dragged the tooltip along and made the label twitch for the length
+
    of the transition. Growing the glyph keeps the same feedback and leaves the tooltip's geometry
+
    alone. */
+
 .cg-rail-item:hover { background: #e7e7e7; color: #202123; }
+
 .cg-rail > .cg-rail-item:hover { box-shadow: 0 3px 10px #00000026; }
+
 .cg-rail > .cg-rail-item svg { transition: transform 160ms cubic-bezier(.22, .8, .28, 1); }
+
 .cg-rail > .cg-rail-item:hover svg { transform: scale(1.2); }
+
 .cg-rail > .cg-rail-item:active svg { transform: scale(.94); }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-rail > .cg-rail-item:hover { box-shadow: 0 3px 10px #00000059; }
+
+body[data-ds-dark-theme] .cg-rail > .cg-rail-item:hover { box-shadow: 0 3px 10px #00000059; }
+
 .cg-rail-item.cg-rail-selected { background: #e7e7e7; color: #202123; }
+
 /* The name label arrives: hidden by opacity + visibility rather than `display`, because `display`
+
    cannot be transitioned and a hard swap is what made it read as a twitch. It slides the last few
+
    pixels into place, and the centering translate stays part of every state. */
+
 .cg-rail-tooltip { position: absolute; left: calc(100% + 5px); top: 50%; opacity: 0; visibility: hidden; transform: translateY(-50%) translateX(-4px); padding: 7px 12px; border-radius: 13px; background: #1c1e20; color: white; font-size: 12px; font-weight: 500; line-height: 16px; white-space: nowrap; box-shadow: 0 4px 14px #0002; pointer-events: none; z-index: 100; transition: opacity 120ms cubic-bezier(.22, .8, .28, 1), transform 170ms cubic-bezier(.22, .8, .28, 1), visibility 0s linear 120ms; }
+
 .cg-rail-item:hover .cg-rail-tooltip,.cg-rail-item:focus-visible .cg-rail-tooltip { opacity: 1; visibility: visible; transform: translateY(-50%) translateX(0); transition: opacity 110ms cubic-bezier(.22, .8, .28, 1), transform 170ms cubic-bezier(.22, .8, .28, 1), visibility 0s; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-rail-selected,html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-rail-item:hover { background: #343434; color: #ececec; --cg-rail-hand: #343434; }
+
+body[data-ds-dark-theme] .cg-rail-selected,body[data-ds-dark-theme] .cg-rail-item:hover { background: #343434; color: #ececec; --cg-rail-hand: #343434; }
 
 
-.cg-rail-item { --cg-icon-surface: #f2f2f2; }
-.cg-rail-item:hover,.cg-rail-selected { --cg-icon-surface: #e7e7e7; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-rail-item { --cg-icon-surface: #171717; }
+
+
+
+.cg-rail-item { --cg-icon-surface: #e9eaee; }
+
+.cg-rail-item:hover,.cg-rail-selected { --cg-icon-surface: #dfe0e5; }
+
+body[data-ds-dark-theme] .cg-rail-item { --cg-icon-surface: #171717; }
+
+
 
 /* Match the visible footprint of 20px Lottie artwork and 24-unit icons. */
+
 .cg-rail > .cg-rail-item svg { width: 20px; height: 20px; display: block; flex: none; }
 
+
+
 .cg-pins-toggle { margin-top: 0; }
-.cg-section-toggle { color: #737373; font-size: 14px; line-height: 22px; }
+
+.cg-section-toggle { color: #5f6368; font-size: 14px; line-height: 22px; }
+
 .cg-task-row { position: relative; height: 31px; border-radius: 10px; margin-inline: -6px; margin-bottom: 0; transition: background-color 150ms cubic-bezier(.22, .8, .28, 1); }
+
 .cg-task-row:hover, .cg-task-current { background: var(--cg-hover); }
+
 .cg-task-row .cg-pinned-row { padding: 4px 8px; border-radius: 10px; color: var(--cg-text); font-size: 13px; height: 31px; }
+
 /* Room for the action strip: 27px per button plus the 4px offset, so 93px for pin+archive+more
+
    and 120px once an archived row adds delete. */
+
 .cg-task-row:hover .cg-pinned-row { padding-right: 93px; background: transparent; }
+
 .cg-task-actions { display: none; position: absolute; right: 4px; top: 2px; }
+
 .cg-task-row:hover .cg-task-actions, .cg-task-row:focus-within .cg-task-actions { display: flex; }
-.cg-task-actions .cg-button { width: 27px; height: 27px; padding: 5px; color: #888; }
+
+.cg-task-actions .cg-button { width: 27px; height: 27px; padding: 5px; color: var(--cg-muted); }
+
 /* An archived row carries one extra action (delete), so its title keeps more room clear. */
+
 .cg-task-row.cg-task-archived:hover .cg-pinned-row { padding-right: 120px; }
+
 .cg-task-actions .cg-purge-action:hover svg { color: #d4380d; }
+
 /* A pinned row's pin stays tinted, so the row state is readable without opening the menu. */
+
 .cg-task-actions .cg-pin-on { color: #3982fa; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-task-actions .cg-pin-on { color: #6b9fff; }
+
+body[data-ds-dark-theme] .cg-task-actions .cg-pin-on { color: #6b9fff; }
+
 .cg-task-menu .cg-purge-action { color: #c54545; }
+
 /* Child sessions: two groups disclosed independently under a spawning row, children indent one
+
    step per level. Each header carries its own label and count, so the two never read alike. */
+
 .cg-task-row.cg-task-with-children > .cg-pinned-row,
+
 .cg-task-row.cg-task-child > .cg-pinned-row { padding-left: calc(22px + var(--cg-branch-indent, 0px)); }
+
 /* The chevron is absolutely positioned on purpose: the row is a fixed 31px box, not a flex
+
    container, so an inline button would push the full-width title onto a second line. The title
+
    reserves its space through the padding rule above instead. */
+
 .cg-children-toggle { position: absolute; left: 4px; top: 6px; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 19px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--cg-muted); cursor: pointer; }
+
 .cg-children-toggle:hover { color: var(--cg-text); }
+
 .cg-children-toggle svg { transition: transform 150ms ease; }
+
 .cg-children-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+
 .cg-task-row.cg-task-child > .cg-children-toggle { left: calc(4px + var(--cg-branch-indent, 0px)); }
+
+/* Status marker for a top-level row: waiting / running / done, and nothing at all when idle.
+
+   It owns the row's leftmost slot, so a row that has a chevron pushes that chevron right and the
+
+   title reserves room for both — the row is a fixed 31px box, not a flex container, so anything
+
+   laid out inline would push the full-width title onto a second line (see the chevron note above).
+
+   Colours come from the host's semantic tokens, so both themes follow without a second rule. */
+
+.cg-task-status { position: absolute; left: 4px; top: 50%; translate: 0 -50%; z-index: 1; display: block; width: 14px; height: 14px; pointer-events: none; }
+
+.cg-task-status[data-state='waiting'],
+
+.cg-task-status[data-state='done'] { width: 10px; height: 10px; left: 6px; }
+
+.cg-task-status[data-state='waiting']::after,
+
+.cg-task-status[data-state='done']::after { content: ''; position: absolute; inset: 20%; border-radius: 50%; background: currentColor; }
+
+.cg-task-status[data-state='waiting'] { color: var(--dsw-alias-state-warn-primary); }
+
+.cg-task-status[data-state='done'] { color: var(--dsw-alias-state-success-primary); }
+
+/* Running is the only moving marker: a quiet ring with a bright arc turning over it. */
+
+.cg-task-status[data-state='running'] { color: var(--dsw-alias-label-tertiary); }
+
+.cg-task-status[data-state='running']::before,
+
+.cg-task-status[data-state='running']::after { content: ''; position: absolute; inset: 0; border: 2px solid currentColor; border-radius: 50%; }
+
+.cg-task-status[data-state='running']::before { opacity: .25; }
+
+.cg-task-status[data-state='running']::after { border-color: transparent; border-top-color: currentColor; animation: cg-status-spin 1.5s linear infinite; }
+
+@keyframes cg-status-spin { to { transform: rotate(360deg); } }
+
+/* This sheet carries the reduced-motion branch for every other animation it owns, and a marker that
+
+   turns forever is precisely what that branch is for. The arc stays as a still segment so the state
+
+   is still readable without the motion. */
+
+@media (prefers-reduced-motion: reduce) {
+
+  /* `animation: none` alone is enough: the element then falls back to the base declarations on
+
+     `::after` above, which already carry the transparent sides plus the currentColor top edge. */
+
+  .cg-task-status[data-state='running']::after { animation: none; }
+
+  .cg-task-status[data-state='running']::before { opacity: .35; }
+
+}
+
+/* Markers appear on top-level rows and on branch rows, but never on agent-spawned rows. That middle
+
+   case is the point: a Session that starts running is reparented under its spawner, so the row you
+
+   most want to watch is exactly the one that lives as a branch, and skipping every child row meant
+
+   skipping it. The child variants below add the branch indent on top, because such a row already
+
+   reserves room for its own chevron and the guide line. */
+
+.cg-task-row.cg-task-stated:not(.cg-task-child) > .cg-children-toggle { left: 22px; }
+
+/* `:not(.cg-task-with-children)` earns its place here: without it this rule ties with the child /
+
+   with-children padding rule at (0,3,0) and wins only by appearing later in the sheet. A row that
+
+   ever carried both classes would then silently lose its indent — exactly the kind of
+
+   ordering-dependent outcome that breaks the day somebody reorders these blocks. With the negation
+
+   the rule stands on its own at (0,4,0) and is disjoint from the with-children variant below. */
+
+.cg-task-row.cg-task-stated:not(.cg-task-child):not(.cg-task-with-children) > .cg-pinned-row { padding-left: 22px; }
+
+.cg-task-row.cg-task-stated:not(.cg-task-child).cg-task-with-children > .cg-pinned-row { padding-left: 40px; }
+
+.cg-task-row.cg-task-stated.cg-task-child > .cg-children-toggle { left: calc(22px + var(--cg-branch-indent, 0px)); }
+
+.cg-task-row.cg-task-stated.cg-task-child > .cg-pinned-row { padding-left: calc(40px + var(--cg-branch-indent, 0px)); }
+
 .cg-group-toggle { box-sizing: border-box; display: flex; align-items: center; gap: 6px; width: calc(100% + 12px); height: 24px; margin: 0 -6px 2px; padding: 2px 8px 2px calc(22px + var(--cg-branch-indent, 0px)); border: 0; border-radius: 8px; background: none; color: var(--cg-muted); font: inherit; font-size: 12px; line-height: 18px; text-align: left; cursor: pointer; }
+
 .cg-group-toggle:hover { background: var(--cg-hover); color: var(--cg-text); }
+
 .cg-group-toggle svg { flex: none; transition: transform 150ms ease; }
+
 .cg-group-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+
 .cg-group-label { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
 .cg-group-badge { flex: none; min-width: 17px; padding: 0 5px; border-radius: 9px; background: var(--cg-hover); color: var(--cg-muted); font-size: 11px; line-height: 15px; text-align: center; }
+
 .cg-group-more { box-sizing: border-box; display: block; width: calc(100% + 12px); margin: 0 -6px 3px; padding: 2px 8px 2px calc(22px + var(--cg-branch-indent, 0px)); border: 0; border-radius: 8px; background: none; color: var(--cg-muted); font: inherit; font-size: 12px; line-height: 18px; text-align: left; cursor: pointer; }
+
 .cg-group-more:hover { background: var(--cg-hover); color: var(--cg-text); }
+
 .cg-task-row.cg-task-child::before { content: ''; position: absolute; left: calc(10px + var(--cg-branch-indent, 0px)); top: 0; bottom: 0; width: 1px; background: var(--cg-hover); }
-.cg-task-preview { width: 300px; padding: 10px; box-sizing: border-box; z-index: 50; background: var(--cg-page); border: 1px solid #dedede; border-radius: 15px; box-shadow: 0 5px 12px #00000012; color: var(--cg-text); font-size: 13px; pointer-events: none; }
+
+.cg-task-preview { width: 300px; padding: 10px; box-sizing: border-box; z-index: 50; background: var(--cg-page); border: 1px solid #dbdce1; border-radius: 15px; box-shadow: 0 5px 12px #00000012; color: var(--cg-text); font-size: 13px; pointer-events: none; }
+
 /* The floating card is one element for the whole list. It is positioned by `transform`, which the
+
    browser animates, so it slides after the pointer instead of being rebuilt (and its entrance
+
    replayed) on every row. Hidden by opacity + visibility, since `display` cannot be transitioned. */
+
 .cg-task-preview-floating { position: fixed; left: 0; top: 0; opacity: 0; visibility: hidden; transition: transform 190ms cubic-bezier(.22, .8, .28, 1), opacity 140ms cubic-bezier(.22, .8, .28, 1), visibility 0s linear 140ms; }
+
 .cg-task-preview-floating[data-on="true"] { opacity: 1; visibility: visible; transition: transform 190ms cubic-bezier(.22, .8, .28, 1), opacity 120ms cubic-bezier(.22, .8, .28, 1); }
+
 .cg-task-preview strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; margin-bottom: 8px; }
+
 .cg-task-preview > div { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-.cg-task-menu { position: absolute; z-index: 55; right: 0; top: 30px; padding: 4px; border: 1px solid #ddd; border-radius: 10px; background: var(--cg-page); box-shadow: 0 4px 12px #0001; }
+
+.cg-task-menu { position: absolute; z-index: 55; right: 0; top: 30px; padding: 4px; border: 1px solid #dbdce1; border-radius: 10px; background: var(--cg-page); box-shadow: 0 4px 12px #0001; }
+
 .cg-task-menu .cg-button { display: flex; width: 100%; white-space: nowrap; }
 
+
+
 /* Rename dialog, fixed so the sidebar's own scroller cannot clip it. */
+
 .cg-rename-backdrop { position: fixed; inset: 0; z-index: 120; background: #0004; display: grid; place-items: center; }
+
 .cg-rename-dialog { width: min(400px,calc(100vw - 80px)); padding: 20px; border-radius: 18px; background: var(--cg-page); box-shadow: 0 20px 80px #0002; }
+
 .cg-rename-dialog h2 { margin: 0 0 12px; font-size: 16px; font-weight: 500; color: var(--cg-text); }
-.cg-rename-input { box-sizing: border-box; display: block; width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 9px; background: var(--cg-page); color: var(--cg-text); font: inherit; }
+
+.cg-rename-input { box-sizing: border-box; display: block; width: 100%; padding: 9px 12px; border: 1px solid #dbdce1; border-radius: 9px; background: var(--cg-page); color: var(--cg-text); font: inherit; }
+
 .cg-rename-error { margin: 8px 0 0; color: #c54545; font-size: 12px; line-height: 17px; }
+
+.cg-rename-note { margin: 8px 0 0; color: var(--cg-muted); font-size: 12px; line-height: 17px; }
+
 .cg-rename-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
 .cg-rename-actions button { border: 0; border-radius: 8px; padding: 8px 16px; font: inherit; cursor: pointer; }
+
 .cg-rename-cancel { background: var(--cg-hover); color: var(--cg-text); }
-.cg-rename-save { background: #3982fa; color: #fff; }
+
+.cg-rename-save { background: #4a72d8; color: #fff; }
+
 .cg-rename-save:disabled, .cg-rename-cancel:disabled { opacity: .5; cursor: default; }
 
+/* 人设弹窗复用重命名弹窗的整套类，只补这两条：字段要有自己的标签，正文要能拉大。 */
+
+.cg-rename-field { display: block; margin-top: 10px; }
+
+.cg-rename-field > span { display: block; margin-bottom: 4px; color: var(--cg-muted); font-size: 12px; line-height: 17px; }
+
+.cg-rename-textarea { min-height: 96px; resize: vertical; }
+
+/* 采样参数：原生滑块 + 数字框并排。两边共用同一个草稿值，滑块只负责粗略定位，总高度 18px，
+
+   弹窗高度不因此变长。颜色一律走主题变量 —— 轨道是 --cg-text 与 --cg-page 的混合、滑块本体
+
+   直接用 --cg-text，深色与浅色两侧都成立，没有一个写死的颜色。 */
+
+.cg-sampling-row { display: flex; align-items: center; gap: 10px; }
+
+.cg-sampling-range { flex: 1 1 auto; min-width: 0; width: auto; height: 18px; margin: 0; padding: 0; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
+
+.cg-sampling-range::-webkit-slider-runnable-track { height: 6px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--cg-text) 16%, var(--cg-page)); }
+
+.cg-sampling-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; box-sizing: border-box; width: 14px; height: 14px; margin-top: -4px; border: 0; border-radius: 50%; background: var(--cg-text); box-shadow: 0 0 0 0 transparent; transition: box-shadow 120ms ease; }
+
+.cg-sampling-range::-moz-range-track { height: 6px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--cg-text) 16%, var(--cg-page)); }
+
+.cg-sampling-range::-moz-range-progress { height: 6px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--cg-text) 40%, var(--cg-page)); }
+
+.cg-sampling-range::-moz-range-thumb { box-sizing: border-box; width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--cg-text); box-shadow: 0 0 0 0 transparent; transition: box-shadow 120ms ease; }
+
+.cg-sampling-range:hover::-webkit-slider-thumb, .cg-sampling-range:focus-visible::-webkit-slider-thumb,
+
+.cg-sampling-range:hover::-moz-range-thumb, .cg-sampling-range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px color-mix(in srgb, var(--cg-text) 18%, transparent); }
+
+.cg-sampling-range:focus-visible { outline: 2px solid #3982fa; outline-offset: 3px; }
+
+.cg-sampling-range:disabled { cursor: default; opacity: .5; }
+
+.cg-sampling-number { flex: 0 0 90px; width: 90px; padding: 7px 8px; text-align: right; }
+
+.cg-rename-field > .cg-sampling-hint { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+
+  .cg-sampling-range::-webkit-slider-thumb, .cg-sampling-range::-moz-range-thumb { transition: none; }
+
+}
+
+
+
 /* Align disclosure and new-chat hit areas with the task rows. */
+
 .cg-navigation > .cg-new, .cg-browse > .cg-section-toggle { box-sizing: border-box; width: calc(100% + 12px); margin-left: -6px; margin-right: -6px; padding-left: 8px; padding-right: 8px; border-radius: 10px; justify-content: flex-start; }
+
 .cg-browse > .cg-section-toggle { min-height: 30px; }
+
 .cg-collapsed .cg-navigation > .cg-new { width: 100%; margin-inline: 0; padding-inline: 4px; justify-content: center; }
 
+
+
 .cg-model-root:has(.cg-model-popover) { z-index: 100; }
+
 .cg-model-popover { padding-bottom: 16px; background-color: var(--cg-page); isolation: isolate; }
+
 .cg-model-reset { box-sizing: border-box; padding: 4px; }
+
 .cg-model-reset svg { display: block; flex: none; width: 16px; height: 16px; overflow: visible; }
+
 .cg-model-slider-shell { margin-bottom: 2px; }
 
+
+
+/* The knob is positioned with `translate: calc((100cqw - 24px) * ratio)`, so this element has to be the
+
+   container those `cqw` units resolve against. Without `container-type` the unit falls back to the
+
+   *viewport* width: the knob then travels one screen-width to the right and leaves the popover entirely —
+
+   the "圆点飞到哪里去了" report. `inline-size` (not `size`) because only the width is queried, and a
+
+   `size` container would have to be given an explicit block size here. */
+
+.cg-model-slider-shell { container-type: inline-size; }
+
+
+
 /* Neutralize native/global range tracks; the shell draws the sole visible track. */
+
 .cg-model-slider::-webkit-slider-runnable-track { appearance: none; height: 28px; border: 0; border-radius: 20px; background: transparent !important; box-shadow: none !important; }
+
 .cg-model-slider::-webkit-slider-thumb { margin-top: -2px; }
+
 .cg-model-slider::-moz-range-track { height: 28px; border: 0; background: transparent !important; box-shadow: none !important; }
+
 .cg-model-slider::-moz-range-progress { background: transparent !important; border: 0; box-shadow: none !important; }
+
 .cg-model-slider { background: transparent !important; box-shadow: none !important; outline: none; }
 
-/* Both visible track ends stop at the thumb center, including minimum. */
+
+
+/* First pass: both visible track ends stop at the thumb center, including minimum (`inset: 0 14px`,
+
+   fill `left: 14px`). The full-width override further down replaces both declarations, so the track
+
+   that actually paints runs edge to edge. */
+
 .cg-model-slider-shell { background: transparent !important; box-shadow: none; }
+
 .cg-model-slider-shell::before { content: ''; position: absolute; inset: 0 14px; border-radius: 20px; background: #e8e6e8; }
+
 .cg-model-slider-fill { left: 14px; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-shell::before { background: #494649; }
+
+body[data-ds-dark-theme] .cg-model-slider-shell::before { background: #494649; }
+
+
 
 /* Full-width track and an independent thumb with two-pixel end overlap. */
+
 .cg-model-slider-shell::before { inset: 4px 0; }
+
 .cg-model-slider-fill { left: 0; }
+
 /* The knob, taken from the reference plugin the owner pointed at (lemonorangeapple/dsh-effort-switcher):
-   30px over a thinner track so it overhangs ✓ `corner-shape: round` for a true circle ✓ a centred box
+
+   24px over a thinner track so it overhangs ✓ `corner-shape: round` for a true circle ✓ a centred box
+
    offset (`margin-left`) instead of `translateX(-50%)` — a percentage plus a half-transform lands the edges
+
    on fractional device pixels at this display's 1.25 ratio — and no border and no shadow at all. */
+
 .cg-model-thumb { position: absolute; top: 2px; margin-left: -12px; box-sizing: border-box; width: 24px; height: 24px; border: 0; border-radius: 50%; corner-shape: round; background: #fff; box-shadow: none; pointer-events: none; z-index: 3; }
+
 /* The knob grows only while the pointer is over it, and never larger than this.
+
    It carries `pointer-events: none`, so the "over" state is decided geometrically in the component (the
+
    knob cannot be hit-tested without swallowing the press that the native range needs to start a drag).
+
    There used to be a second, larger step while the track was `:active` — that is the step the owner saw as
+
    the knob growing and being cut off when they dragged it to either end, so it is gone: dragging keeps the
+
    same 1.08 as hovering, and the ends look like a click-selected tier. */
+
 .cg-model-thumb { transform-origin: 50% 50%; }
+
 .cg-model-thumb[data-over="true"] { transform: scale(1.08); }
+
 /* While the pointer is pressed the knob goes back to its resting size. Hovering and dragging are the same
+
    pointer-on-knob situation, so without this the drag inherits the hover growth: at either end of the travel
+
    (centre 12px from the edge) a 1.08 knob overhangs the track by about a pixel, and that is the "it grows
+
    and sticks to the edge when I drag it" the owner photographed. Dragging now looks exactly like a tier
+
    that was selected by a click. */
+
 .cg-model-slider-shell:active .cg-model-thumb { transform: none; }
+
 .cg-model-slider::-webkit-slider-thumb { background: transparent; border-color: transparent; box-shadow: none; }
+
 .cg-model-slider::-moz-range-thumb { background: transparent; border-color: transparent; box-shadow: none; }
 
+
+
 /* Reference: pill track and a clean maximum-effort gradient. */
+
 .cg-model-slider-shell { border-radius: 14px; }
+
 .cg-model-slider-shell::before, .cg-model-slider-fill { border-radius: 10px; }
+
 .cg-model-slider-shell[data-max="true"] .cg-model-slider-dots { visibility: hidden; }
+
 /* The reference knob is a plain white circle: no outline, just a soft shadow. The plugin already drew a
+
    circle, but with a 1px grey border that read as a framed square at this size. */
+
 .cg-model-thumb { border: 0; border-radius: 50%; box-shadow: 0 1px 3px #00000026; }
+
 .cg-model-popover[data-ultra="true"] .cg-model-slider-fill { background: linear-gradient(95deg, #5055f5 0%, #bb74ff 58%, #793af5 100%); }
 
-/* Depth ramp. The fill deepens with the tier instead of only changing at Ultra: six stops
-   are shared by every model, so three-tier and five-tier effort lists both move
-   monotonically, and the top tier — Max — runs into purple without any meteor. Only Ultra
-   keeps the animated shower (its rules are keyed on [data-ultra="true"] further down).
-   Low starts on a clean light blue: mixing the grey Off stop into it reads as dirty, and
-   nothing here lowers opacity — every stop is an opaque colour. */
-.cg-model-slider-shell {
-  --cg-e1: #b3cdff; /* Low: a real blue — a paler tone sat at the track's own lightness
-                       and read as grey-blue mud */
-  --cg-e2: #86acff;
-  --cg-e3: #6488f5; /* Medium */
-  --cg-e4: #4a63d8; /* High */
-  --cg-e5: #8a4ff0; /* Max -> purple */
-}
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-shell {
-  --cg-e1: #7fa3f5;
-  --cg-e2: #6b91ee;
-  --cg-e3: #5b80ea;
-  --cg-e4: #4f6ae0;
-  --cg-e5: #9a5cf5;
-}
-/* An unknown level id falls back to its bucketed position ... */
-.cg-model-slider-shell[data-depth="0"] .cg-model-slider-fill { background: transparent; }
-.cg-model-slider-shell[data-depth="1"] .cg-model-slider-fill { background: var(--cg-e1); }
-.cg-model-slider-shell[data-depth="2"] .cg-model-slider-fill { background: var(--cg-e2); }
-.cg-model-slider-shell[data-depth="3"] .cg-model-slider-fill { background: var(--cg-e3); }
-.cg-model-slider-shell[data-depth="4"] .cg-model-slider-fill { background: var(--cg-e4); }
-/* ... while an id the ramp knows wins, because it is the tier the model itself names.
-   Off fills nothing: a grey stub against a grey track only looked like a stray artefact. */
-.cg-model-slider-shell[data-effort="off"] .cg-model-slider-fill { background: transparent; }
-.cg-model-slider-shell[data-effort="none"] .cg-model-slider-fill { background: transparent; }
-.cg-model-slider-shell[data-effort="minimal"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e1), var(--cg-e2)); }
-.cg-model-slider-shell[data-effort="low"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e1), var(--cg-e2)); }
-.cg-model-slider-shell[data-effort="medium"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e2), var(--cg-e3)); }
-.cg-model-slider-shell[data-effort="high"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e3), var(--cg-e4)); }
-.cg-model-slider-shell[data-effort="xhigh"] .cg-model-slider-fill,
-.cg-model-slider-shell[data-effort="max"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e4), var(--cg-e5)); }
-/* Ultra must be declared here, after the depth buckets: the top position is depth 4, so a
-   bucket rule placed later silently outranks the gradient and leaves the whole bar blue —
-   which is exactly how the purple went missing.
-   Shape: a short blue lead-in and a bright purple right end stay put, while a soft deep
-   purple shade drifts slowly across the purple middle.
-   The shade is its own element rather than a sized background layer: a layer narrower than
-   the bar ends mid-falloff, and that cut-off painted a visible seam down each side. As an
-   element whose radial radii are exactly half its box, the falloff reaches zero before any
-   edge, and only the transform moves. */
-.cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill {
-  background: linear-gradient(90deg, #3f57c4 0%, #6f5ff2 12%, #8a4ff0 42%, #a855f7 74%, #bb74ff 100%);
-}
-.cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill::after {
-  content: '';
-  position: absolute;
-  top: -70%; bottom: -70%; left: 0; width: 62%;
-  z-index: 0;
-  pointer-events: none;
-  background: radial-gradient(ellipse 50% 50% at 50% 50%, #4c1d95e6 0%, #4c1d9545 45%, #4c1d9500 100%);
-  animation: cg-model-ultra-drift 12s ease-in-out infinite alternate;
-}
-/* The shade is 62% of the bar, so its centre sits at translateX * 0.62 + 31%. 11%..50% keeps
-   that centre between 38% and 62% of the bar: the deep purple floats in the middle and never
-   reaches the blue lead-in on the left or the bright purple end on the right. */
-@keyframes cg-model-ultra-drift {
-  from { transform: translateX(11%); }
-  to { transform: translateX(50%); }
-}
-/* Max reads purple at the rim, and stays free of the Ultra shower. The rim keys on the
-   tier, not on the top position: with a virtual Ultra step appended, Max is the last real
-   tier and is deliberately not the maximum position. */
-.cg-model-slider-shell[data-effort="xhigh"]:not([data-ultra="true"])::before,
-.cg-model-slider-shell[data-effort="max"]:not([data-ultra="true"])::before { box-shadow: inset 0 0 0 1px #8a4ff04d; }
-.cg-model-slider-shell:not([data-ultra="true"]) .cg-model-slider-dots span[data-ultra="true"] { background: #b7b4b7; box-shadow: none; }
-.cg-model-slider-shell:not([data-ultra="true"]) .cg-model-meteors { display: none; }
-/* The dots carry the fill, not a fixed grey: a dot the fill has reached turns white with a
-   dark hairline so it stays legible on the pale Low blue as well as on the deep tiers, and
-   a dot still ahead stays the track marker. */
-.cg-model-slider-dots span[data-on="true"] { background: #fff; box-shadow: 0 0 0 1px #0000002e; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-dots span { background: #8b8992; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-slider-dots span[data-on="true"] { background: #fff; box-shadow: 0 0 0 1px #00000052; }
 
-.cg-model-thumb { transition: left 100ms ease-out, transform 150ms cubic-bezier(.22,.8,.28,1); }
+
+/* Depth ramp. The fill deepens with the tier instead of only changing at Ultra: six stops
+
+   are shared by every model, so three-tier and five-tier effort lists both move
+
+   monotonically, and the top tier — Max — runs into purple without any meteor. Only Ultra
+
+   keeps the animated shower (its rules are keyed on [data-ultra="true"] further down).
+
+   Low starts on a clean light blue: mixing the grey Off stop into it reads as dirty, and
+
+   nothing here lowers opacity — every stop is an opaque colour.
+
+   Declared on the popover, not on `.cg-model-slider-shell` where these are consumed. A custom
+
+   property is inherited downwards only: the popover is the shell's *ancestor*, so a stop declared
+
+   on the shell was invisible to `--cg-glow: var(--cg-e2)` on the popover, and that made the whole
+
+   non-superfast glow invalid. The shell inherits these values unchanged. */
+
+.cg-model-popover {
+
+  --cg-e1: #b3cdff; /* Low: a real blue — a paler tone sat at the track's own lightness
+
+                       and read as grey-blue mud */
+
+  --cg-e2: #86acff;
+
+  --cg-e3: #6488f5; /* Medium */
+
+  --cg-e4: #4a63d8; /* High */
+
+  --cg-e5: #8a4ff0; /* Max -> purple */
+
+}
+
+body[data-ds-dark-theme] .cg-model-popover {
+
+  --cg-e1: #7fa3f5;
+
+  --cg-e2: #6b91ee;
+
+  --cg-e3: #5b80ea;
+
+  --cg-e4: #4f6ae0;
+
+  --cg-e5: #9a5cf5;
+
+}
+
+/* An unknown level id falls back to its bucketed position ... */
+
+.cg-model-slider-shell[data-depth="0"] .cg-model-slider-fill { background: transparent; }
+
+.cg-model-slider-shell[data-depth="1"] .cg-model-slider-fill { background: var(--cg-e1); }
+
+.cg-model-slider-shell[data-depth="2"] .cg-model-slider-fill { background: var(--cg-e2); }
+
+.cg-model-slider-shell[data-depth="3"] .cg-model-slider-fill { background: var(--cg-e3); }
+
+.cg-model-slider-shell[data-depth="4"] .cg-model-slider-fill { background: var(--cg-e4); }
+
+/* ... while an id the ramp knows wins, because it is the tier the model itself names.
+
+   Off fills nothing: a grey stub against a grey track only looked like a stray artefact. */
+
+.cg-model-slider-shell[data-effort="off"] .cg-model-slider-fill { background: transparent; }
+
+.cg-model-slider-shell[data-effort="none"] .cg-model-slider-fill { background: transparent; }
+
+.cg-model-slider-shell[data-effort="minimal"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e1), var(--cg-e2)); }
+
+.cg-model-slider-shell[data-effort="low"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e1), var(--cg-e2)); }
+
+.cg-model-slider-shell[data-effort="medium"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e2), var(--cg-e3)); }
+
+.cg-model-slider-shell[data-effort="high"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e3), var(--cg-e4)); }
+
+.cg-model-slider-shell[data-effort="xhigh"] .cg-model-slider-fill,
+
+.cg-model-slider-shell[data-effort="max"] .cg-model-slider-fill { background: linear-gradient(90deg, var(--cg-e4), var(--cg-e5)); }
+
+/* Ultra must be declared here, after the depth buckets: the top position is depth 4, so a
+
+   bucket rule placed later silently outranks the gradient and leaves the whole bar blue —
+
+   which is exactly how the purple went missing.
+
+   Shape: a short blue lead-in and a bright purple right end stay put, while a soft deep
+
+   purple shade drifts slowly across the purple middle.
+
+   The shade is its own element rather than a sized background layer: a layer narrower than
+
+   the bar ends mid-falloff, and that cut-off painted a visible seam down each side. As an
+
+   element whose radial radii are exactly half its box, the falloff reaches zero before any
+
+   edge, and only the transform moves. */
+
+.cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill {
+
+  background: linear-gradient(90deg, #3f57c4 0%, #6f5ff2 12%, #8a4ff0 42%, #a855f7 74%, #bb74ff 100%);
+
+}
+
+.cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill::after {
+
+  content: '';
+
+  position: absolute;
+
+  top: -70%; bottom: -70%; left: 0; width: 62%;
+
+  z-index: 0;
+
+  pointer-events: none;
+
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, #4c1d95e6 0%, #4c1d9545 45%, #4c1d9500 100%);
+
+  animation: cg-model-ultra-drift 12s ease-in-out infinite alternate;
+
+}
+
+/* The shade is 62% of the bar, so its centre sits at translateX * 0.62 + 31%. 11%..50% keeps
+
+   that centre between 38% and 62% of the bar: the deep purple floats in the middle and never
+
+   reaches the blue lead-in on the left or the bright purple end on the right. */
+
+@keyframes cg-model-ultra-drift {
+
+  from { transform: translateX(11%); }
+
+  to { transform: translateX(50%); }
+
+}
+
+/* Max reads purple at the rim, and stays free of the Ultra shower. The rim keys on the
+
+   tier, not on the top position: with a virtual Ultra step appended, Max is the last real
+
+   tier and is deliberately not the maximum position. */
+
+.cg-model-slider-shell[data-effort="xhigh"]:not([data-ultra="true"])::before,
+
+.cg-model-slider-shell[data-effort="max"]:not([data-ultra="true"])::before { box-shadow: inset 0 0 0 1px #8a4ff04d; }
+
+/* Deliberately ungated and deliberately not theme-varied: this dot marks a position the fill has
+
+   not reached on a plain rail, so it is the same neutral in both themes — giving it a dark-mode
+
+   value would make it read as a marker that carries meaning. Both properties are stated so the
+
+   purple ultra glow from the `[data-ultra="true"]` rule cannot leak in while the shell's ultra
+
+   state is off. */
+
+.cg-model-slider-shell:not([data-ultra="true"]) .cg-model-slider-dots span[data-ultra="true"] { background: #b7b4b7; box-shadow: none; }
+
+.cg-model-slider-shell:not([data-ultra="true"]) .cg-model-meteors { display: none; }
+
+/* The dots carry the fill, not a fixed grey: a dot the fill has reached turns white with a
+
+   dark hairline so it stays legible on the pale Low blue as well as on the deep tiers, and
+
+   a dot still ahead stays the track marker. */
+
+.cg-model-slider-dots span[data-on="true"] { background: #fff; box-shadow: 0 0 0 1px #0000002e; }
+
+body[data-ds-dark-theme] .cg-model-slider-dots span { background: #8b8992; }
+
+body[data-ds-dark-theme] .cg-model-slider-dots span[data-on="true"] { background: #fff; box-shadow: 0 0 0 1px #00000052; }
+
+
+
+/* The knob travels by `translate`, so that is what animates. This used to name `left`, which the component
+
+   no longer writes — the transition therefore matched nothing and the knob jumped between tiers instead of
+
+   sliding. */
+
+.cg-model-thumb { transition: translate 100ms ease-out, transform 150ms cubic-bezier(.22,.8,.28,1); }
+
 /* The transient Ultra cost notice is longer than any tier name, so it gets its own fit
+
    instead of stretching the summary pill. */
+
 .cg-model-summary strong[data-notice="true"], .cg-model-trigger-effort[data-notice="true"] { font-size: 11px; letter-spacing: .2px; white-space: nowrap; }
+
 .cg-model-slider-fill { transition: width 100ms ease-out; }
+
 .cg-model-popover { animation: cg-model-enter 120ms ease-out; transform-origin: bottom right; }
+
 @keyframes cg-model-enter { from { opacity: 0; transform: translateY(3px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
 @media (prefers-reduced-motion: reduce) { .cg-model-thumb, .cg-model-slider-fill { transition: none; } .cg-model-popover { animation: none; } }
 
+
+
 /* Reference sidebar typography and disclosure behavior. */
+
 .cg-brand { color: #424242; }
-.cg-navigation > .cg-new, .cg-browse > .cg-section-toggle { font-family: var(--dsw-font-family); color: #737373; }
+
+.cg-navigation > .cg-new, .cg-browse > .cg-section-toggle { font-family: var(--dsw-font-family); color: var(--cg-muted); }
+
 .cg-browse > .cg-section-toggle:hover, .cg-browse > .cg-section-toggle:active, .cg-browse > .cg-section-toggle:focus { background: transparent; }
+
 .cg-section-toggle svg { transition: transform 150ms ease-out, opacity 120ms ease-out; opacity: 1; }
+
 .cg-section-toggle[aria-expanded="true"] svg { transform: rotate(90deg); opacity: 0; }
+
 .cg-section-toggle[aria-expanded="true"]:hover svg, .cg-section-toggle[aria-expanded="true"]:focus-visible svg { opacity: 1; }
+
 .cg-browse { overflow: visible; }
+
 .cg-task-row .cg-pinned-row { color: #424242; }
+
 .cg-projects { display: flex; flex-direction: column; gap: 0; }
+
 .cg-projects > .cg-button { width: 100%; min-height: 31px; text-align: left; color: #424242; }
+
 .cg-navigation { min-height: 0; overflow: visible; }
+
 .cg-navigation .cg-browse { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; margin-inline: -6px; padding-inline: 6px; }
+
 .cg-navigation .cg-workspaces[hidden] { display: none; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-brand, html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-task-row .cg-pinned-row, html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-projects > .cg-button { color: var(--cg-text); }
+
+body[data-ds-dark-theme] .cg-brand, body[data-ds-dark-theme] .cg-task-row .cg-pinned-row, body[data-ds-dark-theme] .cg-projects > .cg-button { color: var(--cg-text); }
+
 @media (prefers-reduced-motion: reduce) { .cg-section-toggle svg { transition: none; } }
 
+
+
 /* Animate a stable wrapper so native SVG styles cannot cancel rotation. */
+
 .cg-disclosure-arrow { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; flex: none; transform: rotate(0deg); transform-origin: center; opacity: 1; transition: transform 180ms ease, opacity 120ms ease; }
+
 .cg-section-toggle[aria-expanded="true"] .cg-disclosure-arrow { transform: rotate(90deg); opacity: 0; }
+
 .cg-section-toggle[aria-expanded="true"]:hover .cg-disclosure-arrow, .cg-section-toggle[aria-expanded="true"]:focus-visible .cg-disclosure-arrow { opacity: 1; }
+
 .cg-section-toggle .cg-disclosure-arrow svg { display: block; transform: none !important; opacity: 1 !important; transition: none; }
+
+
 
 .cg-task-preview-floating { display: block; position: fixed; z-index: 1000; margin: 0; }
 
+
+
 .cg-mode-status { margin: 4px 10px 6px; color: #777; font-size: 12px; line-height: 1.5; }
+
 .cg-brand-option:disabled { opacity: .55; cursor: default; }
 
+
+
 /* Completed turn disclosure: one shared color for text and arrow. */
+
 html[data-chatgpt-ui] .cg-turn-process {
+
   display: inline-flex;
+
   align-items: center;
+
   gap: 4px;
+
   width: 100%;
+
   max-width: 100%;
+
   min-height: 30px;
+
   margin: 0 0 8px;
+
   padding: 2px 0;
+
   border: 0;
+
   border-bottom: .5px solid var(--dsw-alias-border-l2, #e5e5e5);
+
   background: transparent;
-  color: #999;
+
+  color: var(--cg-muted);
+
   font: inherit;
+
   font-size: 14px;
+
   line-height: 22px;
+
   text-align: left;
+
   cursor: pointer;
+
   transition: color 140ms ease;
+
 }
+
 html[data-chatgpt-ui] .cg-turn-process:hover,
+
 html[data-chatgpt-ui] .cg-turn-process:focus-visible { color: #000; }
+
 html[data-chatgpt-ui] .cg-turn-process:focus-visible {
+
   outline: 2px solid #3982fa;
+
   outline-offset: 3px;
+
   border-radius: 4px;
+
 }
+
 html[data-chatgpt-ui] .cg-turn-process:disabled { cursor: default; }
+
 html[data-chatgpt-ui] .cg-turn-process-arrow {
+
   display: inline-flex;
+
   color: inherit;
+
   transition: transform 160ms ease;
+
 }
+
 html[data-chatgpt-ui] .cg-turn-process[aria-expanded="true"] .cg-turn-process-arrow { transform: rotate(90deg); }
+
 @media (prefers-reduced-motion: reduce) {
+
   html[data-chatgpt-ui] .cg-turn-process,
+
   html[data-chatgpt-ui] .cg-turn-process-arrow { transition: none; }
+
 }
+
+
+
+
 
 
 
 /* Model catalog follows the reference's compact menu spacing. */
+
 .cg-model-popover[data-pane="model"] { padding: 4px; border-radius: 16px; box-shadow: 0 6px 14px #0000000c; }
-.cg-model-catalog-title { margin: 4px 8px 8px; color: #999; font-size: 12px; line-height: 20px; }
+
+.cg-model-catalog-title { margin: 4px 8px 8px; color: var(--cg-muted); font-size: 12px; line-height: 20px; }
+
 .cg-model-catalog-default { padding: 0 8px; color: var(--cg-text); font-size: 12px; line-height: 18px; }
+
 .cg-model-popover[data-pane="model"] .cg-model-catalog { max-height: min(440px, 72vh); gap: 0; padding: 0; }
+
 .cg-model-popover[data-pane="model"] .cg-model-provider { padding: 0 8px 3px; font-size: 12px; line-height: 18px; }
+
 .cg-model-popover[data-pane="model"] .cg-model-option { box-sizing: border-box; min-height: 29px; padding: 4px 8px; line-height: 21px; border-radius: 10px; }
-.cg-model-popover[data-pane="model"] .cg-model-option[aria-checked="true"] { background: #f1f1f1; }
+
+.cg-model-popover[data-pane="model"] .cg-model-option[aria-checked="true"] { background: #f1f1f1; color: var(--cg-text); }
+
 .cg-model-popover[data-pane="model"] .cg-model-option:hover { background: var(--cg-hover); }
+
 .cg-model-trigger { padding: 0 9px; border-radius: 999px; }
+
 .cg-model-trigger[aria-expanded="true"] { background: #f1f1f1; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-option[aria-checked="true"],
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-trigger[aria-expanded="true"] { background: #404043; }
+
+body[data-ds-dark-theme] .cg-model-option[aria-checked="true"],
+
+body[data-ds-dark-theme] .cg-model-trigger[aria-expanded="true"] { background: #404043; }
+
+
 
 /* User bubble metadata appears near the bubble and its action strip.
+
    The pale blue is a light-theme choice and has to say so: unguarded it outranked DSH's own
+
    `.Sixlwa_bubble { background: var(--dsw-specific-bubble) }` in the dark theme too, and the
+
    dark label token (#ececec) on that pale blue came out at roughly 1.1:1 — an unreadable
+
    message. In dark the token wins again, which is #2c2c2e under #ececec. */
-html[data-chatgpt-ui]:not(:has([data-ds-dark-theme])) .Sixlwa_userRow .Sixlwa_bubble { background: #E8F3FE; }
+
+body:not([data-ds-dark-theme]) .Sixlwa_userRow .Sixlwa_bubble { background: #f4f5f7; }
+
 html[data-chatgpt-ui] .Sixlwa_userRow > .xzv4MW_actions { opacity: 0; transition: opacity 120ms ease; }
+
 html[data-chatgpt-ui] .Sixlwa_userRow:has(.Sixlwa_userStack:hover) > .xzv4MW_actions,
+
 html[data-chatgpt-ui] .Sixlwa_userRow > .xzv4MW_actions:hover,
+
 html[data-chatgpt-ui] .Sixlwa_userRow:focus-within > .xzv4MW_actions { opacity: 1; }
+
 html[data-chatgpt-ui] button[aria-label="访问模式，当前：完全权限"] { color: #FF5C00; }
+
 @media (hover: none) {
+
   html[data-chatgpt-ui] .Sixlwa_userRow > .xzv4MW_actions { opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  html[data-chatgpt-ui] .Sixlwa_userRow > .xzv4MW_actions { transition: none; }
+
 }
 
-html[data-chatgpt-ui] { --cg-hover: #EEEFEF; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) { --cg-hover: #303030; }
-html[data-chatgpt-ui] .iWlSmW_trigger { position: relative; border-radius: 999px; }
-html[data-chatgpt-ui] .iWlSmW_chevron { display: none; }
-html[data-chatgpt-ui] .iWlSmW_trigger:hover,
-html[data-chatgpt-ui] .iWlSmW_trigger:focus-visible { background: var(--cg-hover); }
-html[data-chatgpt-ui] .iWlSmW_trigger::after {
-  content: '更改权限';
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 6px 11px;
-  border-radius: 12px;
-  background: #1c1e20;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 18px;
-  white-space: nowrap;
-  box-shadow: 0 4px 12px #0002;
-  pointer-events: none;
-  opacity: 0;
-  visibility: hidden;
-  z-index: 100;
+@media (prefers-reduced-motion: reduce) {
+
+  html[data-chatgpt-ui] .Sixlwa_userRow > .xzv4MW_actions { transition: none; }
+
 }
+
+
+
+html[data-chatgpt-ui] { --cg-hover: #f0f0f0; --dsw-specific-input-major: #ffffff; --dsw-alias-button-info-fill: #3982fa; --dsw-alias-state-business-primary: #3982fa; }
+
+body[data-ds-dark-theme] { --cg-hover: #303030; }
+
+html[data-chatgpt-ui] .iWlSmW_trigger { position: relative; border-radius: 999px; }
+
+html[data-chatgpt-ui] .iWlSmW_chevron { display: none; }
+
+html[data-chatgpt-ui] .iWlSmW_trigger:hover,
+
+html[data-chatgpt-ui] .iWlSmW_trigger:focus-visible { background: var(--cg-hover); }
+
+html[data-chatgpt-ui] .iWlSmW_trigger::after {
+
+  content: '更改权限';
+
+  position: absolute;
+
+  bottom: calc(100% + 6px);
+
+  left: 50%;
+
+  transform: translateX(-50%);
+
+  padding: 6px 11px;
+
+  border-radius: 12px;
+
+  background: #f2f4f7;
+
+  color: #33353b;
+
+  font-size: 12px;
+
+  font-weight: 600;
+
+  line-height: 18px;
+
+  white-space: nowrap;
+
+  box-shadow: 0 4px 12px #0000001a;
+
+  pointer-events: none;
+
+  opacity: 0;
+
+  visibility: hidden;
+
+  z-index: 100;
+
+}
+
 html[data-chatgpt-ui] .iWlSmW_trigger:hover::after,
+
 html[data-chatgpt-ui] .iWlSmW_trigger:focus-visible::after { opacity: 1; visibility: visible; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .iWlSmW_trigger:hover,
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .iWlSmW_trigger:focus-visible { background: #404043; }
+
+body[data-ds-dark-theme] .iWlSmW_trigger:hover,
+
+body[data-ds-dark-theme] .iWlSmW_trigger:focus-visible { background: #404043; }
+
+
 
 /* Keep native UI aliases and queue text on the same interface family. */
+
 html[data-chatgpt-ui] {
+
   --dsw-font: var(--font-sans-default);
+
   --dsw-font-family-brand: var(--font-sans-default);
+
 }
+
 html[data-chatgpt-ui] ._7yHdaG_count,
+
 html[data-chatgpt-ui] ._7yHdaG_preview,
+
 html[data-chatgpt-ui] ._7yHdaG_editor { font-family: var(--dsw-font-family); }
 
+
+
 html[data-chatgpt-ui] .iWlSmW_trigger:has(.iWlSmW_chevronOpen)::after { opacity: 0; visibility: hidden; }
-html[data-chatgpt-ui] .wSkVaW_tabs { display: none; }
-html[data-chatgpt-ui] .wSkVaW_header:not(.wSkVaW_headerBlank) { min-height: 50px; padding-bottom: 10px; }
 
 /* Lightning orchestrator switch: a real button. Armed, the glyph paints itself with the
+
    shared deep purple gradient and carries its sparkles, so no colour override is needed. */
+
 .cg-model-zap {
+
   box-sizing: border-box; display: grid; place-items: center; width: 26px; height: 26px;
+
   padding: 3px; border: 0; border-radius: 8px; background: transparent;
+
   color: #b9b8bb; cursor: pointer; transition: color 140ms ease, background 140ms ease;
+
 }
+
 .cg-model-zap:hover:not(:disabled) { background: #f1f1f3; color: #6f6f73; }
+
 .cg-model-zap:focus-visible { outline: 2px solid #3982fa; outline-offset: 1px; }
+
 .cg-model-zap:disabled { cursor: default; opacity: .45; }
+
 .cg-model-zap-glyph { flex: none; transition: filter 160ms ease; }
+
 .cg-model-zap[data-on="true"] { color: #8a4ff0; }
+
 .cg-model-zap[data-on="true"] .cg-model-zap-glyph { filter: drop-shadow(0 0 5px #8a4ff08c); }
+
 .cg-model-zap[data-on="true"]:hover { background: #f3ebff; }
+
 /* The sparkles breathe out of phase; they are stars around the bolt, not a streak. */
+
 .cg-bolt-star { transform-box: fill-box; transform-origin: center; animation: cg-bolt-twinkle 2.2s ease-in-out infinite; }
+
 @keyframes cg-bolt-twinkle {
+
   0%, 100% { opacity: .35; transform: scale(.7); }
+
   45% { opacity: 1; transform: scale(1.15); }
+
 }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-zap:hover:not(:disabled) { background: #404043; color: #d6d6d8; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-zap[data-on="true"] { color: #bb8dff; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-zap[data-on="true"]:hover { background: #362a4d; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-zap[data-on="true"]:hover { background: #2c3852; }
+
+body[data-ds-dark-theme] .cg-model-zap:hover:not(:disabled) { background: #404043; color: #d6d6d8; }
+
+body[data-ds-dark-theme] .cg-model-zap[data-on="true"] { color: #bb8dff; }
+
+body[data-ds-dark-theme] .cg-model-zap[data-on="true"]:hover { background: #362a4d; }
+
+body[data-ds-dark-theme] .cg-model-zap[data-on="true"]:hover { background: #2c3852; }
+
+
 
 /* Armed-state marker in the collapsed trigger, so the mode is visible with the
+
    popover closed. */
-.cg-model-trigger-bolt { display: inline-flex; align-items: center; flex: none; color: #8a4ff0; }
+
+.cg-model-trigger-bolt { display: inline-flex; align-items: center; flex: none; color: #6f5bc4; }
+
 .cg-model-trigger-bolt svg { width: 14px; height: 14px; color: currentColor; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-trigger-bolt { color: #bb8dff; }
+
+body[data-ds-dark-theme] .cg-model-trigger-bolt { color: #bb8dff; }
+
+
 
 /* Ultra: a meteor shower crosses the track. Each meteor is a gradient streak with a
+
    bright leading point; the eleven of them run on negative delays, so the field is full
+
    from the first painted frame instead of filling in over two seconds. Track width is
+
    measured from the shell by the component, and this value is only the fallback for the
+
    frames before that measurement lands. It is a pixel distance on purpose: `translateX`
+
    resolves a percentage against the meteor's own width (14-42px), so `calc(100% + 36px)`
+
    here let every streak die less than a third of the way along the rail. An extra sweep
+
    runs along the track edge at maximum, and everything collapses to a static sheen under
+
    reduced motion. */
+
 /* No `overflow: hidden` on the shell any more. It used to clip the meteors, but it also clipped the knob:
-   while dragging, the knob grows to 1.14× and at either end of the travel it stuck out past the shell and
+
+   while dragging, the knob grows to 1.08× and at either end of the travel it stuck out past the shell and
+
    was sliced — which is what the owner sees as "pulling it to the end does not line up". The clip now lives
+
    on the meteor layer alone (`.cg-model-meteors`), which is what the reference plugin does: its groove
+
    clips, its knob is a sibling and may overhang. */
+
 .cg-model-slider-shell { --cg-meteor-travel: 420px; }
-.cg-model-meteors { position: absolute; inset: 4px 0; overflow: hidden; z-index: 1; border-radius: inherit; pointer-events: none; }
+
+/* One extra px of room each side, not four: the halo below is painted inside this box, so whatever
+
+   the box refuses to show is what gets clipped. At `inset: 4px` the visible height was 20px against
+
+   streaks sitting at y=3…18, which left no streak enough clearance for a 7px halo — it was painted
+
+   and then cut off. This buys 26px without letting the streaks touch the shell edge. */
+
+.cg-model-meteors { position: absolute; inset: 1px 0; overflow: hidden; z-index: 1; border-radius: inherit; pointer-events: none; }
+
+/* A screen blend used to sit on this container, and it is gone on purpose. It bought +20% to +35%
+
+   relative luminance across the tail — genuinely the cheapest brightness per *painted* pixel — but it
+
+   was not cheap per *frame*: a blended element cannot be composited on its own, it has to be recomposited
+
+   against its backdrop every time either side changes, and this layer's own content changes on every
+
+   frame because eleven streaks translate across it. The cost therefore scaled with frames, not with
+
+   paint: the layer fell off the GPU fast path and every streak's transform dragged a full re-blend of
+
+   the 26px band behind it. The brightness is bought back in the places that cost nothing per frame —
+
+   the tail's own gradient alphas below and the halo's alpha in `.cg-model-meteor` — because a static
+
+   gradient is rasterised once and then only translated. Dark theme lost the most, so the compensation
+
+   lives on the dark branch and the light branch keeps its own saturated values. */
+
 .cg-model-meteor {
+
   position: absolute; top: var(--cg-meteor-y); left: 0; display: block;
+
   width: var(--cg-meteor-len); height: var(--cg-meteor-thick);
-  border-radius: 999px; transform-origin: left center;
-  background: linear-gradient(90deg, #ffffff00, #a98cff5c 32%, #d9c8ffdd 70%, #ffffff);
-  filter: drop-shadow(0 0 3px #c9a8ffcc);
-  opacity: 0; animation: cg-model-meteor var(--cg-meteor-dur) linear var(--cg-meteor-delay) infinite;
+
+  transform-origin: left center;
+
+  /* This box paints nothing, and it carries no clip. The streak and the taper live one box down, on
+
+     `::before`, for one measured reason: `clip-path` clips the element *and its pseudo-elements* and
+
+     the filter result with them (Masking 1 §2 — filter, then clip, then mask, then opacity). With the
+
+     clip on this box the drop-shadows were painted from the pill and then thrown away: sampled in
+
+     Chrome, every halo pixel outside the box measured 0, and only 1.5% of the shadow pixels survived,
+
+     all of them inside the box. That is the "怎么不发光了": the streak lost its light, not its motion.
+
+     The tail keeps its own colour ramp — only the leading point was ever recoloured, because a
+
+     purple head on a warm tail reads as a stray dot rather than the tip of the streak. The head
+
+     below is a soft translucent white instead of an opaque one, so it sits inside the tail's
+
+     brightest stop rather than stamping a hard dot onto it.
+
+     White, and now actually white. The streak's `::before` paints two background layers — a white ramp
+
+     over a tier-coloured one — and the colour layer used to sit at 34/62/74%, which read as a purple
+
+     (Ultra) or gold (超快) bar with white laid on top, not as the white blocks the owner asked for. It
+
+     sits at 10–18% now: a trace of air in the tail, not a tint. Nothing about the glow is lost, because
+
+     the glow never came from that layer — it is the drop-shadow on `.cg-model-meteor` and the head below.
+
+     The reference version the owner remembers is a field of small white light blocks crossing the rail —
+
+     short, bright — and a long ramp of purple-to-gold reads as tape next to it. The mode colour lives in
+
+     the head, which is where it belongs: the streak is light, the tip is the tier. */
+
+  background: none;
+
+  /* One halo, painted from `::before`'s *clipped* silhouette, so it follows the taper and fades with
+
+     the tail instead of ringing a rectangle — the same shape the old bloom band had, which is why the
+
+     band could go. It used to be two stacked drop-shadows (a 3px white one under a 5px mode-coloured
+
+     one); that pair is the expensive half of this element, because the head below pulses inside this
+
+     filter, so the filter re-runs whenever the head does, and eleven streaks then cost twenty-two blur
+
+     rasterisations per frame. One pass at the intermediate radius costs eleven and reads the same at 3px
+
+     thickness. The colour is the old pair collapsed into one: mostly white with the tier colour mixed
+
+     in, at an alpha a little above the 0.685 the two translucent layers stacked to — that is the
+
+     compensation for the screen blend this layer no longer gets, see the note above this block.
+
+     Radius stays small on purpose: the layer is only 26px tall and its overflow clips whatever a bigger
+
+     blur spreads past it, so a wide radius would be painted and then thrown away. */
+
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--cg-glow, #ffffff) 38%, #ffffffa6));
+
+  opacity: 0; animation: cg-model-meteor var(--cg-meteor-dur) linear var(--cg-meteor-delay) infinite; animation-duration: calc(var(--cg-meteor-dur) * 1);
+
 }
-/* The leading point: brighter, round, and slightly ahead of the tail. */
-.cg-model-meteor::after {
-  content: ''; position: absolute; right: -1px; top: 50%; width: 2px; height: 2px;
-  margin-top: -1px; border-radius: 50%; background: #fff; box-shadow: 0 0 6px 1px #d9c2ffff;
-}
-/* Eleven streaks, every gap under ~0.4s and none of the periods a multiple of another, so
-   the field never falls into a visible rhythm; the short ones read as fast dust. */
-.cg-model-meteor:nth-child(1) { --cg-meteor-y: 3px; --cg-meteor-delay: -0.1s; --cg-meteor-dur: 1.5s; --cg-meteor-len: 26px; --cg-meteor-thick: 2px; }
-.cg-model-meteor:nth-child(2) { --cg-meteor-y: 8px; --cg-meteor-delay: -0.5s; --cg-meteor-dur: 1.9s; --cg-meteor-len: 34px; --cg-meteor-thick: 2px; }
-.cg-model-meteor:nth-child(3) { --cg-meteor-y: 13px; --cg-meteor-delay: -0.88s; --cg-meteor-dur: 2.1s; --cg-meteor-len: 20px; --cg-meteor-thick: 3px; }
-.cg-model-meteor:nth-child(4) { --cg-meteor-y: 18px; --cg-meteor-delay: -1.26s; --cg-meteor-dur: 1.7s; --cg-meteor-len: 30px; --cg-meteor-thick: 2px; }
-.cg-model-meteor:nth-child(5) { --cg-meteor-y: 17px; --cg-meteor-delay: -1.62s; --cg-meteor-dur: 2.3s; --cg-meteor-len: 42px; --cg-meteor-thick: 2px; }
-.cg-model-meteor:nth-child(6) { --cg-meteor-y: 6px; --cg-meteor-delay: -1.98s; --cg-meteor-dur: 2.6s; --cg-meteor-len: 16px; --cg-meteor-thick: 2px; }
-.cg-model-meteor:nth-child(7) { --cg-meteor-y: 11px; --cg-meteor-delay: -0.3s; --cg-meteor-dur: 1.6s; --cg-meteor-len: 14px; --cg-meteor-thick: 2px; }
-.cg-model-meteor:nth-child(8) { --cg-meteor-y: 15px; --cg-meteor-delay: -1.14s; --cg-meteor-dur: 2s; --cg-meteor-len: 38px; --cg-meteor-thick: 2px; }
-.cg-model-meteor:nth-child(9) { --cg-meteor-y: 15px; --cg-meteor-delay: -0.68s; --cg-meteor-dur: 1.8s; --cg-meteor-len: 22px; --cg-meteor-thick: 3px; }
-.cg-model-meteor:nth-child(10) { --cg-meteor-y: 5px; --cg-meteor-delay: -1.44s; --cg-meteor-dur: 2.2s; --cg-meteor-len: 12px; --cg-meteor-thick: 2px; }
-.cg-model-meteor:nth-child(11) { --cg-meteor-y: 9px; --cg-meteor-delay: -0.22s; --cg-meteor-dur: 2.45s; --cg-meteor-len: 18px; --cg-meteor-thick: 2px; }
-@keyframes cg-model-meteor {
-  0% { transform: translateX(-44px); opacity: 0; }
-  10% { opacity: 1; }
-  72% { opacity: .9; }
-  100% { transform: translateX(var(--cg-meteor-travel)); opacity: 0; }
-}
-/* A wide glare sweeps the track once every few seconds, so the field reads as moving
-   even between meteors. Carried by ::after, which the star field does not need. */
-.cg-model-slider-shell[data-ultra="true"]::after {
-  content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit; pointer-events: none;
-  background: linear-gradient(105deg, #ffffff00 44%, #ffffffa8 50%, #d9c8ff8c 56%, #ffffff00 62%);
-  background-size: 220% 100%; mix-blend-mode: screen;
-  animation: cg-model-glare 3.4s ease-in-out infinite;
-}
-@keyframes cg-model-glare {
-  0% { background-position: 150% 0; opacity: 0; }
-  18% { opacity: .9; }
-  70% { opacity: .9; }
-  100% { background-position: -60% 0; opacity: 0; }
-}
-/* Star field rides the meteor layer's own pseudo-element-free element list, so the
-   twinkle is drawn by a dedicated overlay instead of competing with the glare. */
-.cg-model-meteors::before {
-  content: ''; position: absolute; inset: 3px 8px; border-radius: inherit;
+
+/* The leading point: brighter, round, and slightly ahead of the tail. Its full rule — geometry,
+
+   colour and the four-shadow halo — is stated once below, after the streak it sits on. */
+
+
+
+/* ── The streak, and the bloom it now carries inside itself ────────────────────────────────────
+
+   The streak is a white bar: full thickness at the leading (right) end, about two thirds of it at
+
+   the tail. Tapered, not a cylinder — a true point would read as a comet rather than the short bar
+
+   of light this is meant to be, so the tail only thins; reading right-to-left, the streak narrows a
+
+   little the further you get from the tip. Done with clip-path rather than a height change because
+
+   the height comes from a data variable.
+
+   The clip lives here and nowhere else. This box *is* the shape, so clipping it costs nothing else:
+
+   the element above stays unclipped and can still paint the halo, which is the arrangement that was
+
+   missing before. Everything this box draws is inside the trapezoid, so the bloom that used to be a
+
+   band 2px/6px outside the box is now the second background layer, under the bar — it colours the
+
+   thin tail instead of haloing it, and the halo itself is the element's drop-shadow. */
+
+.cg-model-meteor::before {
+
+  content: ''; position: absolute; inset: 0; border-radius: 999px;
+
+  clip-path: polygon(0% 17%, 100% 0%, 100% 100%, 0% 83%);
+
+  /* Two layers, and the second one is a trace rather than a tint. The owner's picture is a field of
+
+     white light blocks, so the streak's body has to read as white; the tier colour belongs to the head
+
+     below and to the drop-shadow on `.cg-model-meteor`, which is where the glow actually comes from.
+
+     The colour layer stays at 10–18% for the faint air it gives the tail and nothing more. At the
+
+     34/62/74% it used to carry, the streak read as a purple (Ultra) or gold (超快) bar with white laid
+
+     over it — never the white the request asked for. Dark branch only: the light branch restates this
+
+     whole list below with its own values. */
+
   background-image:
-    radial-gradient(1.5px 1.5px at 8% 30%, #ffffffdd, transparent),
-    radial-gradient(1.2px 1.2px at 20% 68%, #f2ebffcc, transparent),
-    radial-gradient(1.2px 1.2px at 28% 72%, #e5d9ffcc, transparent),
-    radial-gradient(1.8px 1.8px at 39% 22%, #ffffffcc, transparent),
-    radial-gradient(1.2px 1.2px at 47% 26%, #ffffffcc, transparent),
-    radial-gradient(1.1px 1.1px at 55% 74%, #cbb4ffcc, transparent),
-    radial-gradient(1.2px 1.2px at 66% 66%, #d9c8ffee, transparent),
-    radial-gradient(1.4px 1.4px at 74% 34%, #ffffffdd, transparent),
-    radial-gradient(1.5px 1.5px at 84% 38%, #ffffffdd, transparent),
-    radial-gradient(1.1px 1.1px at 93% 74%, #cbb4ffcc, transparent);
-  animation: cg-model-twinkle 2.2s ease-in-out infinite alternate;
+
+    linear-gradient(90deg, #ffffff00, #ffffff8f 20%, #fffffff0 70%, #ffffff),
+
+    linear-gradient(90deg,
+
+      #ffffff00 0%,
+
+      color-mix(in srgb, var(--cg-glow, #c9b4f0) 10%, transparent) 38%,
+
+      color-mix(in srgb, var(--cg-glow, #c9b4f0) 14%, transparent) 78%,
+
+      color-mix(in srgb, var(--cg-glow, #c9b4f0) 18%, transparent) 100%);
+
 }
-@keyframes cg-model-twinkle { from { opacity: .3; } to { opacity: 1; } }
-.cg-model-slider-shell[data-ultra="true"] .cg-model-thumb {
-  border-color: #d3b6ff;
-  box-shadow: 0 0 6px #a066ff99, 0 0 16px #8b5cf68c, 0 0 0 1px #ffffff99 inset;
+
+
+
+/* Head: a flare plus a slow breath. The point stays 2px on purpose — at that size a 2px offset inside a
+
+   3px blur overlaps into one soft cross, which is the look a star wants; a conic gradient would need a
+
+   bigger box, and enlarging the box is what turns a tip into a shape.
+
+   Four layers, not six. The two that went are the vertical arms at 38% — the weakest pair, and the shaft
+
+   they would add is the direction the streak already travels in, so on a 2px dot they were doing the least
+
+   work of anything here while still costing two more blurred shadows per head. The 58% ring came up to 62%
+
+   to hold the head's overall light after the layer blend was removed. Everything rides --cg-glow, so 超快
+
+   keeps its gold head and the Ultra tiers their purple with no second rule. */
+
+/* The head, in full and in one place. It used to be split across two blocks — geometry and a
+
+   single-shadow halo up in the streak section, then four shadows down here — and the second block's
+
+   box-shadow silently replaced the first one's, leaving a dead declaration behind. Merged.
+
+   The head wears the mode's own colour: --cg-glow is the tier glow this panel already breathes in,
+
+   #f7c948 gold under superfast and #bb74ff purple at the top non-superfast stop. Mixed toward white so
+
+   it stays a soft tip instead of a saturated dot; the plain declaration in front is the fallback for a
+
+   browser without color-mix, matching how the popover halo degrades. Every var() carries #ffffffb3 as
+
+   its fallback because this rule also runs where --cg-glow has no tier (off / none) and must stay white
+
+   rather than losing the declaration. */
+
+.cg-model-meteor::after {
+
+  content: ''; position: absolute; right: -1px; top: 50%; width: 2px; height: 2px;
+
+  margin-top: -1px; border-radius: 50%;
+
+  background: var(--cg-glow, #ffffffb3);
+
+  background: color-mix(in srgb, var(--cg-glow, #ffffffb3) 45%, #ffffff);
+
+  box-shadow:
+
+    0 0 5px 0         color-mix(in srgb, var(--cg-glow, #ffffffb3) 62%, transparent),
+
+    0 0 2px 0         color-mix(in srgb, var(--cg-glow, #ffffffb3) 46%, #ffffff),
+
+    2px 0 2px -.5px   color-mix(in srgb, var(--cg-glow, #ffffffb3) 46%, transparent),
+
+    -2px 0 2px -.5px  color-mix(in srgb, var(--cg-glow, #ffffffb3) 46%, transparent);
+
+  animation: cg-model-meteor-head 1.15s ease-in-out infinite;
+
 }
-.cg-model-slider-shell[data-ultra="true"][data-max="true"] .cg-model-thumb {
-  animation: cg-model-thumb-pulse 2.4s ease-in-out infinite;
+
+/* Opacity and transform only: both are composited, so the painted shadows are cached and the pulse
+
+   costs no repaint. A keyframed box-shadow would repaint eleven heads on every frame. */
+
+@keyframes cg-model-meteor-head {
+
+  0%, 100% { opacity: .8;  transform: scale(1); }
+
+  50%      { opacity: .94; transform: scale(1.12); }
+
 }
-@keyframes cg-model-thumb-pulse {
-  0%, 100% { box-shadow: 0 0 6px #a066ff80, 0 0 14px #8b5cf666, 0 0 0 1px #ffffff99 inset; }
-  50% { box-shadow: 0 0 10px #b98cffff, 0 0 26px #8b5cf6aa, 0 0 0 1px #ffffffcc inset; }
+
+
+
+/* Light theme: the rail is near-white (#e8e6e8), where added white is nothing, so the flare and the
+
+   bloom lean on the mode colour instead. Both background layers are restated: a background-image
+
+   override replaces the whole list, and dropping the first one would make the streak itself vanish in
+
+   the light theme. The colour layer carries the same low alpha as the dark branch — the streak has to
+
+   read as white in both themes, and on this rail that means the white ramp does the work. */
+
+body:not([data-ds-dark-theme]) .cg-model-meteor::before {
+
+  background-image:
+
+    linear-gradient(90deg, #ffffff00, #ffffff80 20%, #ffffffe6 70%, #ffffff),
+
+    linear-gradient(90deg,
+
+      #ffffff00 0%,
+
+      color-mix(in srgb, var(--cg-glow, #8f74d6) 8%, transparent) 38%,
+
+      color-mix(in srgb, var(--cg-glow, #8f74d6) 12%, transparent) 78%,
+
+      color-mix(in srgb, var(--cg-glow, #8f74d6) 16%, transparent) 100%);
+
 }
-.cg-model-popover[data-ultra="true"] .cg-model-slider-shell::before { box-shadow: inset 0 0 0 1px #bb74ff3d; }
-/* The appended Ultra position is drawn darker: it is a mode, not a real tier. */
-.cg-model-slider-dots span[data-ultra="true"] { background: #9b50ff; box-shadow: 0 0 5px #9b50ff99; }
+
+/* The shared halo leans white so it survives on the dark rail; on the light rail a near-white blur is
+
+   nothing, so light keeps the mode colour the way its flare does. Same single pass, same radius. */
+
+body:not([data-ds-dark-theme]) .cg-model-meteor {
+
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--cg-glow, #8f74d6) 58%, transparent));
+
+}
+
+body:not([data-ds-dark-theme]) .cg-model-meteor::after {
+
+  box-shadow:
+
+    0 0 7px 1px       color-mix(in srgb, var(--cg-glow, #8f74d6) 74%, transparent),
+
+    0 0 2px 0         var(--cg-glow, #8f74d6),
+
+    2px 0 3px -.5px   color-mix(in srgb, var(--cg-glow, #8f74d6) 54%, transparent),
+
+    -2px 0 3px -.5px  color-mix(in srgb, var(--cg-glow, #8f74d6) 54%, transparent);
+
+}
+
+
+
+/* Reduced motion: the block further up already stops every animation and parks the shower at .45,
+
+   which leaves all eleven streaks stacked at the left edge. `::before` is the streak itself now, so
+
+   there is nothing to hide there; the head keeps a single small halo. */
+
 @media (prefers-reduced-motion: reduce) {
-  .cg-model-meteor, .cg-model-meteors::before,
-  .cg-model-slider-shell[data-ultra="true"]::after,
-  .cg-model-slider-shell[data-ultra="true"][data-max="true"] .cg-model-thumb { animation: none; }
-  .cg-model-meteor { opacity: .45; }
-  .cg-model-slider-shell[data-ultra="true"]::after { opacity: .35; background-position: 50% 0; }
-  /* The drifting deep purple parks in the middle instead of moving, and the bolt's sparkles
-     hold a steady glow. */
-  .cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill::after { animation: none; transform: translateX(30%); }
-  .cg-bolt-star { animation: none; opacity: .85; transform: none; }
-  .cg-model-zap, .cg-model-zap-glyph { transition: none; }
+
+  .cg-model-meteor::after {
+
+    animation: none; transform: none;
+
+    box-shadow: 0 0 5px 0 color-mix(in srgb, var(--cg-glow, #ffffffb3) 64%, transparent);
+
+  }
+
 }
+
+/* Eleven streaks, every gap under ~0.4s and none of the periods a multiple of another, so
+
+   the field never falls into a visible rhythm; the short ones read as fast dust and the long ones as
+
+   the occasional real meteor. Lengths run 15/16/18/20/23/24/26/28/30/32/34px — a 2.27× spread end to end,
+
+   scattered across the lanes rather than sorted, so adjacent streaks never pair up at the same size.
+
+   What a streak is graded against is not L/T but the straight edge it keeps: `border-radius: 999px` eats
+
+   T/2 at each end, so the flat run is L − T, and the ratio that decides "bar or dot" is (L − T) / T ≥ 4 —
+
+   equivalently L ≥ 5T. L/T = 4 is not enough: 12/3 clears it and still leaves 9/3 = 3.00 of straight edge,
+
+   which is the "豆" the owner reported. Measured at DPR 1.25 against a rasterised box, the straight edge
+
+   covers 0.77–0.87 of the length at L/T = 4 but only 0.57–0.63 at 2, so the gap is real.
+
+   All eleven now satisfy L ≥ 5T (15/3 leaves 4.00 straight, 34/4 leaves 7.50), and the short ones carry
+
+   the thinner body so the field still reads as one system rather than eleven unrelated sizes.
+
+   Thickness is integer only: measured, 3.5px rasterises as 3px plus one 38%-coverage edge row, while
+
+   4px fills that row to 79% — a 2.5/3.5 split would be invisible. Two body sizes, length does the grading.
+
+   34px is the ceiling: past that a streak stops reading as a short bar of light and turns back into the
+
+   long coloured tape that was already rejected once.
+
+   Duration, delay and lane are untouched — that rhythm was accepted. */
+
+.cg-model-meteor:nth-child(1) { --cg-meteor-y: 3px; --cg-meteor-delay: -0.1s; --cg-meteor-dur: 1.5s; --cg-meteor-len: 32px; --cg-meteor-thick: 4px; }
+
+.cg-model-meteor:nth-child(2) { --cg-meteor-y: 8px; --cg-meteor-delay: -0.5s; --cg-meteor-dur: 1.9s; --cg-meteor-len: 26px; --cg-meteor-thick: 4px; }
+
+.cg-model-meteor:nth-child(3) { --cg-meteor-y: 13px; --cg-meteor-delay: -0.88s; --cg-meteor-dur: 2.1s; --cg-meteor-len: 20px; --cg-meteor-thick: 3px; }
+
+.cg-model-meteor:nth-child(4) { --cg-meteor-y: 18px; --cg-meteor-delay: -1.26s; --cg-meteor-dur: 1.7s; --cg-meteor-len: 34px; --cg-meteor-thick: 4px; }
+
+.cg-model-meteor:nth-child(5) { --cg-meteor-y: 17px; --cg-meteor-delay: -1.62s; --cg-meteor-dur: 2.3s; --cg-meteor-len: 23px; --cg-meteor-thick: 4px; }
+
+.cg-model-meteor:nth-child(6) { --cg-meteor-y: 6px; --cg-meteor-delay: -1.98s; --cg-meteor-dur: 2.6s; --cg-meteor-len: 16px; --cg-meteor-thick: 3px; }
+
+.cg-model-meteor:nth-child(7) { --cg-meteor-y: 11px; --cg-meteor-delay: -0.3s; --cg-meteor-dur: 1.6s; --cg-meteor-len: 28px; --cg-meteor-thick: 4px; }
+
+.cg-model-meteor:nth-child(8) { --cg-meteor-y: 15px; --cg-meteor-delay: -1.14s; --cg-meteor-dur: 2s; --cg-meteor-len: 24px; --cg-meteor-thick: 4px; }
+
+.cg-model-meteor:nth-child(9) { --cg-meteor-y: 15px; --cg-meteor-delay: -0.68s; --cg-meteor-dur: 1.8s; --cg-meteor-len: 18px; --cg-meteor-thick: 3px; }
+
+.cg-model-meteor:nth-child(10) { --cg-meteor-y: 5px; --cg-meteor-delay: -1.44s; --cg-meteor-dur: 2.2s; --cg-meteor-len: 30px; --cg-meteor-thick: 4px; }
+
+.cg-model-meteor:nth-child(11) { --cg-meteor-y: 9px; --cg-meteor-delay: -0.22s; --cg-meteor-dur: 2.45s; --cg-meteor-len: 15px; --cg-meteor-thick: 3px; }
+
+@keyframes cg-model-meteor {
+
+  0% { transform: translateX(-44px); opacity: 0; }
+
+  10% { opacity: 1; }
+
+  72% { opacity: .9; }
+
+  100% { transform: translateX(var(--cg-meteor-travel)); opacity: 0; }
+
+}
+
+/* A wide glare sweeps the track once every few seconds, so the field reads as moving
+
+   even between meteors. Carried by ::after, which the star field does not need.
+
+   Its screen blend is gone too, for the same reason as the meteor layer's: the sweep is the
+
+   one thing in this panel that repaints its whole width on every frame, and blending made that repaint
+
+   recomposite against the rail as well. The gradient's two light stops carry the ~12% more alpha the
+
+   blend was contributing. What is left is a plain repaint of a static gradient, which is the cheapest
+
+   form this sweep has short of rebuilding it as a translated layer. */
+
+.cg-model-slider-shell[data-ultra="true"]::after {
+
+  content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit; pointer-events: none;
+
+  background: linear-gradient(105deg, #ffffff00 44%, #c9b4f08f 50%, #d9c8ff9e 56%, #ffffff00 62%);
+
+  background-size: 220% 100%;
+
+  animation: cg-model-glare 3.4s ease-in-out infinite; opacity: 0;
+
+}
+
+@keyframes cg-model-glare {
+
+  0% { background-position: 150% 0; opacity: 0; }
+
+  18% { opacity: .9; }
+
+  70% { opacity: .9; }
+
+  100% { background-position: -60% 0; opacity: 0; }
+
+}
+
+/* Star field rides the meteor layer's own pseudo-element-free element list, so the
+
+   twinkle is drawn by a dedicated overlay instead of competing with the glare. */
+
+.cg-model-meteors::before {
+
+  content: ''; position: absolute; inset: 3px 8px; border-radius: inherit;
+
+  background-image:
+
+    radial-gradient(1.5px 1.5px at 8% 30%, #cbb4ff88, transparent),
+
+    radial-gradient(1.2px 1.2px at 20% 68%, #f2ebffcc, transparent),
+
+    radial-gradient(1.2px 1.2px at 28% 72%, #e5d9ffcc, transparent),
+
+    radial-gradient(1.8px 1.8px at 39% 22%, #cbb4ff77, transparent),
+
+    radial-gradient(1.2px 1.2px at 47% 26%, #cbb4ff77, transparent),
+
+    radial-gradient(1.1px 1.1px at 55% 74%, #cbb4ffcc, transparent),
+
+    radial-gradient(1.2px 1.2px at 66% 66%, #d9c8ffee, transparent),
+
+    radial-gradient(1.4px 1.4px at 74% 34%, #cbb4ff88, transparent),
+
+    radial-gradient(1.5px 1.5px at 84% 38%, #cbb4ff88, transparent),
+
+    radial-gradient(1.1px 1.1px at 93% 74%, #cbb4ffcc, transparent);
+
+  animation: cg-model-twinkle 2.6s ease-in-out infinite alternate;
+
+}
+
+@keyframes cg-model-twinkle { from { opacity: .3; } to { opacity: .6; } }
+
+.cg-model-slider-shell[data-ultra="true"] .cg-model-thumb {
+
+  border-color: #d3b6ff;
+
+  box-shadow: 0 0 6px #a066ff99, 0 0 16px #8b5cf68c, 0 0 0 1px #ffffff99 inset;
+
+}
+
+.cg-model-slider-shell[data-ultra="true"][data-max="true"] .cg-model-thumb {
+
+  animation: none;
+
+}
+
+@keyframes cg-model-thumb-pulse {
+
+  0%, 100% { box-shadow: 0 0 6px #a066ff80, 0 0 14px #8b5cf666, 0 0 0 1px #ffffff99 inset; }
+
+  50% { box-shadow: 0 0 10px #b98cffff, 0 0 26px #8b5cf6aa, 0 0 0 1px #ffffffcc inset; }
+
+}
+
+.cg-model-popover[data-ultra="true"] .cg-model-slider-shell::before { box-shadow: inset 0 0 0 1px #bb74ff3d; }
+
+/* The appended Ultra position is drawn darker: it is a mode, not a real tier. */
+
+.cg-model-slider-dots span[data-ultra="true"] { background: #9b50ff; box-shadow: 0 0 5px #9b50ff99; }
+
+@media (prefers-reduced-motion: reduce) {
+
+  .cg-model-meteor, .cg-model-meteors::before,
+
+  .cg-model-slider-shell[data-ultra="true"]::after,
+
+  .cg-model-slider-shell[data-ultra="true"][data-max="true"] .cg-model-thumb { animation: none; }
+
+  .cg-model-meteor { opacity: .45; }
+
+  .cg-model-slider-shell[data-ultra="true"]::after { opacity: .35; background-position: 50% 0; }
+
+  /* The drifting deep purple parks in the middle instead of moving, and the bolt's sparkles
+
+     hold a steady glow. */
+
+  .cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill::after { animation: none; transform: translateX(30%); }
+
+  .cg-bolt-star { animation: none; opacity: .85; transform: none; }
+
+  .cg-model-zap, .cg-model-zap-glyph { transition: none; }
+
+}
+
+
 
 /* ---- Motion: the panels and rows cross over instead of snapping --------------------------------
+
    The house curve is cubic-bezier(.22,.8,.28,1) at 140-180ms: quick enough to feel like a response
+
    rather than a wait, and eased so nothing starts or stops abruptly. Everything here is decoration —
+
    the reduced-motion block at the end switches all of it off. */
-.cg-model-pane { animation: cg-soft-in 170ms cubic-bezier(.22, .8, .28, 1); }
+
+.cg-model-pane { color: var(--cg-text); animation: cg-soft-in 170ms cubic-bezier(.22, .8, .28, 1); }
+
 .cg-model-editor { display: flex; flex: 1 1 auto; min-width: 0; align-items: flex-start; gap: 2px; animation: cg-soft-in 140ms cubic-bezier(.22, .8, .28, 1); }
+
 .cg-model-viewer { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 2px; animation: cg-soft-in 140ms cubic-bezier(.22, .8, .28, 1); }
+
 .cg-menu, .cg-task-menu { animation: cg-soft-in 130ms cubic-bezier(.22, .8, .28, 1); transform-origin: top left; }
+
 @keyframes cg-soft-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
 .cg-button, .cg-model-option, .cg-model-rename, .cg-model-alias-save, .cg-model-alias-cancel,
+
 .cg-model-summary, .cg-model-zap, .cg-model-reset, .cg-model-choice, .cg-rail-item, .cg-task-menu .cg-button {
+
   transition: background-color 140ms cubic-bezier(.22, .8, .28, 1), color 140ms cubic-bezier(.22, .8, .28, 1),
+
     opacity 140ms cubic-bezier(.22, .8, .28, 1), border-color 140ms cubic-bezier(.22, .8, .28, 1);
+
 }
+
 /* The rail buttons also carry the hover scale, so it needs its own duration in the same list. */
+
 .cg-rail-item { transition: background-color 140ms cubic-bezier(.22, .8, .28, 1), color 140ms cubic-bezier(.22, .8, .28, 1),
+
   opacity 140ms cubic-bezier(.22, .8, .28, 1), transform 150ms cubic-bezier(.22, .8, .28, 1); }
+
 .cg-task-row .cg-pinned-row { transition: padding-right 170ms cubic-bezier(.22, .8, .28, 1), background-color 140ms cubic-bezier(.22, .8, .28, 1); }
+
 @media (prefers-reduced-motion: reduce) {
+
   .cg-model-pane, .cg-model-editor, .cg-model-viewer, .cg-menu, .cg-task-menu { animation: none; }
+
   .cg-button, .cg-model-option, .cg-model-rename, .cg-model-alias-save, .cg-model-alias-cancel,
+
   .cg-model-summary, .cg-model-zap, .cg-model-reset, .cg-model-choice, .cg-rail-item,
+
   .cg-task-menu .cg-button, .cg-task-row .cg-pinned-row { transition: none; }
+
 }
+
 /* The host's own menus (the sidebar's chat menu, the runtime picker and friends) are matched
+
    structurally instead of by build-hashed class name: ARIA roles plus a substring on the class
+
    covers what this app renders without pinning a hash that the next DSH build would change. */
+
 html[data-chatgpt-ui] [role="menu"], html[data-chatgpt-ui] [role="listbox"],
+
 html[data-chatgpt-ui] [class*="_menu_"], html[data-chatgpt-ui] [class*="_popover_"],
+
 html[data-chatgpt-ui] [class*="_dropdown_"], html[data-chatgpt-ui] [class*="_popup_"],
+
 html[data-chatgpt-ui] [class*="_contextMenu"] {
+
   animation: cg-soft-in 140ms cubic-bezier(.22, .8, .28, 1);
+
   transform-origin: top left;
+
 }
+
 html[data-chatgpt-ui] [role="menuitem"], html[data-chatgpt-ui] [role="option"],
+
 html[data-chatgpt-ui] [class*="_menu_"] button, html[data-chatgpt-ui] [class*="_menu_"] a {
+
   transition: background-color 140ms cubic-bezier(.22, .8, .28, 1), color 140ms cubic-bezier(.22, .8, .28, 1);
+
 }
+
 @media (prefers-reduced-motion: reduce) {
+
   html[data-chatgpt-ui] [role="menu"], html[data-chatgpt-ui] [role="listbox"],
+
   html[data-chatgpt-ui] [class*="_menu_"], html[data-chatgpt-ui] [class*="_popover_"],
+
   html[data-chatgpt-ui] [class*="_dropdown_"], html[data-chatgpt-ui] [class*="_popup_"],
+
   html[data-chatgpt-ui] [class*="_contextMenu"] { animation: none; }
+
 }
+
+
 
 /* The sidebar's hover card (title plus an excerpt of the chat) lives in its own CSS module, found
+
    in the app's stylesheet as `_preview_38jqx_52` / `_card_38jqx_9` — the same module id, so the
+
    card and its preview text belong together. Matched by those substrings rather than by the hash,
+
    and the tooltip family is included for the same reason. */
+
 html[data-chatgpt-ui] [class*="_preview"], html[data-chatgpt-ui] [class*="_card_"],
+
 html[data-chatgpt-ui] [class*="_tooltip_"], html[data-chatgpt-ui] [role="tooltip"] {
+
   animation: cg-soft-in 160ms cubic-bezier(.22, .8, .28, 1);
+
   transform-origin: top left;
+
 }
+
 @media (prefers-reduced-motion: reduce) {
+
   html[data-chatgpt-ui] [class*="_preview"], html[data-chatgpt-ui] [class*="_card_"],
+
   html[data-chatgpt-ui] [class*="_tooltip_"], html[data-chatgpt-ui] [role="tooltip"] { animation: none; }
+
 }
+
+
 
 /* The right rail's own pieces (the turn rail, its labels, the thumb on the control track, the
+
    selection rail, the request-boundary control) are matched by the *name* half of their hashed
+
    class — `38jqx`-style hashes change with every build, the names do not. They get the same 180ms
+
    curve as the rest of this UI, so a marker slides between turns instead of jumping; that is the
+
    treatment the chat list's hover card already got. */
+
 html[data-chatgpt-ui] [class*="turnRail"], html[data-chatgpt-ui] [class*="turnLabel"],
+
 html[data-chatgpt-ui] [class*="controlThumb"], html[data-chatgpt-ui] [class*="controlTrack"],
+
 html[data-chatgpt-ui] [class*="selectionRail"], html[data-chatgpt-ui] [class*="requestBoundaryControl"],
+
 html[data-chatgpt-ui] [class*="requestDetailsDot"] {
+
   transition: transform 180ms cubic-bezier(.22, .8, .28, 1), top 180ms cubic-bezier(.22, .8, .28, 1),
+
     left 180ms cubic-bezier(.22, .8, .28, 1), height 170ms cubic-bezier(.22, .8, .28, 1),
+
     opacity 150ms cubic-bezier(.22, .8, .28, 1), background-color 150ms cubic-bezier(.22, .8, .28, 1),
+
     color 150ms cubic-bezier(.22, .8, .28, 1);
+
 }
+
 @media (prefers-reduced-motion: reduce) {
+
   html[data-chatgpt-ui] [class*="turnRail"], html[data-chatgpt-ui] [class*="turnLabel"],
+
   html[data-chatgpt-ui] [class*="controlThumb"], html[data-chatgpt-ui] [class*="controlTrack"],
+
   html[data-chatgpt-ui] [class*="selectionRail"], html[data-chatgpt-ui] [class*="requestBoundaryControl"],
+
   html[data-chatgpt-ui] [class*="requestDetailsDot"] { transition: none; }
+
 }
+
+
 
 /* The dashes on the right are the trajectory package's rail (`hash_turnRail`, `hash_turnLabel`,
+
    `hash_turnLabelActive` …). The rule below reaches *everything inside* the rail plus its
+
    pseudo-elements, because the mark that looks like a moving box may well be drawn by one.
+
    `!important` is deliberate here and only here: the third party sets its own `transition` on some
+
    of these elements (0.12s), and a same-specificity override would lose the cascade coin toss. */
+
 html[data-chatgpt-ui] [class*="turnRail"],
+
 html[data-chatgpt-ui] [class*="turnRail"] *,
+
 html[data-chatgpt-ui] [class*="turnRail"]::before,
+
 html[data-chatgpt-ui] [class*="turnRail"]::after,
+
 html[data-chatgpt-ui] [class*="turnRail"] *::before,
+
 html[data-chatgpt-ui] [class*="turnRail"] *::after,
+
 html[data-chatgpt-ui] [class*="turnLabel"] {
+
   transition: transform 190ms cubic-bezier(.22, .8, .28, 1) !important,
+
     top 190ms cubic-bezier(.22, .8, .28, 1) !important,
+
     left 190ms cubic-bezier(.22, .8, .28, 1) !important,
+
     bottom 190ms cubic-bezier(.22, .8, .28, 1) !important,
+
     height 180ms cubic-bezier(.22, .8, .28, 1) !important,
+
     width 180ms cubic-bezier(.22, .8, .28, 1) !important,
+
     opacity 150ms cubic-bezier(.22, .8, .28, 1) !important,
+
     background-color 150ms cubic-bezier(.22, .8, .28, 1) !important,
+
     box-shadow 150ms cubic-bezier(.22, .8, .28, 1) !important;
+
 }
+
 @media (prefers-reduced-motion: reduce) {
+
   html[data-chatgpt-ui] [class*="turnRail"],
+
   html[data-chatgpt-ui] [class*="turnRail"] *,
+
   html[data-chatgpt-ui] [class*="turnRail"]::before,
+
   html[data-chatgpt-ui] [class*="turnRail"]::after,
+
   html[data-chatgpt-ui] [class*="turnRail"] *::before,
+
   html[data-chatgpt-ui] [class*="turnRail"] *::after,
+
   html[data-chatgpt-ui] [class*="turnLabel"] { transition: none !important; }
+
 }
+
+
 
 /* New-chat hero mark, the settings picker that chooses it, and the Codex mark's click animation. */
+
 .cg-hero-mark { display: block; color: inherit; }
+
 /* Lifted clear of the slot's own box, and the lift is repeated in every keyframe of the click
+
    animation: that animation writes `transform`, so a static translate here would be overwritten the
+
    moment the mark is clicked and the icon would drop back down mid-animation. The mark is also not
+
    focusable (see the component), so a click cannot draw a focus ring around it. */
+
 .cg-hero-mark-codex { cursor: pointer; transform: translateY(-9px); outline: none; user-select: none; -webkit-user-select: none; }
+
 .cg-hero-mark-image { object-fit: contain; border-radius: 8px; }
+
 /* Click animation: the mark tips over, the chevron and the dash slide, then everything settles. */
+
 @keyframes cg-codex-pop {
+
   0% { transform: translateY(-9px) rotate(0deg) scale(1); }
+
   30% { transform: translateY(-9px) rotate(-7deg) scale(1.05); }
+
   62% { transform: translateY(-9px) rotate(5deg) scale(1.02); }
+
   100% { transform: translateY(-9px) rotate(0deg) scale(1); }
+
 }
+
 @keyframes cg-codex-chevron {
+
   0%, 100% { transform: translateX(0); }
+
   35% { transform: translateX(3px); }
+
   70% { transform: translateX(-1px); }
+
 }
+
 @keyframes cg-codex-dash {
+
   0%, 100% { transform: translateX(0); }
+
   40% { transform: translateX(-4px); }
+
 }
+
 .cg-hero-mark-pulse { animation: cg-codex-pop 620ms cubic-bezier(.22, .8, .28, 1); transform-origin: 50% 50%; }
+
 .cg-hero-mark-pulse .cg-hero-mark-codex-chevron { animation: cg-codex-chevron 620ms cubic-bezier(.22, .8, .28, 1); }
+
 .cg-hero-mark-pulse .cg-hero-mark-codex-dash { animation: cg-codex-dash 620ms cubic-bezier(.22, .8, .28, 1); }
 
+
+
 .cg-mark-picker { position: fixed; left: 56px; bottom: 64px; z-index: 500; width: min(268px, calc(100vw - 80px)); box-sizing: border-box; padding: 12px; border-radius: 14px; background: var(--cg-popover, #ffffff); color: var(--cg-text, #202123); box-shadow: 0 10px 34px #0000002e, 0 0 0 1px var(--cg-border, #00000014); animation: cg-soft-in 160ms cubic-bezier(.22, .8, .28, 1); }
-.cg-mark-title { margin: 2px 4px 8px; font-size: 13px; font-weight: 600; }
+
+.cg-mark-title { color: var(--cg-text); margin: 2px 4px 8px; font-size: 13px; font-weight: 600; }
+
 .cg-mark-option { width: 100%; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 10px; font-size: 13px; }
+
 .cg-mark-option:hover { background: var(--cg-hover, #f2f2f2); }
-.cg-mark-option[aria-checked="true"] { color: var(--cg-accent, #4d6bfe); }
+
+.cg-mark-option[aria-checked="true"] { color: var(--cg-accent, #3b5bdb); }
+
 .cg-mark-file { display: block; width: 100%; margin: 8px 0 6px; font-size: 12px; color: var(--cg-muted, #6b6b6b); }
+
 .cg-mark-file::file-selector-button { margin-right: 8px; padding: 4px 10px; border: 0; border-radius: 8px; background: var(--cg-hover, #f2f2f2); color: inherit; font: inherit; cursor: pointer; }
+
 .cg-mark-hint { margin: 4px 4px 0; font-size: 11.5px; line-height: 16px; color: var(--cg-muted, #6b6b6b); }
+
 .cg-mark-error { margin: 6px 4px 0; font-size: 11.5px; line-height: 16px; color: #c0392b; }
+
 .cg-mark-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+
 .cg-mark-close { padding: 5px 12px; border-radius: 9px; font-size: 12.5px; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-mark-picker { background: #2b2b2b; color: #ececec; box-shadow: 0 10px 34px #00000073, 0 0 0 1px #ffffff1a; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-mark-option:hover, html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-mark-file::file-selector-button { background: #3a3a3a; }
+
+body[data-ds-dark-theme] .cg-mark-picker { background: #2b2b2b; color: #ececec; box-shadow: 0 10px 34px #00000073, 0 0 0 1px #ffffff1a; }
+
+body[data-ds-dark-theme] .cg-mark-option:hover, body[data-ds-dark-theme] .cg-mark-file::file-selector-button { background: #3a3a3a; }
+
 @media (prefers-reduced-motion: reduce) {
+
   .cg-hero-mark-pulse, .cg-hero-mark-pulse .cg-hero-mark-codex-chevron, .cg-hero-mark-pulse .cg-hero-mark-codex-dash { animation: none; }
+
   .cg-mark-picker { animation: none; }
+
 }
+
+
 
 /* The model-name sync state: one muted line at the foot of the settings menu. It exists because the
+
    failure mode of this feature was invisible — a push that reached nothing looked exactly like success
+
    — and it lives here, not under the reasoning slider, which is a place the eye rests. */
+
 .cg-account-sync { margin: 8px 4px 2px; font-size: 11px; line-height: 15px; color: var(--cg-muted, #6b6b6b); }
+
 .cg-account-sync[data-phase="failed"] { color: #c0392b; }
+
 .cg-account-sync[data-phase="ok"] { color: #2e7d32; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-account-sync[data-phase="ok"] { color: #6cc48a; }
-.cg-model-sync-warn { color: #c0392b; }
+
+body[data-ds-dark-theme] .cg-account-sync[data-phase="ok"] { color: #6cc48a; }
+
 .cg-model-sync-warn { color: #c0392b; }
 
+.cg-model-sync-warn { color: #c0392b; }
+
+
+
 /* ---------------------------------------------------------------------------------------------
+
    思考中的提示：藏掉宿主的鲸鱼尾与闪烁文字，改成一句淡灰的「正在思考」。
+
    宿主的 RunningStatus 渲染 `[data-chat-running]`：一条鲸鱼尾 + 一段带动画渐变的文字（蓝色）。
+
    这里把尾巴与宿主文字藏起来（文字仍在 DOM 里，脚本从它读出行进时间，见 client.js 的
+
    startRunningStatusStyle），只把措辞与颜色换成自己的——不加图标、不保留宿主的闪烁。
+
    期间用时由脚本写进 `--cg-running-for`，不重写宿主的文本节点——宿主每秒重渲染一次，改动它的
+
    文字会与它抢同一个节点。
+
    --------------------------------------------------------------------------------------------- */
+
 html[data-chatgpt-ui] [data-chat-running] svg,
+
 html[data-chatgpt-ui] [data-chat-running] [class*="whale"],
+
 html[data-chatgpt-ui] [data-chat-running] [class*="Whale"] { display: none; }
+
 html[data-chatgpt-ui] [data-chat-running] [class*="runningText"] {
+
   font-size: 0;
+
   /* The host animates a gradient through this element with `background-clip: text`; neither the
+
      gradient nor the transparent fill may leak into the redrawn label. */
-  background: none; -webkit-text-fill-color: #8c8c8c; color: #8c8c8c;
-}
-html[data-chatgpt-ui] [data-chat-running] [class*="runningText"]::after {
-  content: '正在思考' var(--cg-running-for, '');
-  font-size: 12.5px; letter-spacing: .2px; white-space: nowrap;
-  color: #8c8c8c; -webkit-text-fill-color: #8c8c8c;
-}
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) [data-chat-running] [class*="runningText"],
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) [data-chat-running] [class*="runningText"]::after {
-  color: #9a9a9a; -webkit-text-fill-color: #9a9a9a;
-}
-.cg-running-hook { display: none; }
-/* Zero the block's own top margin. The host applies the flow gap through a sibling rule
-   (`.…_flowItem + .…_flowItem { margin-top: var(--dsh-chat-flow-gap) }`, 12px or 16px) and carries that
-   variable on the running block itself, so overriding the *variable* here would change nothing above it;
-   `margin-top: 0` on the block is what actually wins, because this selector is more specific than that
-   rule. What this cannot fix: if the space above the indicator looks far larger than 12–16px, it is not
-   this gap — it is the height of the assistant message that has not been written yet. */
-html[data-chatgpt-ui] [data-chat-running] { margin-top: 0; padding-top: 0; }
-html[data-chatgpt-ui] [data-chat-running] [class*="runningDivider"] { margin: 0; }
-@media (prefers-reduced-motion: reduce) {
-  html[data-chatgpt-ui] [data-chat-running] [class*="runningText"]::after { animation: none; }
+
+  background: none; -webkit-text-fill-color: #6b6b6b; color: #6b6b6b;
+
 }
 
-/* ---------------------------------------------------------------------------------------------
-   提供商参考清单（模型面板标题旁那个按钮打开的第二页）。
-   用原生 <details>/<summary> 做折叠：展开状态由浏览器维护，不需要插件再加一个 state——面板里的
-   每一个 useState 都被测试垫片的槽位表盯着，能不加就不加。
-   --------------------------------------------------------------------------------------------- */
-html[data-chatgpt-ui] .cg-model-catalog-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-html[data-chatgpt-ui] .cg-model-providers-button {
-  flex: none; height: 24px; padding: 0 10px; border: 1px solid var(--cg-line, #e8e8e8); border-radius: 999px;
-  background: var(--cg-page, #fff); color: var(--cg-muted, #6b6b6b); font-size: 12px; line-height: 22px; cursor: pointer;
+html[data-chatgpt-ui] [data-chat-running] [class*="runningText"]::after {
+
+  content: '正在思考' var(--cg-running-for, '');
+
+  font-size: 12.5px; letter-spacing: .2px; white-space: nowrap;
+
+  color: #6b6b6b; -webkit-text-fill-color: #6b6b6b;
+
 }
-html[data-chatgpt-ui] .cg-model-providers-button:hover { background: var(--cg-hover, #f2f2f2); color: var(--cg-text, #1a1a1a); }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-providers-button { border-color: #383838; background: #292929; color: #a8a8a8; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-providers-button:hover { background: #333; color: #ececec; }
-html[data-chatgpt-ui] .cg-model-provider-note { margin: 6px 2px 8px; color: var(--cg-muted, #6b6b6b); font-size: 11px; line-height: 15px; }
-html[data-chatgpt-ui] .cg-model-providers { max-height: 320px; overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
-html[data-chatgpt-ui] .cg-model-provider-region { margin: 8px 2px 4px; color: var(--cg-muted, #6b6b6b); font-size: 11px; font-weight: 600; letter-spacing: .4px; }
-html[data-chatgpt-ui] .cg-model-provider { border-bottom: 1px solid var(--cg-line, #f0f0f0); }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-provider { border-bottom-color: #2f2f2f; }
-html[data-chatgpt-ui] .cg-model-provider-name {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 7px 6px; color: var(--cg-text, #1a1a1a); font-size: 13px; line-height: 18px; cursor: pointer; list-style: none;
+
+body[data-ds-dark-theme] [data-chat-running] [class*="runningText"],
+
+body[data-ds-dark-theme] [data-chat-running] [class*="runningText"]::after {
+
+  color: #9a9a9a; -webkit-text-fill-color: #9a9a9a;
+
 }
-html[data-chatgpt-ui] .cg-model-provider-name::-webkit-details-marker { display: none; }
-html[data-chatgpt-ui] .cg-model-provider-name:hover { background: var(--cg-hover, #f5f5f5); }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-provider-name:hover { background: #2f2f2f; }
-html[data-chatgpt-ui] .cg-model-provider-name::before { content: '›'; flex: none; width: 10px; color: var(--cg-muted, #8a8a8a); transition: transform 150ms cubic-bezier(.22,.8,.28,1); }
-html[data-chatgpt-ui] .cg-model-provider[open] > .cg-model-provider-name::before { transform: rotate(90deg); }
-html[data-chatgpt-ui] .cg-model-provider-name > span:first-of-type { flex: 1; min-width: 0; }
-html[data-chatgpt-ui] .cg-model-provider-count { flex: none; color: var(--cg-muted, #9a9a9a); font-size: 11px; font-weight: 400; }
-html[data-chatgpt-ui] .cg-model-provider-models { margin: 0 0 6px; padding: 0 0 0 18px; color: var(--cg-muted, #5f5f5f); font-size: 12px; line-height: 18px; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-provider-models { color: #a0a0a0; }
-html[data-chatgpt-ui] .cg-model-provider-site { display: inline-block; margin: 0 0 8px 18px; color: var(--cg-muted, #6b6b6b); font-size: 11px; text-decoration: none; }
-html[data-chatgpt-ui] .cg-model-provider-site:hover { text-decoration: underline; }
+
+.cg-running-hook { display: none; }
+
+/* Zero the block's own top margin. The host applies the flow gap through a sibling rule
+
+   (`.…_flowItem + .…_flowItem { margin-top: var(--dsh-chat-flow-gap) }`, 12px or 16px) and carries that
+
+   variable on the running block itself, so overriding the *variable* here would change nothing above it;
+
+   `margin-top: 0` on the block is what actually wins, because this selector is more specific than that
+
+   rule. What this cannot fix: if the space above the indicator looks far larger than 12–16px, it is not
+
+   this gap — it is the height of the assistant message that has not been written yet. */
+
+html[data-chatgpt-ui] [data-chat-running] { margin-top: 0; padding-top: 0; }
+
+html[data-chatgpt-ui] [data-chat-running] [class*="runningDivider"] { margin: 0; }
+
 @media (prefers-reduced-motion: reduce) {
-  html[data-chatgpt-ui] .cg-model-provider-name::before { transition: none; }
+
+  html[data-chatgpt-ui] [data-chat-running] [class*="runningText"]::after { animation: none; }
+
 }
+
+
+
+/* ---------------------------------------------------------------------------------------------
+
+   提供商参考清单（模型面板标题旁那个按钮打开的第二页）。
+
+   用原生 <details>/<summary> 做折叠：展开状态由浏览器维护，不需要插件再加一个 state——面板里的
+
+   每一个 useState 都被测试垫片的槽位表盯着，能不加就不加。
+
+   --------------------------------------------------------------------------------------------- */
+
+html[data-chatgpt-ui] .cg-model-catalog-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+html[data-chatgpt-ui] .cg-model-providers-button {
+
+  flex: none; height: 24px; padding: 0 10px; border: 1px solid var(--cg-line, #e8e8e8); border-radius: 999px;
+
+  background: var(--cg-page, #fff); color: var(--cg-muted, #6b6b6b); font-size: 12px; line-height: 22px; cursor: pointer;
+
+}
+
+html[data-chatgpt-ui] .cg-model-providers-button:hover { background: var(--cg-hover, #f2f2f2); color: var(--cg-text, #1a1a1a); }
+
+body[data-ds-dark-theme] .cg-model-providers-button { border-color: #383838; background: #292929; color: #a8a8a8; }
+
+body[data-ds-dark-theme] .cg-model-providers-button:hover { background: #333; color: #ececec; }
+
+html[data-chatgpt-ui] .cg-model-provider-note { margin: 6px 2px 8px; color: var(--cg-muted, #6b6b6b); font-size: 11px; line-height: 15px; }
+
+html[data-chatgpt-ui] .cg-model-providers { max-height: 320px; overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+
+html[data-chatgpt-ui] .cg-model-provider-region { margin: 8px 2px 4px; color: var(--cg-muted, #6b6b6b); font-size: 11px; font-weight: 600; letter-spacing: .4px; }
+
+html[data-chatgpt-ui] .cg-model-provider { border-bottom: 1px solid var(--cg-line, #f0f0f0); }
+
+body[data-ds-dark-theme] .cg-model-provider { border-bottom-color: #2f2f2f; }
+
+html[data-chatgpt-ui] .cg-model-provider-name {
+
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+
+  padding: 7px 6px; color: var(--cg-text, #1a1a1a); font-size: 13px; line-height: 18px; cursor: pointer; list-style: none;
+
+}
+
+html[data-chatgpt-ui] .cg-model-provider-name::-webkit-details-marker { display: none; }
+
+html[data-chatgpt-ui] .cg-model-provider-name:hover { background: var(--cg-hover, #f5f5f5); }
+
+body[data-ds-dark-theme] .cg-model-provider-name:hover { background: #2f2f2f; }
+
+html[data-chatgpt-ui] .cg-model-provider-name::before { content: '›'; flex: none; width: 10px; color: var(--cg-muted, #8a8a8a); transition: transform 150ms cubic-bezier(.22,.8,.28,1); }
+
+html[data-chatgpt-ui] .cg-model-provider[open] > .cg-model-provider-name::before { transform: rotate(90deg); }
+
+html[data-chatgpt-ui] .cg-model-provider-name > span:first-of-type { flex: 1; min-width: 0; }
+
+html[data-chatgpt-ui] .cg-model-provider-count { flex: none; color: var(--cg-muted, #9a9a9a); font-size: 11px; font-weight: 400; }
+
+html[data-chatgpt-ui] .cg-model-provider-models { margin: 0 0 6px; padding: 0 0 0 18px; color: var(--cg-muted, #5f5f5f); font-size: 12px; line-height: 18px; }
+
+body[data-ds-dark-theme] .cg-model-provider-models { color: #a0a0a0; }
+
+html[data-chatgpt-ui] .cg-model-provider-site { display: inline-block; margin: 0 0 8px 18px; color: var(--cg-muted, #6b6b6b); font-size: 11px; text-decoration: none; }
+
+html[data-chatgpt-ui] .cg-model-provider-site:hover { text-decoration: underline; }
+
+@media (prefers-reduced-motion: reduce) {
+
+  html[data-chatgpt-ui] .cg-model-provider-name::before { transition: none; }
+
+}
+
 /* The two modes opened by the zap button. They reuse the popover's geometry and the menu idiom already used
+
    by the agent picker (`role="menuitemradio"` + `aria-checked`), so the panel needs no new interaction
+
    machinery: Escape and outside-click already close the popover. */
+
 .cg-model-modes { display: flex; flex-direction: column; gap: 4px; padding: 4px 2px 2px; }
+
 .cg-model-mode { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 10px 12px; border: 1px solid transparent; border-radius: 12px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease; }
+
 .cg-model-mode:hover:not(:disabled), .cg-model-mode:focus-visible { background: #0000000a; border-color: #00000012; }
+
 .cg-model-mode[data-on="true"] { border-color: #7b5cf04d; background: #7b5cf014; }
+
 .cg-model-mode:disabled { opacity: 0.5; cursor: default; }
+
 .cg-model-mode-check { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; color: var(--cg-effort-color); }
-.cg-model-mode-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.cg-model-mode-text { color: var(--cg-text); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
 .cg-model-mode-text > strong { font-size: 14px; font-weight: 600; letter-spacing: 0.1px; }
-.cg-model-mode-text > span { font-size: 12px; opacity: 0.6; }
+
+.cg-model-mode-text > span { font-size: 12px; color: var(--cg-muted); }
+
+
 
 .cg-model-trigger-bolt[data-tree="true"] { width: 20px; }
+
 @media (prefers-reduced-motion: reduce) { .cg-model-mode { transition: none; } }
+
 .cg-model-popover[data-superfast="true"] { --cg-effort-color: #e8a317; }
+
 /* The tier name on the collapsed trigger is set by an explicit purple rule, so inheriting the mode colour is not
+
    enough for it; at the time of writing it was the last purple left on screen while 超快 was on. The root holds
+
    both the trigger and the popover, which is why the mode rides there as well. */
+
 .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-ultra="true"] { color: #e8a317; }
-.cg-model-popover[data-superfast="true"] .cg-model-slider-fill { background: linear-gradient(90deg, #9dc4ff 0%, #bcd8ff 18%, #e8e2ff 38%, #ffe6a8 62%, #f7c948 82%, #e8a317 100%); }
+
+.cg-model-popover[data-superfast="true"] .cg-model-slider-fill { background: linear-gradient(90deg, #dcb273 0%, #eed3a8 18%, #fdf6e4 38%, #ffe6a8 62%, #f7c948 82%, #e8a317 100%); }
+
 .cg-model-popover[data-superfast="true"] .cg-model-slider-shell::before { box-shadow: inset 0 0 0 1px #f7c9483d; }
+
 .cg-model-popover[data-superfast="true"] .cg-model-slider-shell .cg-model-meteors { display: block; }
-.cg-model-popover[data-superfast="true"] .cg-model-meteor { background: linear-gradient(90deg, #ffffff00, #9dc4ff5c 32%, #ffe6a8dd 70%, #ffffff); filter: drop-shadow(0 0 3px #f7c948cc); }
+
+/* 超快 keeps the base streak ramp on ::before and only overrides the halo: a `background` on the element
+
+   would paint the unclipped rectangle behind the tapered smear and flatten the taper away. */
+
+.cg-model-popover[data-superfast="true"] .cg-model-meteor { filter: drop-shadow(0 0 4px color-mix(in srgb, var(--cg-glow, #ffffff) 45%, #ffffffb8)); }
+
 .cg-model-popover[data-superfast="true"] .cg-model-meteors::before { background-image:
-    radial-gradient(1.5px 1.5px at 8% 30%, #ffffffdd, transparent),
-    radial-gradient(1.2px 1.2px at 20% 68%, #cfe3ffcc, transparent),
+
+    radial-gradient(1.5px 1.5px at 8% 30%, #ffe6a8cc, transparent),
+
+    radial-gradient(1.2px 1.2px at 20% 68%, #ffedbc, transparent),
+
     radial-gradient(1.2px 1.2px at 28% 72%, #ffe6a8cc, transparent),
-    radial-gradient(1.8px 1.8px at 39% 22%, #ffffffcc, transparent),
-    radial-gradient(1.2px 1.2px at 47% 26%, #ffffffcc, transparent),
+
+    radial-gradient(1.8px 1.8px at 39% 22%, #f7c94899, transparent),
+
+    radial-gradient(1.2px 1.2px at 47% 26%, #f7c94899, transparent),
+
     radial-gradient(1.1px 1.1px at 55% 74%, #f7c948cc, transparent),
+
     radial-gradient(1.2px 1.2px at 66% 66%, #ffe6a8ee, transparent),
-    radial-gradient(1.4px 1.4px at 74% 34%, #ffffffdd, transparent),
-    radial-gradient(1.5px 1.5px at 84% 38%, #ffffffdd, transparent),
+
+    radial-gradient(1.4px 1.4px at 74% 34%, #ffe6a8cc, transparent),
+
+    radial-gradient(1.5px 1.5px at 84% 38%, #ffe6a8cc, transparent),
+
     radial-gradient(1.1px 1.1px at 93% 74%, #f7c948cc, transparent); }
+
 .cg-model-popover[data-superfast="true"] .cg-model-slider-shell[data-effort] .cg-model-slider-fill::after { background: radial-gradient(ellipse 50% 50% at 50% 50%, #8a4d0de6 0%, #8a4d0d45 45%, #8a4d0d00 100%); }
 
+
+
 /* 超快's palette. Every rule is keyed on the root, which carries data-superfast for the trigger and the popover
+
    alike. Selectors are one class deeper than the rules they must beat — the fill's depth buckets are (0,3,0) and
+
    the tier-name rules are explicit colours, so neither can be reached by inheritance. Ultra keeps its own purple
+
    ramp, untouched, because these only apply while 超快 is the chosen mode. */
+
 .cg-model-root[data-superfast="true"] .cg-model-popover { --cg-effort-color: #e8a317; }
-.cg-model-root[data-superfast="true"] .cg-model-slider-shell .cg-model-slider-fill { background: linear-gradient(90deg, #9dc4ff 0%, #bcd8ff 18%, #e8e2ff 38%, #ffe6a8 62%, #f7c948 82%, #e8a317 100%); }
+
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell .cg-model-slider-fill { background: linear-gradient(90deg, #dcb273 0%, #eed3a8 18%, #fdf6e4 38%, #ffe6a8 62%, #f7c948 82%, #e8a317 100%); }
+
 .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-ultra="true"] { color: #e8a317; }
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="max"] .cg-model-summary strong,
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="xhigh"] .cg-model-summary strong { color: #e8a317; }
+
 .cg-model-root[data-superfast="true"] .cg-model-ultra-notice { color: #e8a317; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-ultra-notice { color: #f7ad31; }
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-ultra-notice { color: #f7ad31; }
+
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell::before { box-shadow: inset 0 0 0 1px #f7c9483d; }
+
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-ultra="true"] .cg-model-slider-dots span[data-ultra="true"] { background: #e8a317; box-shadow: 0 0 5px #e8a31799; }
+
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-ultra="true"] .cg-model-thumb { border-color: #ffe8a8; box-shadow: 0 0 6px #e8a31799, 0 0 16px #c8860d8c, 0 0 0 1px #ffffff99 inset; }
+
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-max="true"][data-ultra="true"] .cg-model-thumb { animation: none; }
+
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell .cg-model-meteors { display: block; }
-.cg-model-root[data-superfast="true"] .cg-model-meteor { background: linear-gradient(90deg, #ffffff00, #9dc4ff5c 32%, #ffe6a8dd 70%, #ffffff); filter: drop-shadow(0 0 3px #f7c948cc); }
+
+/* Same for the root-scoped 超快 branch. */
+
+.cg-model-root[data-superfast="true"] .cg-model-meteor { filter: drop-shadow(0 0 4px color-mix(in srgb, var(--cg-glow, #ffffff) 45%, #ffffffb8)); }
+
 .cg-model-root[data-superfast="true"] .cg-model-meteors::before { background-image:
+
     radial-gradient(1.5px 1.5px at 8% 30%, #ffffffdd, transparent),
-    radial-gradient(1.2px 1.2px at 20% 68%, #cfe3ffcc, transparent),
+
+    radial-gradient(1.2px 1.2px at 20% 68%, #ffedbc, transparent),
+
     radial-gradient(1.2px 1.2px at 28% 72%, #ffe6a8cc, transparent),
+
     radial-gradient(1.8px 1.8px at 39% 22%, #ffffffcc, transparent),
+
     radial-gradient(1.2px 1.2px at 47% 26%, #ffffffcc, transparent),
+
     radial-gradient(1.1px 1.1px at 55% 74%, #f7c948cc, transparent),
+
     radial-gradient(1.2px 1.2px at 66% 66%, #ffe6a8ee, transparent),
+
     radial-gradient(1.4px 1.4px at 74% 34%, #ffffffdd, transparent),
+
     radial-gradient(1.5px 1.5px at 84% 38%, #ffffffdd, transparent),
+
     radial-gradient(1.1px 1.1px at 93% 74%, #f7c948cc, transparent); }
+
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell .cg-model-slider-fill::after { background: radial-gradient(ellipse 50% 50% at 50% 50%, #8a4d0de6 0%, #8a4d0d45 45%, #8a4d0d00 100%); }
+
 /* The dark theme carries its own, deeper selectors for the tier names and the glyph colour, so the light-only
+
    rules above are not enough: the owner's panel is dark, which is why the first attempt looked like a no-op. */
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover { --cg-effort-color: #f0b429; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-ultra="true"],
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="max"] .cg-model-summary strong,
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="xhigh"] .cg-model-summary strong { color: #f0b429; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-bolt { color: #f0b429; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-zap[data-on="true"] { color: #f0b429; }
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-popover { --cg-effort-color: #f0b429; }
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-ultra="true"],
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="max"] .cg-model-summary strong,
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="xhigh"] .cg-model-summary strong { color: #f0b429; }
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-trigger-bolt { color: #f0b429; }
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-zap[data-on="true"] { color: #f0b429; }
+
 .cg-model-root[data-superfast="true"] .cg-model-zap[data-on="true"] .cg-model-zap-glyph { filter: drop-shadow(0 0 5px #f7c9488c); }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-ultra="true"] .cg-model-slider-dots span[data-ultra="true"] { background: #f0b429; box-shadow: 0 0 5px #f0b42999; }
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-ultra="true"] .cg-model-slider-dots span[data-ultra="true"] { background: #f0b429; box-shadow: 0 0 5px #f0b42999; }
+
 /* Longhand on purpose: the `background` shorthand resets `background-size`, and the glare is a 220%-wide layer
+
    that sweeps by moving its position — with the size reset it could only pulse in place. */
-.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-ultra="true"]::after { background-size: 220% 100%; background-repeat: no-repeat; background-image: linear-gradient(105deg, #ffffff00 44%, #ffffffa8 50%, #ffe9b08c 56%, #ffffff00 62%); }
+
+.cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-ultra="true"]::after { background-size: 220% 100%; background-repeat: no-repeat; background-image: linear-gradient(105deg, #ffffff00 44%, #f0d9a88f 50%, #ffe9b09e 56%, #ffffff00 62%); }
+
+
 
 .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="max"],
+
 .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="xhigh"],
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="max"],
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="xhigh"] { color: #f0b429; }
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="max"],
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="xhigh"] { color: #f0b429; }
+
 /* 超快: one fill colour per tier, except Max, which runs a wide amber ramp — bright gold on the left falling to
+
    muted amber on the right — so it reads as a gradient at a glance instead of as one flat tone, and the ramp
+
    passes through xhigh's flat #d9a534 rather than ending on it, which is what keeps the two distinguishable.
-   Medium is deliberately left on the blue→gold ramp, since the brief named only Low, High, Max and Ultra. */
+
+   Medium is deliberately left on the shared six-stop ramp, since the brief named only Low, High, Max and Ultra.
+
+   That ramp used to run blue→gold; it is now warm end to end, because 超快 must not show blue at any tier. The
+
+   lightness arc is unchanged — mid camel → pale camel → cream → warm cream → gold → deep gold — so the bar still
+
+   reads as a gradient rather than a flat tone. */
+
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="low"] .cg-model-slider-fill { background: #e6cb97; }
+
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="minimal"] .cg-model-slider-fill { background: #e6cb97; }
+
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="high"] .cg-model-slider-fill { background: #dfb662; }
+
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="xhigh"] .cg-model-slider-fill { background: #d9a534; }
+
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="max"] .cg-model-slider-fill { background: linear-gradient(90deg, #f7c948 0%, #d9a534 52%, #c08d28 100%); }
+
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill { background: linear-gradient(90deg, #dfb662 0%, #dcae55 12%, #d9a534 42%, #e8b622 74%, #f7c948 100%); }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="low"] .cg-model-slider-fill { background: #e8d09f; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="minimal"] .cg-model-slider-fill { background: #e8d09f; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="high"] .cg-model-slider-fill { background: #e0b766; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="xhigh"] .cg-model-slider-fill { background: #d9a534; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="max"] .cg-model-slider-fill { background: linear-gradient(90deg, #ffd45e 0%, #d9a534 52%, #c08d28 100%); }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill { background: linear-gradient(90deg, #e0b766 0%, #ddb258 12%, #d9a534 42%, #eab820 74%, #f7c948 100%); }
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="low"] .cg-model-slider-fill { background: #e8d09f; }
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="minimal"] .cg-model-slider-fill { background: #e8d09f; }
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="high"] .cg-model-slider-fill { background: #e0b766; }
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="xhigh"] .cg-model-slider-fill { background: #d9a534; }
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="max"] .cg-model-slider-fill { background: linear-gradient(90deg, #ffd45e 0%, #d9a534 52%, #c08d28 100%); }
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="ultra"] .cg-model-slider-fill { background: linear-gradient(90deg, #e0b766 0%, #ddb258 12%, #d9a534 42%, #eab820 74%, #f7c948 100%); }
+
+
 
 /* 超快 must not paint the empty tier. The superfast base fill rule is (0,4,0), one class deeper than the shared
-   transparent rules at (0,3,0), so without this the Off position showed a blue→gold bar. */
+
+   transparent rules at (0,3,0), so without this the Off position showed a warm gold bar. */
+
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="off"] .cg-model-slider-fill,
+
 .cg-model-root[data-superfast="true"] .cg-model-slider-shell[data-effort="none"] .cg-model-slider-fill { background: transparent; }
 
+
+
 /* 超快: at Off / Low / High the tier name takes High's own fill colour, so label and bar match. Max and the top tier
+
    are untouched — they keep the mode's gold. */
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="off"] .cg-model-summary strong,
+
 .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="off"],
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="none"] .cg-model-summary strong,
+
 .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="none"],
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="low"] .cg-model-summary strong,
+
 .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="low"],
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="minimal"] .cg-model-summary strong,
+
 .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="minimal"],
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="high"] .cg-model-summary strong,
+
 .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="high"] { color: #dfb662; }
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="off"] .cg-model-summary strong,
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="off"],
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="none"] .cg-model-summary strong,
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="none"],
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="low"] .cg-model-summary strong,
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="low"],
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="minimal"] .cg-model-summary strong,
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="minimal"],
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="high"] .cg-model-summary strong,
-html[data-chatgpt-ui]:has([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="high"] { color: #e0b766; }
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="off"] .cg-model-summary strong,
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="off"],
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="none"] .cg-model-summary strong,
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="none"],
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="low"] .cg-model-summary strong,
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="low"],
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="minimal"] .cg-model-summary strong,
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="minimal"],
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="high"] .cg-model-summary strong,
+
+body[data-ds-dark-theme] .cg-model-root[data-superfast="true"] .cg-model-trigger-effort[data-effort="high"] { color: #e0b766; }
+
+
 
 /* Orchestration on: the whole effort panel glows in its tier colour — border plus halo, not just the track.
-   Colour comes from --cg-glow (tier colour by default, gold under superfast). The neutral drop shadow is kept in
-   the same declaration because a later box-shadow would otherwise replace it. Static on purpose. */
+
+   Colour comes from --cg-glow (tier colour by default, gold under superfast).
+
+   The halo itself lives on ::before, not on the popover. A keyframed box-shadow on the panel repaints the
+
+   whole surface on every frame and re-runs the eleven meteors' filters with it; painted once as a static
+
+   shadow and breathed with opacity only, the glow is composited and costs nothing per frame. The popover
+
+   keeps no colour shadow of its own any more, so the neutral drop shadow from the theme rules further down
+
+   survives untouched — which is also what leaves the off tier with an ordinary shadow instead of none. */
+
 .cg-model-root[data-lightning="true"] .cg-model-popover,
+
 .cg-model-root[data-superfast="true"] .cg-model-popover {
+
   /* Full-saturation first, then the softened value: a browser without color-mix keeps the stronger one instead of
+
      losing the declaration, and everyone else gets the quiet version. */
+
   border-color: var(--cg-glow);
+
   border-color: color-mix(in srgb, var(--cg-glow) 42%, transparent);
-  /* The entrance animation is kept in the same list, then the glow breathes after it. */
-  animation: cg-model-enter 120ms ease-out, cg-model-glow-breathe 2.6s ease-in-out 120ms infinite;
-  box-shadow: 0 6px 14px #0000000c, 0 0 16px 0 var(--cg-glow);
-  box-shadow: 0 6px 14px #0000000c, 0 0 16px 0 color-mix(in srgb, var(--cg-glow) 40%, transparent);
+
+  /* No `animation` here on purpose. The entrance is declared on the base `.cg-model-popover` rule (0,1,0);
+
+     re-declaring it at (0,3,0) outranks the reduced-motion stop — a media query adds no specificity — and
+
+     that is what used to re-open the entrance for lightning/superfast under reduced motion.
+
+     The breathing moved to ::before, next to the shadow it animates. */
+
 }
 
-@keyframes cg-model-glow-breathe {
-  0%, 100% { box-shadow: 0 6px 14px #0000000c, 0 0 12px 0 color-mix(in srgb, var(--cg-glow) 34%, transparent); }
-  50% { box-shadow: 0 6px 14px #0000000c, 0 0 20px 2px color-mix(in srgb, var(--cg-glow) 50%, transparent); }
+
+
+/* The halo. `inset: 0` covers the whole panel and a positioned box paints above in-flow content, so
+
+   `pointer-events: none` is mandatory: without it the pseudo-element swallows every click meant for the
+
+   options, the search box and the buttons (measured with elementFromPoint — the static controls resolve to
+
+   the pseudo-element). `z-index: -1` is a second guard: it puts the halo under the panel's own content
+
+   while staying above the panel background, inside the stacking context that `z-index: 60` already gives
+
+   the popover. `border-radius: inherit` follows both the 19px default and the 16px model pane, no second
+
+   rule needed. `inset: 0` resolves against the padding box, so the halo starts 1px inside the border; at a
+
+   16px blur that offset is not visible.
+
+   Geometry is the midpoint of the old 12px/20px sweep: `0 0 16px 1px`. Alpha is the old 50% peak and
+
+   opacity runs .68 → 1 — exactly the 34% → 50% alpha the box-shadow keyframes used to animate. */
+
+.cg-model-root[data-lightning="true"] .cg-model-popover::before,
+
+.cg-model-root[data-superfast="true"] .cg-model-popover::before {
+
+  content: '';
+
+  position: absolute;
+
+  inset: 0;
+
+  z-index: -1;
+
+  border-radius: inherit;
+
+  pointer-events: none;
+
+  box-shadow: 0 0 16px 1px color-mix(in srgb, var(--cg-glow) 50%, transparent);
+
+  opacity: .68;
+
+  animation: cg-model-halo-breathe 2.6s ease-in-out 120ms infinite;
+
 }
+
+
+
+/* Opacity only: it is composited, so the painted shadow is cached and the breath costs no repaint. This is
+
+   the whole point of moving off box-shadow — a keyframed box-shadow repaints the panel every frame. */
+
+@keyframes cg-model-halo-breathe {
+
+  0%, 100% { opacity: .68; }
+
+  50% { opacity: 1; }
+
+}
+
+
+
+/* --cg-glow is read by the border above and by the halo. Every tier assigns it below; these two are the
+
+   neutral fallbacks for a tier this file does not name — off / none, or an id the host's effort catalogue
+
+   adds later. Without them the border would fall back to currentColor (near-black in the light theme,
+
+   near-white in the dark one) and the halo's box-shadow would become `none`, losing the neutral drop shadow
+
+   along with it. Neutral, never gold: gold belongs to 超快 alone. */
+
+.cg-model-popover { --cg-glow: #e6e6e6; }
+
+body[data-ds-dark-theme] .cg-model-popover { --cg-glow: #444; }
+
+
 
 .cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="minimal"] { --cg-glow: var(--cg-e2); }
+
 .cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="low"] { --cg-glow: var(--cg-e2); }
+
 .cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="medium"] { --cg-glow: var(--cg-e3); }
+
 .cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="high"] { --cg-glow: var(--cg-e4); }
+
 .cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="xhigh"] { --cg-glow: var(--cg-e5); }
+
 .cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="max"] { --cg-glow: var(--cg-e5); }
+
 .cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-effort="ultra"],
+
 .cg-model-root:not([data-superfast="true"]) .cg-model-popover[data-max="true"] { --cg-glow: #bb74ff; }
 
+
+
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="off"] { --cg-glow: #e0b766; }
+
+.cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="none"] { --cg-glow: #e0b766; }
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="minimal"] { --cg-glow: #e0b766; }
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="low"] { --cg-glow: #e0b766; }
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="medium"] { --cg-glow: #dfb662; }
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="high"] { --cg-glow: #dfb662; }
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="xhigh"] { --cg-glow: #d9a534; }
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="max"] { --cg-glow: #d9a534; }
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-effort="ultra"],
+
 .cg-model-root[data-superfast="true"] .cg-model-popover[data-max="true"] { --cg-glow: #f7c948; }
 
-/* This selector outranks the popover clause further up, so the stop has to be repeated here. The glow itself stays
-   (it is a static box-shadow in the rule above); only the breathing is switched off. */
+
+
+/* Only the halo is left to stop. The panel's entrance is declared on the base `.cg-model-popover` rule
+
+   alone (0,1,0), so the equal-specificity stop in the reduced-motion block above already cancels it for
+
+   every tier and both themes. Nothing may re-open it here: a (0,3,0) animation declaration in this block
+
+   is exactly the regression that made lightning/superfast keep the 120ms entrance under reduced motion.
+
+   ::before does need its own clause — a rule on the popover cannot reach its pseudo-element's animation. */
+
 @media (prefers-reduced-motion: reduce) {
-  .cg-model-root[data-lightning="true"] .cg-model-popover,
-  .cg-model-root[data-superfast="true"] .cg-model-popover { animation: cg-model-enter 120ms ease-out; }
+
+  .cg-model-root[data-lightning="true"] .cg-model-popover::before,
+
+  .cg-model-root[data-superfast="true"] .cg-model-popover::before { animation: none; }
+
 }
+
+
 
 /* 峰谷徽标：只占一个字，细节放在悬停提示里，字号跟状态行其余项一致。 */
+
 .cg-peak {
+
   font-size: 12px;
+
   line-height: 1;
+
   padding: 2px 5px;
+
   border-radius: 6px;
+
   cursor: default;
+
   color: var(--cg-muted, #8b8b8b);
+
   background: color-mix(in srgb, currentColor 12%, transparent);
+
   font-variant-numeric: tabular-nums;
+
 }
+
 .cg-peak[data-peak="peak"] { color: #d98324; }
+
 .cg-peak[data-peak="offpeak"] { color: #3f9c6a; }
 
+
+
 /* 峰谷徽标的悬停气泡：用页面自己画，避免系统白框；悬停即显，无延迟。 */
+
 .cg-peak-wrap { position: relative; display: inline-flex; align-items: center; outline: none; }
+
 .cg-peak-tip {
+
   position: absolute;
+
   top: calc(100% + 8px);
+
   right: 0;
+
   min-width: 152px;
+
   max-width: min(320px, calc(100vw - 24px));
+
   padding: 8px 10px 9px;
+
   border-radius: 10px;
-  border: 1px solid var(--cg-border-soft, rgba(255, 255, 255, 0.12));
-  background: var(--cg-tooltip-bg, #24262b);
-  color: var(--cg-tooltip-fg, #f2f3f5);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.34);
+
+  border: 1px solid var(--cg-border-soft, #e2e4e8);
+
+  background: var(--cg-tooltip-bg, #f7f8fa);
+
+  color: var(--cg-tooltip-fg, #33353b);
+
+  box-shadow: 0 10px 26px #0000001f;
+
   font-size: 12px;
+
   line-height: 1.5;
+
   text-align: left;
+
   pointer-events: none;
+
   z-index: 60;
+
 }
+
 .cg-peak-tip-title { font-weight: 600; margin-bottom: 4px; white-space: nowrap; }
+
 .cg-peak-tip-row { display: flex; align-items: center; gap: 6px; opacity: 0.88; white-space: nowrap; }
+
 .cg-peak-tip-icon { flex: none; }
 
+
+
+/* The host-contract check writes its result to `data-cg-contract` / `data-cg-contract-missing` on the
+
+   root element and warns once in the console. It deliberately paints nothing: a badge for a state that
+
+   does not change between releases ("this sheet references a prefix this host does not emit") is a
+
+   permanent decoration, and a permanent decoration gets ignored exactly when it finally matters. Read
+
+   it from the attributes, or from the console line, when something looks wrong. */
+
+
+
+/* 注入块设置页（宿主设置弹窗里的一个 section）。它渲染在宿主的弹窗里，不在本插件自己的 `.cg-settings`
+
+   弹层里，所以颜色一律取自宿主的 `--dsw-alias-*`：宿主在 body 上按浅/深主题切换这些变量，这里不写
+
+   第二份主题分支。开关是自绘的 `button[role="switch"]` —— 宿主的 Switch 控件不在本插件的
+
+   `dsh.client.inject` 列表里（实测拿不到），所以轨道与滑块都是本插件自己的元素。 */
+
+.cg-injection { display: flex; flex-direction: column; gap: 8px; max-width: 640px; padding: 2px 0; }
+
+.cg-injection-intro, .cg-injection-hint { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary, var(--cg-muted, #999)); }
+
+.cg-injection-error { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-error-primary, #ec1313); }
+
+.cg-injection-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, 0.25)); border-radius: 12px; }
+
+.cg-injection-text { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+
+.cg-injection-label { font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-primary, inherit); }
+
+.cg-injection-note { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary, var(--cg-muted, #999)); }
+
+.cg-injection-retry { flex: none; align-self: flex-start; border: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, 0.25)); border-radius: 8px; padding: 4px 12px; font-size: 13px; }
+
+.cg-toggle { position: relative; flex: none; width: 40px; height: 22px; padding: 0; border: 1px solid var(--dsw-alias-border-l3, rgba(127, 127, 127, 0.3)); border-radius: 999px; background: var(--dsw-alias-bg-module-platform, rgba(127, 127, 127, 0.18)); color: inherit; cursor: pointer; transition: background 140ms ease, border-color 140ms ease; }
+
+.cg-toggle-knob { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--dsw-alias-switch-thumb, #fff); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28); transition: transform 140ms ease; }
+
+.cg-toggle-on { background: var(--dsw-alias-state-business-primary, #3982fa); border-color: transparent; }
+
+.cg-toggle-on .cg-toggle-knob { transform: translateX(18px); }
+
+.cg-toggle:disabled { opacity: 0.55; cursor: default; }
+
+@media (prefers-reduced-motion: reduce) {
+
+  .cg-toggle, .cg-toggle-knob { transition: none; }
+
+}
+
+
+
+
+
+/* Dark-mode overrides for the panels that now default to their light appearance.
+
+   They are appended last so they win on specificity ties against the single-class rules above. */
+
+body[data-ds-dark-theme] .cg-model-tooltip { background: #1c1e20; color: #fff; box-shadow: 0 5px 14px #00000052; }
+
+body[data-ds-dark-theme] .iWlSmW_trigger::after { background: #1c1e20; color: #fff; box-shadow: 0 4px 12px #0002; }
+
+body[data-ds-dark-theme] .cg-peak-tip { border-color: rgba(255, 255, 255, 0.12); background: #24262b; color: #f2f3f5; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.34); }
+
+
+
+/* Light-mode glow policy: on a white panel a coloured halo reads as a ring painted onto the
+
+   surface, and the popover's halo breathes every 2.6s. Keep the state colour, drop the glow;
+
+   dark keeps its original values (all selectors below are light-only, so the dark rules above
+
+   are untouched). */
+
+body:not([data-ds-dark-theme]) .cg-model-zap[data-on="true"] .cg-model-zap-glyph { filter: none; }
+
+body:not([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-zap[data-on="true"] .cg-model-zap-glyph { filter: none; }
+
+/* No `animation` here on purpose. This selector is (0,2,1) and the reduced-motion stop on
+
+   `.cg-model-popover` is (0,1,0) — a media query adds no specificity — so an entrance animation
+
+   declared here kept playing in light + reduced motion while dark stayed still. The entrance comes
+
+   from the base `.cg-model-popover` rule above; the reduced-motion block cancels it for both themes. */
+
+body:not([data-ds-dark-theme]) .cg-model-popover { border-color: #e6e6e6; box-shadow: 0 6px 14px #0000000f, 0 0 0 1px #00000008; }
+
+body:not([data-ds-dark-theme]) .cg-model-slider-shell[data-ultra="true"] .cg-model-thumb { box-shadow: 0 0 0 1px #0000000f; }
+
+body:not([data-ds-dark-theme]) .cg-model-ultra-notice { color: #7a5cc4; }
+
+body:not([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-ultra-notice { color: #b8860b; }
+
+body:not([data-ds-dark-theme]) .cg-model-popover[data-ultra="true"] .cg-model-slider-shell::before,
+
+body:not([data-ds-dark-theme]) .cg-model-popover[data-superfast="true"] .cg-model-slider-shell::before,
+
+body:not([data-ds-dark-theme]) .cg-model-root[data-superfast="true"] .cg-model-slider-shell::before,
+
+body:not([data-ds-dark-theme]) .cg-model-slider-shell[data-effort="max"]:not([data-ultra="true"])::before { box-shadow: none; }
+
+body:not([data-ds-dark-theme]) .cg-model-popover[data-superfast="true"] .cg-model-slider-dots span[data-ultra="true"] { box-shadow: none; }
+
+
+
+/* Dark-mode fallbacks for the panels whose light values are now hard-coded above.
+
+   Without these, the composer card and the model popover render white in dark mode. */
+
+body[data-ds-dark-theme] [data-composer-card] { background: #2a2a2c; border: 1px solid #3a3a3d; box-shadow: 0 2px 6px #0000003d; }
+
+body[data-ds-dark-theme] .cg-model-popover { background-color: var(--cg-page); border-color: #444; box-shadow: 0 6px 14px #00000059; }
+
+body[data-ds-dark-theme] .cg-model-popover[data-pane="model"] { background-color: var(--cg-page); }
+
+body[data-ds-dark-theme] .cg-model-popover[data-pane="model"] .cg-model-option[aria-checked="true"] { background: #404043; color: #ececec; }
+
+body[data-ds-dark-theme] .cg-model-trigger[aria-expanded="true"] { background: #404043; }
+
+body[data-ds-dark-theme] .cg-tabs { background: #2f2f31; }
+
+body[data-ds-dark-theme] .cg-goal { border-left-color: #383838; }
+
+
+
+/* 主题切换冻结窗口（由 client.js 的 MutationObserver 加在 <html> 上，约 260ms）：
+
+   属性切换会让入场动画与颜色过渡整体重播，读起来就是"闪一下"，这里把它们静默掉。
+
+   类名重复三次是有意的：:1026-:1039 的 turnRail / turnLabel 家族也带 !important，
+
+   特异性 (0,2,1)，而单写一次 html.cg-settling 只有 (0,1,1) —— 两边都是 !important 时
+
+   由特异性决定胜负，那一族的 background-color 150ms 就会漏过冻结，切换时单独做渐变。
+
+   重复类名把这条抬到 (0,3,1)，压住宿主与自身所有同层 !important 过渡。 */
+
+html.cg-settling.cg-settling.cg-settling *,
+
+html.cg-settling.cg-settling.cg-settling *::before,
+
+html.cg-settling.cg-settling.cg-settling *::after {
+
+  animation: none !important;
+
+  transition: none !important;
+
+}
+
+
+
+
+/* 代码块在深色主题下几乎看不见，但**不能**把所有 span 刷成一个颜色——那会把语法高亮抹掉，
+   而高亮正是代码块存在的意义。所以这里只做两件事：
+   ① 把容器和裸文本的前景色提到正文色，让没有高亮的行（注释、标点、纯文本）读得清；
+   ② 不碰 `span` 和 `code` 自己的 color，宿主给关键字/字符串/注释上的颜色原样保留。
+   宿主 `.compact pre :is(code, span) { color: inherit !important }` 会把没有自己颜色的
+   span 继承成容器的色，所以改容器就够；有自己颜色的 span 因为有内联 style 或更高特异度，
+   不会被这条影响。
+   前三次失败的教训写在下面，避免以后再踩：
+   · `:where()` 特异度 0 → 被宿主 `.compact`（0,1,0）压掉；
+   · `:global()` 是 CSS Modules 语法，浏览器不认识，选择器列表里有一个无效就整条作废；
+   · `body[data-ds-dark-theme][data-chatgpt-ui]` 要求同一元素同时带两个属性，永远不匹配。
+   这一次不再提亮 `--dsw-alias-label-tertiary` 变量本身——那会让全站所有次要文字一起变亮，
+   层次塌掉，而且用户明确说不要那个效果。 */
+html[data-chatgpt-ui] .markdown pre,
+html[data-chatgpt-ui] .compact pre {
+  --shiki-foreground: var(--cg-text, #ececec);
+}

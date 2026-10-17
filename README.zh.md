@@ -2,7 +2,9 @@
 
 # dsh-codex-ui
 
-DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex-ui` 的衍生版），适配 **0.2.0-rc.2 Web**（peerDependencies 声明）；除界面外，还带一套通过系统提示词注入的编排契约——派发动作由模型按契约执行，插件本身不调用子代理工具。
+DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex-ui` 的衍生版），适配 **0.2.0-rc.2 Web**（CHANGELOG 另记录对照过 0.2.1-rc.2）；本包不声明 DSH 版本范围——DSH 的兼容门只认 `peerDependencies`，写死版本会让别的 DSH 版本装不上，兼容性改由实测对照保证（理由见〈安装前须知〉）；除界面外，还带一套通过系统提示词注入的编排契约——派发动作由模型按契约执行，插件本身不调用子代理工具。
+
+> **2.0 是破坏性版本（自 2.0.0 起；2.0.1 / 2.0.2 仅为版本号调整，功能与 2.0.0 相同），需要配套插件。** 输入框右下角那一整块（模型选择器 + 推理强度条 + 流星）已拆成独立插件 `dsh-codex-ui-reasoning`，**必须一起装**：只装主包时右下角会退回 DSH 原生模型选择器，没有强度条、也没有流星。两个都装时要给副包配 `promptInjection: false`，否则同一套提示词会注入两遍。升级步骤、分工表、回滚办法与可直接粘贴的 `cordis.patch.yml` 片段见 **[MIGRATION-2.0.zh.md](MIGRATION-2.0.zh.md)**。下面功能清单里凡涉及模型选择器、推理强度条、流星的部分，自 2.0 起由副包提供。
 
 ![界面预览：新对话页](assets/screenshot-1.0.0.png)
 
@@ -11,12 +13,12 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 > **关于本项目**：这是 [Loliyer520/dsh-codex-ui](https://github.com/Loliyer520/dsh-codex-ui) 的衍生版本（MIT），在其基础上继续开发：新增 Ultra 档与闪电编排两套提示词契约、强制中文、会话重命名、已归档会话删除、子代理/分支分组，并修掉了一批缺陷。**与 OpenAI 无隶属或背书关系**；随包分发的 Codex 图标与 OpenAI Sans 字体属于 OpenAI，授权与风险见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 - **侧栏**：紧凑会话列表、项目与最近会话分组、置顶（调用宿主 workspace 接口）、悬浮预览卡、重命名、归档（宿主能力）与**永久删除**（仅限已归档会话）、子代理 / 分支分组。
-- **模型面板**：原生模型与推理强度档位（列表来自宿主）、模型显示名自定义（同时写入"模型身份"提示词段落）、**编排模式三档菜单**（标准 / 快速 / 超快）、滑条末追加虚拟 **Ultra 格**并注入"最严验收"契约、开启编排时披露 token 成本倍率（1.5× / 2.5×）。
+- **模型面板**（面板 UI、滑条与流星自 2.0 起由副包 `dsh-codex-ui-reasoning` 渲染；主包只保留模型身份段落与注入侧）：原生模型与推理强度档位（列表来自宿主）、模型显示名自定义（同时写入"模型身份"提示词段落）、**编排模式三档菜单**（标准 / 快速 / 超快）、滑条末追加虚拟 **Ultra 格**并注入"最严验收"契约、开启编排时披露 token 成本倍率（1.5× / 2.5×）。
 - **提示词**：DeepSeek 模式不追加本插件的风格段（宿主原版系统提示词不受影响，中文策略与模型身份段仍生效）；Codex 模式追加"严谨、理性、严肃、简短"的回复规则；强制中文，模型身份段落同时约束思考过程；新对话页有回复风格页签与品牌图标。
 - **编排契约**：快速 / 超快已开启的会话里，委派是默认动作——三条窄豁免 + 发答前自检；每轮 step 1–3 各注入一条带轮次号的短提醒（step 4 起不再注入）；超快模式下每个**一级**子代理再开两个孙代理，**二级即止**。
-- **界面与其它**：浅色 / 深色 / 窄窗口适配；超快模式滑条四段暖色递深（minimal·low / high / xhigh·max / ultra 渐变）；努力滑条旋钮 24×24 正圆（常态带投影，超快 + Ultra 态加描边与发光）；字体与图标随包分发（字体以 base64 内联进 `lib/client.js`）；设置菜单显示官方 DeepSeek API 余额（服务端缓存 30 秒，只有校验过的余额字段回到前端），并带刷新 / 控制台 / 设置 / 插件 / 帮助入口。
+- **界面与其它**（其中滑条与流星属副包）：浅色 / 深色 / 窄窗口适配；超快模式滑条四段暖色递深（minimal·low / high / xhigh·max / ultra 渐变）；努力滑条旋钮 24×24 正圆（常态带投影，超快 + Ultra 态加描边与发光）；字体与图标随包分发（字体以 base64 内联进 `lib/client.js`）；设置菜单显示官方 DeepSeek API 余额（服务端缓存 30 秒，只有校验过的余额字段回到前端），并带刷新 / 控制台 / 设置 / 插件 / 帮助入口。
 
-**本版要点（1.0.0）**：首个 1.0 正式版，产物 `dsh-codex-ui-1.0.0.tgz`（在 Releases 里下载，不入库）；测试 79 条 / 78 通过 / 1 跳过（本机未安装 0.2.0-rc.2 的运行时依赖，见 `tests/prompt-modes.test.mjs:23`）/ 0 失败；界面类改动刷新页面即可，提示词契约类需重启 DSH。
+**当前版本（2.0.2）**：产物 `dsh-codex-ui-2.0.2.tgz`（`npm pack` 生成，不入库）；2.0.1 / 2.0.2 仅为版本号调整（移除 `peerDependencies` 声明），功能与 2.0.0 相同；1.0.0 与 1.1.0 的历史要点见 [CHANGELOG.md](CHANGELOG.md)。界面类改动刷新页面即可，提示词契约类需重启 DSH。
 
 ## 新对话页：回复风格、标题与图标
 
@@ -28,12 +30,12 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 
 ## Ultra 档与闪电编排
 
-模型面板（输入框里的模型选择器）上有两个提示词层的开关，由宿主半边的 `agent/pre-step` 按会话精确注入：
+模型面板（输入框里的模型选择器，2.0 起由副包渲染）上有两个提示词层的开关，注入由宿主半边的 `agent/pre-step` 按会话精确执行：
 
-- **Ultra 档**：滑条末尾追加一格 `Ultra`（模型自带 `ultra` 档时直接用该真实档）。选中时写回模型**真实的最高档**，`ultra` 从不作为推理档 id 下发；同时注入"最严验收"契约——先定验收标准、证据先于断言、对抗式复查、根因优先、显式停止条件、不许改测试迁就实现。界面进入 Ultra 时轨道有流星特效。
+- **Ultra 档**：滑条末尾追加一格 `Ultra`（模型自带 `ultra` 档时直接用该真实档）。选中时写回模型**真实的最高档**，`ultra` 从不作为推理档 id 下发；同时注入"最严验收"契约——先定验收标准、证据先于断言、对抗式复查、根因优先、显式停止条件、不许改测试迁就实现。界面进入 Ultra 时轨道有流星特效（滑条与流星属副包）。
 - **闪电编排**：点面板左上角那枚闪电启用。注入的编排契约要求父 agent 在**同一条消息里并发派发至少两个子代理**，按角度而不是复制切分，每个子代理提示词自包含，父 agent 只做编排与整合；正文末尾带防递归守卫，子代理不会继续派活。
 
-两个开关按会话记录在 `$DSH_HOME/storages/codex-ui-turbo.json`（最多 40 个会话），通过 `/api/dsh-codex-ui/turbo` 读写。关闭时会补一条一次性"模式已关闭"提示，避免历史里那条契约继续生效。这是提示词层的能力，不会给模型加算力；闪电会显著增加 token 消耗。
+两个开关按会话记录在 `$DSH_HOME/storages/`（最多 40 个会话）：2.0 起拆成 `codex-ui-persona.json` 与 `codex-ui-effort.json`，旧的 `codex-ui-turbo.json` 只用于一次性迁移；写入方是副包，本包只读。读取仍通过 `/api/dsh-codex-ui/turbo`（写侧对推理档位相关字段返回 `turbo/effort-moved`）。关闭时会补一条一次性"模式已关闭"提示，避免历史里那条契约继续生效。这是提示词层的能力，不会给模型加算力；闪电会显著增加 token 消耗。
 
 ## 安装
 
@@ -41,16 +43,16 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 
 **A. 本地 tarball（不依赖 registry，最快）**
 
-拿到 `dsh-codex-ui-1.0.0.tgz` 后，在 DSH **插件 → 添加插件**里填该文件的绝对路径，或：
+拿到 `dsh-codex-ui-2.0.2.tgz` 后，在 DSH **插件 → 添加插件**里填该文件的绝对路径，或：
 
 ```powershell
-dsh plugin --profile <profile名称> add 'C:/路径/dsh-codex-ui-1.0.0.tgz'
+dsh plugin --profile <profile名称> add 'C:/路径/dsh-codex-ui-2.0.2.tgz'
 ```
 
 **B. npm**
 
 ```powershell
-dsh plugin --profile <profile名称> add dsh-codex-ui@1.0.0
+dsh plugin --profile <profile名称> add dsh-codex-ui@2.0.2
 ```
 
 > ⚠️ **这个包目前还没有发布到 npm**（公共 registry 上会返回 404）——现在执行上面这条会失败，首次安装请用 A 或 C 方式。若你打算发布到 npm，这条命令在发布满 24 小时后即可用。
@@ -90,7 +92,7 @@ dsh plugin --profile <profile名称> remove dsh-chatgpt-ui
 - **本插件强制中文**：装上之后，被注入的会话都会用中文思考并作答（代码与路径等保持原样）；只有该轮明确要求另一种语言时才例外。不想要这个行为，把 `src/turbo.js` 里的 `FORCE_CHINESE` 改成 `false`。
 - 本插件通过 `cordis.patch.yml` **禁用内置 `ui-sidebar`** 并插入自己的侧栏（右侧栏仍由宿主提供，本插件不接管）；这会改变界面结构。想先试用，请装到一个独立 profile。
 - **已知限制**：插件管理页里的启用/停用开关**对本插件无效**——它是以自定义 id 插入的，页面按包名写开关。要停用请从 profile 的 `cordis.patch.yml` 里移除对应的插入条目，或直接卸载。
-- 对等依赖为 `@deepseek-ai/dsh 0.2.0-rc.2`；CSS 依赖参考版本的类名，升级 DSH 后需要重新校验。
+- 本包**不声明 DSH 版本范围**：DSH 的插件兼容门只读 `peerDependencies`（`dsh-app-boot` 按 `includePrerelease` 判 semver，且不读 `peerDependenciesMeta`，所以标 `optional` 也不免除拦截），写死 `0.2.0-rc.2` 会让别的 DSH 版本装不上、必须逐个 `allow-version` 精确豁免（1.1.0 那版就如此）；兼容性因此由实测对照保证——CHANGELOG 记录对照过 0.2.0-rc.2 / 0.2.1-rc.2。CSS 依赖参考版本的类名，升级 DSH 后需要重新校验。
 - 包内包含 `src/`：`lib/index.js` 运行时导入 `../src/*.js`，因此不要只发布 `lib/`。
 - 变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 

@@ -1,4 +1,5 @@
-import { presetSilences } from './turbo-policy.js';
+import { presetSilences, SECTION_MANDATE } from './turbo-policy.js';
+import { isBlockOn } from './injection-state.js';
 /**
  * The name the assistant answers to.
  *
@@ -86,14 +87,22 @@ export function identityText(selection, table = aliases, names = catalogNames) {
   const name = own ?? fromCatalog;
   if (name === null) return '';
   return [
-    '## 模型身份（运行环境指定）',
+    '## 你是谁',
     '',
-    `你就是「${name}」。被问到"你是什么模型"「你是哪个模型」这类问题时，直接回答「${name}」。`,
-    '运行环境里出现的其它标识（底层路由 id、适配器名、模式名等）不是你的身份（除非本会话里另一个插件的 persona 明确指定了不同的身份，那部分以它为准）：不要用它们回答，也不要在回答里补充"底层其实是某某模型"。',
-    '只就身份说这一个名字，不要据它推断能力、上下文长度、知识截止日期、厂商或版本。',
+    `你就是「${name}」。`,
+    `只问"你是什么模型"（不问厂家、不问能力）时：一句话回答「${name}」，不加厂家、不加来源、不展开；"我只知道名字/我不确定自己是谁"这类含糊话仍然禁止。问的是"你是谁 / 介绍一下你自己 / 你能做什么"时，走下面那条固定句式。`,
+    // Renaming reads to a model as an event it then narrates; the fix is to state the name as a
+    // constant (like a language or a time zone) instead of denying a list of change-words, and to
+    // put "introduce yourself" on one path: name → capabilities — reported as a self-introduction,
+    // never as a search log. The maker slot is gone: it could only be filled by guessing or
+    // searching, and either way it produced a maker nobody had verified, so the name stands alone.
+    `需要介绍自己、或者被问"你是谁、你能做什么"时，按这个句式回答：第一句「我是「${name}」」，然后一段「我能做的事：<工具、能力、边界>」。不要把检索过程、搜索结果清单、报道标题或链接写进正文 —— 自我介绍不是查证汇报，写出来很假。`,
+    '这个名字是固定值，和语言、时区一样：不必围绕它做说明、换名或纠错，被问到以外的场合也不必提起它。',
+    '不要补充"底层其实是某某模型"这类内容。运行环境里出现的其它标识（底层路由 id、适配器名、模式名等）不是你的名字（除非本会话里另一个插件的 persona 明确指定了不同的名字，那部分以它为准）：不要用它们回答。',
+    '不要据名称本身推断上下文长度、知识截止日期或版本号；但被问到能力、或者需要介绍自己时，照实说自己实际能做的事，不必回避。',
     // The reasoning trace is visible to the user, so the rule has to hold there as well: a model that
     // announces its real route id while thinking has leaked exactly what the rename exists to hide.
-    '这条规则在**思考过程中同样适用**：不要在推理里推测、罗列或提及任何底层路由 id、适配器、厂商、版本号，也不要讨论"我的真实身份是什么"；思考中需要指称自己时，就用上面这个名字。',
+    '这条规则在**思考过程中同样适用**：不要在推理里推测、罗列或提及底层路由 id、适配器名或版本号，也不要讨论"我的真实身份是什么"；思考中需要指称自己时，就用上面这个名字。',
   ].join('\n');
 }
 
@@ -183,7 +192,15 @@ export function registerModelIdentity(ctx) {
         name: 'chatgpt-ui:model-identity',
         order,
         interpolate: false,
-        text: ({ agent }) => presetSilences(agent) ? '' : identityText(agent?.options),
+        // The switch governs this section and nothing else. isBlockOn reads the same global
+        // injection map the settings panel writes, so switching 模型身份 off removes this paragraph
+        // while leaving every other block alone. The enforcement line rides with the paragraph:
+        // an identity statement reads as background colour unless it is stated as a requirement.
+        text: ({ agent }) => {
+          if (presetSilences(agent) || !isBlockOn('modelIdentity')) return '';
+          const body = identityText(agent?.options);
+          return body === '' ? '' : `${SECTION_MANDATE}\n\n${body}`;
+        },
       });
       sectionState = { ok: true, error: '', order };
       writeIdentityStatus({ step: 'section', sectionOk: true, sectionError: '', order });

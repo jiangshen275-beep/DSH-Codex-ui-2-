@@ -88,6 +88,21 @@ const peakIsDeepSeek = provider => typeof provider === 'string' && provider.star
 
 
 // The directory is shared with the native /model command and session projection.
+
+// No imports here. `React`, `h`, `paths` and `Icon` come from ui-kit.js, `providerGroups` from
+// providers.js, and `ALIASES_KEY` / `readAliases` / `publishAliases` / `publishCatalogNames` from
+// alias-sync.js: the build concatenates those three modules into the same factory body *before* this
+// one (the same order dsh-codex-ui uses in scripts/build.mjs), which is why they are free symbols.
+
+// One registration per context: the slot below is single-kind, and a second register throws from inside
+// the fiber, where the failure reads as a vanished panel rather than a double mount.
+//
+// Keyed by ctx rather than a plain boolean, because a hot reload mounts the new instance before it
+// disposes the old one: a shared flag would make the new instance skip its own registration and then be
+// cleared by the old disposer, leaving the slot empty until something applied a third time.
+const modelUiRegistered = new WeakSet()
+
+// The directory is shared with the native /model command and session projection.
 function registerModelUI(ctx) {
   // Tier labels follow the model menu's own convention: an English word, a capital and
   // the rest lower case — Off / Low / Medium / High / Max / Ultra.
@@ -186,7 +201,13 @@ function registerModelUI(ctx) {
     // sync; after that the slider position is the truth and this is the last value we
     // pushed, which keeps a slow Host response from fighting the user's drag.
     const [ultraFlag, setUltraFlag] = React.useState(false);
-    const [turboReady, setTurboReady] = React.useState(false);
+    // Three answers about the Host's record for one session, and whose record it is. A boolean made
+    // "not read yet" and "the read failed" the same value, and the writer below refuses to speak while
+    // it is false — so one failed read disabled the Ultra switch for the rest of the session while the
+    // track went on showing Ultra. `phase` names all three cases, `sessionId` makes an answer that
+    // belongs to another conversation read as no answer at all, and `retrySeq` is the retry lever:
+    // only the user raises it, so a retry can never re-trigger itself.
+    const [turboState, setTurboState] = React.useState({ sessionId: null, phase: 'idle', retrySeq: 0 });
     // Token multiplier the armed contract states, as reported by the Host. Defaults to
     // the contract's own figure so the label is never blank before the first read.
     const [budget, setBudget] = React.useState({ value: 1.5, exact: true });
@@ -203,9 +224,8 @@ function registerModelUI(ctx) {
     // middle of the rail. The effect body is declared below the derived `ultraOn`.
     const meteorShellRef = React.useRef(null);
     const meteorFieldRef = React.useRef(null);
-    // The knob is positioned from a percentage plus `translateX(-50%)`, which lands its edges on
-    // fractional device pixels at a fractional DPR — and a circle rasterised off the grid reads as a
-    // rounded square. This ref lets the effect below rewrite `left` on the device-pixel grid.
+    // The knob's position is a `translate` (see the thumb's style below), and this ref is the node the hover
+    // test writes `data-over` to.
     const thumbRef = React.useRef(null);
     const lightningRef = React.useRef(false);
   const superfastRef = React.useRef(false);
@@ -224,6 +244,17 @@ function registerModelUI(ctx) {
     // map, and the row currently being renamed (`{ key, name, draft }` or null).
     const [aliases, setAliases] = React.useState(readModelAliases);
     const [aliasEditor, setAliasEditor] = React.useState(null);
+    // The slider track's own width, measured by the same observer that feeds the meteor travel. It no longer decides
+    // where the knob is drawn — that is a container-unit calc now, so no missing measurement can strand the knob at
+    // the track's start — but the hover hit-test below still wants the travel in pixels.
+    const [shellWidth, setShellWidth] = React.useState(0);
+    // One hover gesture's worth of the shell's client box. The pointer test used to read the thumb's box on
+    // every move; read once instead, and drop the copy whenever it can go stale (leave, resize, scroll).
+    const shellRectRef = React.useRef(null);
+    // The session whose Host answer the local pin currently mirrors — null between sessions. A ref, not
+    // state, because the read effect that clears it runs earlier in the same commit than the writer that
+    // has to see it: a `setState` there would still read as the previous session for that whole pass.
+    const ultraSyncedRef = React.useRef(null);
     // The catalog the menu is showing is published to the Host too: a model whose displayed name comes
     // from the catalog rather than from the rename box must still be named in the prompt.
     React.useEffect(() => { publishCatalogNames(state.groups); }, [state.groups]);
@@ -254,13 +285,24 @@ function registerModelUI(ctx) {
     // A long display name wraps and the field grows downward. Measured rather than guessed: the
     // browser knows how tall the wrapped text is, so the field is reset to auto and then to that
     // height. `scrollHeight` is absent in the test shim, which is why it is optional here.
-    React.useEffect(() => {
+    //
+    // A layout effect, not a passive one: the field mounts with `rows: 1` and the stylesheet gives
+    // `.cg-model-alias-input` `overflow: hidden`, so every frame between mount and measurement shows
+    // one line with the second one cut and no scrollbar to admit it. A passive effect runs after the
+    // paint, which is exactly that frame.
+    //
+    // The dependency is the editor *object*, not its fields. `openEditor` builds a fresh object on
+    // every click, so reopening a row is always a dependency change even when the draft and the model
+    // id are byte for byte identical; keying on those two fields dropped precisely the case that
+    // matters — a newly mounted textarea whose name had not changed — while still re-running for the
+    // case that does not (a keystroke that changes the draft but keeps the node).
+    React.useLayoutEffect(() => {
       const field = aliasFieldRef.current;
       if (field == null || typeof field.style?.setProperty !== 'function') return;
       field.style.height = 'auto';
       const measured = field.scrollHeight;
       if (typeof measured === 'number' && measured > 0) field.style.height = `${measured}px`;
-    }, [aliasEditor?.draft, aliasEditor?.modelId]);
+    }, [aliasEditor]);
     /** Show the Ultra cost notice for a moment, restarting it if it is already up. */
     const showUltraNotice = () => {
       setUltraNotice(true);
@@ -269,7 +311,21 @@ function registerModelUI(ctx) {
     };
     // A session is blank only while the user has not sent anything in it; the client is the
     // only side that knows, and the inherited switches must not leak into running ones.
-    const blank = useSessions?.(state => state?.byId?.[sessionId]?.blank) === true;
+    //
+    // Three answers, not two: a missing row reads `undefined`, and collapsing that to `false` said
+    // "this is not a new conversation" about a row that simply had not arrived yet — so the first
+    // read of a brand new chat skipped the inherited switches, and nothing re-read once the row did
+    // land. `blankRow` keeps the distinction; the read effect below watches `blank` and so runs
+    // again when the row turns out to be blank after all.
+    const blankRow = useSessions?.(state => state?.byId?.[sessionId]?.blank);
+    const blank = blankRow === true;
+    // An answer belongs to one session. Derived from the *prop* rather than from state, so the first
+    // render after a switch already reads `idle`: `ultraFlag`, `lightning` and `superfast` still hold
+    // the conversation we just left, and painting those as this one's state is exactly the dot and
+    // the mode tick that sat in the wrong place until the read came back.
+    const turboPhase = turboState.sessionId === sessionId ? turboState.phase : 'idle';
+    const turboSynced = turboPhase === 'ready';
+    const turboFailed = turboPhase === 'error';
     // The armed bolt is painted with a shared deep purple gradient. SVG resolves
     // `url(#id)` against the document, so the definition is mounted once per
     // component and removed on unmount — never by parsing another plugin's DOM.
@@ -321,6 +377,13 @@ function registerModelUI(ctx) {
     const maxIndex = Math.max(0, steps.length - 1);
     const effectiveValue = hasRealUltra ? 'ultra' : state.current?.reasoningEffort ?? reasoning?.defaultEffort;
     const effectiveIndex = steps.findIndex(step => step.id === effectiveValue);
+    // `-1` is a state of its own, not tier 0. `findIndex` answers it whenever the directory's effort
+    // is not one of the steps at all — an `off` the model omits, a level the catalog has not listed —
+    // and every reader below used to clamp it with `Math.max(0, ...)`: the knob parked at the lowest
+    // tier while the text beside it printed `state.retainedEffort`, two claims that cannot both be
+    // true. A pinned Ultra is the one exception: `virtualUltra` derives its position from the step
+    // list instead of from the effort id, so that branch knows where the knob goes.
+    const indexUnknown = effectiveIndex < 0 && !(ultraFlag && virtualUltra);
     // The pinned Ultra position. The directory only ever holds the real maximum, so
     // the switch is the only thing that separates "Ultra" from "maximum"; a drag
     // preview always wins over whichever position was stored.
@@ -329,15 +392,33 @@ function registerModelUI(ctx) {
     const shownUltra = virtualUltra && shownIndex === maxIndex
       || hasRealUltra && shownIndex === effectiveIndex && effectiveValue === 'ultra';
     const displayLevel = draftIndex === null ? steps[shownIndex] : steps[draftIndex];
-    const label = shownUltra ? 'Ultra' : displayLevel ? effortLabel(displayLevel) : state.retainedEffort || 'Off';
+    // What the track is allowed to claim, and when it may claim nothing at all: with no answer from
+    // the Host for this session, or no step that matches its effort, `shownIndex` is a number by
+    // construction — the range input needs one — but it is not a fact. A drag is the user's own
+    // input, so it always counts, which is also why the knob comes back the moment the pointer moves.
+    const trackUnknown = draftIndex === null && (!turboSynced || indexUnknown);
+    // The tier text follows the same rule as the track, in one place: while the position is unknown
+    // the only honest name is the one the directory retained, never the step the clamp landed on.
+    // A drag has already chosen a real step, so it passes straight through.
+    const label = trackUnknown ? state.retainedEffort || 'Off' : shownUltra ? 'Ultra' : displayLevel ? effortLabel(displayLevel) : state.retainedEffort || 'Off';
     const ultraOn = shownUltra;
+    // Everything painted reads this rather than `ultraOn`: the pin can be one session behind until
+    // the read answers, and the Ultra paint — purple track, meteors, the cost notice — is a claim
+    // about the Host, not a local preference.
+    const claimUltra = shownUltra && !trackUnknown;
+    // The mode ticks make the same promise, and get the same treatment: before this session's answer
+    // arrives neither switch is known — and 标准 is not a default, it is one of three options — so
+    // none of the three is ticked instead of the panel guessing.
+    const modeFast = turboSynced && lightning;
+    const modeTree = turboSynced && superfast;
     // The visible tier name is what carries the transient Ultra cost notice; the accessible
     // name stays the tier itself.
-    const displayLabel = ultraOn && ultraNotice ? '更快消耗 Token' : label;
+    const displayLabel = claimUltra && ultraNotice ? '更快消耗 Token' : label;
     // Hooks for the depth ramp: the tier the slider shows, plus a 0..4 bucket so a model
-    // with a level id the CSS does not know still deepens instead of staying flat.
-    const effortTone = shownUltra ? 'ultra' : (effectiveIndex >= 0 ? steps[shownIndex]?.id ?? 'off' : 'off');
-    const effortDepth = maxIndex > 0 ? Math.round(shownIndex / maxIndex * 4) : 0;
+    // with a level id the CSS does not know still deepens instead of staying flat. An unknown
+    // position has no tone — it is not the lowest tier, it is no tier.
+    const effortTone = trackUnknown ? 'off' : shownUltra ? 'ultra' : (effectiveIndex >= 0 ? steps[shownIndex]?.id ?? 'off' : 'off');
+    const effortDepth = trackUnknown || maxIndex <= 0 ? 0 : Math.round(shownIndex / maxIndex * 4);
     // The budget figure is measured, not guessed: one delegation costs a delegated turn about 1.5x a plain turn, and a
 // superfast turn about 3x — see CHANGELOG 1.0.0 for the ledger numbers behind those two ratios.
     // The tree runs one extra tier (each tier-1 child opens two grandchildren), so it costs several flat
@@ -348,52 +429,112 @@ function registerModelUI(ctx) {
     const modelName = chosen ? aliasOf(chosen.group.id, chosen.model) : state.current?.model || '选择模型';
     const busy = locked || state.pending !== null;
     const close = React.useCallback(() => { setOpen(false); setDraftIndex(null); triggerRef.current?.focus(); }, []);
-    // Track width feeds the meteor travel distance, so it is measured whenever the track can exist
-    // and re-measured whenever it resizes. The dependency on `open` is the load-bearing one: the
-    // rail only mounts inside the popover, so measuring on `ultraOn` alone found a null ref whenever
+    // Track width feeds the meteor travel distance and the knob's hover hit-test — the knob's own position is a
+    // container-unit calc now — so it is measured whenever the track can exist and re-measured whenever it resizes.
+    // The dependency on `open` is the load-bearing
+    // one: the rail only mounts inside the popover, so measuring on `ultraOn` alone found a null ref whenever
     // Ultra was switched on with the popover shut, and the fallback then stopped the shower at the
     // meteor's own width instead of the width of the track.
-    React.useEffect(() => {
-      if (!ultraOn || !open) return undefined;
+    //
+    // `steps.length` is a dependency too, not only `open`: the rail also needs the directory's levels, so opening the
+    // picker before the catalog arrived mounted no shell at all, this pass found a null ref, and nothing re-ran it
+    // once the shell appeared — the width stayed 0 until an unrelated resize fired the observer.
+    //
+    // A layout effect, not a passive one: the meteor travel is drawn from the measured width, so a passive effect
+    // would paint one frame of the shower at the wrong distance. The width comes from
+    // `getComputedStyle().width` — the layout width, so the popover's entrance `scale(.985)` cannot leak into it
+    // the way it leaked into an earlier `getBoundingClientRect` measurement of this same element (227.2px
+    // instead of the settled 230.4px) — and not from `clientWidth`, which rounds: on a 268.4px track the top
+    // tier would stop 0.4px short.
+    React.useLayoutEffect(() => {
+      if (!open) return undefined;
       const shell = meteorShellRef.current;
       if (!shell) return undefined;
       const measure = () => {
-        const travel = `${Math.round(shell.clientWidth + 36)}px`;
-        meteorFieldRef.current?.style.setProperty('--cg-meteor-travel', travel);
+        const parsed = parseFloat(getComputedStyle(shell).width);
+        const width = Number.isFinite(parsed) ? parsed : shell.clientWidth;
+        setShellWidth(previous => (previous === width ? previous : width));
+        if (ultraOn) meteorFieldRef.current?.style.setProperty('--cg-meteor-travel', `${Math.round(width + 36)}px`);
+        // A resize moves the shell out from under the pointer test's cached box.
+        shellRectRef.current = null;
       };
       measure();
       if (typeof ResizeObserver !== 'function') return undefined;
       const observer = new ResizeObserver(measure);
       observer.observe(shell);
-      return () => observer.disconnect();
-    }, [ultraOn, open]);
-    // The knob's position is CSS, not a measurement.
+      // Scroll moves the shell just as surely, and scroll does not bubble out of a scroller: a capture
+      // listener on the window is what hears it, whichever element did the scrolling.
+      const forget = () => { shellRectRef.current = null; };
+      window.addEventListener('scroll', forget, { capture: true, passive: true });
+      return () => { observer.disconnect(); window.removeEventListener('scroll', forget, { capture: true }); };
+    }, [ultraOn, open, steps.length]);
+    // The knob travels the track on the compositor, not through layout.
     //
-    // It used to be written from a layout effect that read the shell's width. Reported symptom: at Ultra the
-    // knob stopped 3.2px short of the track's end while the fill reached it, which reads as the knob
-    // "bouncing back" and leaving a gap. Measured cause: the effect read the width during the popover's
-    // entrance — 227.2px instead of the settled 230.4px — and no later pass corrected it. A `calc` cannot
-    // measure early: `12px + (100% - 24px) × ratio` is the same band (centre from 12 to width−12, so at
-    // ratio 0 and 1 the circle's edge sits exactly on the track's edge) evaluated by the browser at whatever
-    // width the track actually has.
+    // `left` re-laid the slider out on every tier change, and its 100ms transition did that on every frame of a
+    // drag — that is the stutter this replaces. The knob's centre stays 12px in from the track's edge because the
+    // stylesheet holds `left: 12px` with the knob's own `-12px` margin cancelling it.
     const knobRatio = maxIndex > 0 ? shownIndex / maxIndex : 0;
+    // The travel is the track's width minus the knob's diameter — the very box the fill above measures against —
+    // and the browser resolves it, so nothing JS measures can leave the knob at the track's start. A percentage
+    // inside `translate` cannot express it: that percentage refers to the element's OWN box, so `100%` is the
+    // knob's 24px and `calc((100% - 24px) * ratio)` collapses to 0 (measured in Chromium 152: `translate: 100%`
+    // moves a 24px knob 24px, not the track's 230px). `100cqw` is the track's own content width instead, because
+    // the stylesheet makes the shell a size container; it resolves to the same box as the fill's `100%`, so the
+    // bar and the dot cannot disagree, and it measures itself even on the frame the popover first paints.
+    //
+    // The `12px` term is the knob's own half-width, and leaving it out was the "圆点对不齐" report: the stylesheet
+    // gives the knob `margin-left: -12px`, so `translate` positions its LEFT EDGE, while the tier dots are laid out
+    // `space-between` inside `inset: 0 12px` — their centres sit at `12 + (width - 24) * i / max`. Without the
+    // term the knob's centre lands exactly 12px left of the dot it is supposed to be sitting on, at every tier,
+    // and at the top tier it stops short of the last dot by that same amount.
+    const knobTravel = `calc(12px + (100cqw - 24px) * ${knobRatio})`;
+    // Still measured, and still 0 until the track exists: only the hover hit-test reads this now, so a missing
+    // measurement can shift neither the dot nor the fill.
+    const thumbX = Math.max(0, shellWidth - 24) * knobRatio;
     React.useEffect(() => { if (effortTarget.current === null || effortTarget.current === effectiveValue) setDraftIndex(null); }, [effectiveValue]);
     React.useEffect(() => { effortQueue.current = null; effortTarget.current = null; setDraftIndex(null); }, [state.current?.provider, state.current?.model]);
     React.useEffect(() => { if (locked || !available) setOpen(false); }, [locked, available]);
     React.useEffect(() => {
       if (!open) return;
       const outside = event => { if (!rootRef.current?.contains(event.target)) { setOpen(false); setDraftIndex(null); } };
+      // Esc walks one level out per press, innermost first, and the listener only exists while the
+      // popover is open — so Esc belongs to the panel and never reaches the host.
+      //
+      // This listener is registered in the *capture* phase, and that is why the rename field's own
+      // handler can never fire: a capture listener on document runs before the event reaches its
+      // target, and `stopPropagation` there stops the event from reaching the target element too
+      // (DOM standard: nothing but the current object receives it). So the cancel has to happen
+      // here. It used to not, and Esc inside the rename field fell through to the pane step below —
+      // jumping to 强度 with a half-typed name, or closing the whole popover when no model was
+      // selected yet.
       const escape = event => {
         if (event.key !== 'Escape') return;
         event.preventDefault();
         event.stopPropagation();
+        // A live rename draft is the innermost level, but only while its field is on screen: the
+        // editor renders inside the model pane, so that is the one case where Esc has to give the
+        // row back. Dropping the draft here — rather than by delegation to the field's own
+        // onKeyDown, which the stopPropagation above makes unreachable — is what keeps a draft from
+        // outliving the Esc that leaves the row and reappearing when a later visit paints the row
+        // in editing state again. A draft left behind in another pane costs no press: the same Esc
+        // clears it and goes on to the pane step, so the key never reads as doing nothing.
+        const draftOnScreen = aliasEditor != null && pane === 'model';
+        if (aliasEditor != null) setAliasEditor(null);
+        if (draftOnScreen) return;
+        // A sub-page steps back to the view it was opened from, so one Esc never throws away the
+        // whole panel: 编排模式 lives under 强度, and 提供商 under 模型.
+        if (pane === 'lightning') { setPane('effort'); focusPending.current = true; return; }
+        if (pane === 'providers') { setPane('model'); focusPending.current = true; return; }
         if (pane === 'model' && state.current !== null) { setPane('effort'); focusPending.current = true; }
         else close();
       };
       document.addEventListener('pointerdown', outside);
       document.addEventListener('keydown', escape, true);
       return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape, true); };
-    }, [open, pane, state.current, close]);
+    // `aliasEditor` is a dependency because the handler reads it: without it the listener would keep
+    // the closure from before the field opened, and Esc inside the field would still fall through to
+    // the pane step.
+    }, [open, pane, state.current, close, aliasEditor]);
     React.useEffect(() => {
       if (!open || !focusPending.current) return;
       focusPending.current = false;
@@ -402,10 +543,23 @@ function registerModelUI(ctx) {
     }, [open, pane]);
     // The arming state lives on the Host so it survives a page reload; read it once
     // per session and adopt the answer, then let local intent win until it changes.
+    //
+    // Three ways in: the session changes, a blank row lands (see the `blank` note above), and the
+    // user presses 重试 in the popover. None of them can loop — this effect only ever writes `phase`,
+    // and `retrySeq` is raised by the retry alone.
     React.useEffect(() => {
       if (typeof sessionId !== 'string' || !sessionId) return;
       let cancelled = false;
-      ultraSentRef.current = null;
+      // The pin still in local state belonged to the session we are leaving, so the writer below must
+      // not read it as this session's answer. Without this, switching from an Ultra session to one
+      // whose row says "no Ultra" wrote the old pin onto the new session before the read answered,
+      // and the read then settled the track back to Max against a row that now said `ultra: true`.
+      //
+      // Only a *new* session reopens that hole. A re-read of the same session — a blank row arriving,
+      // a retry — keeps `ultraSentRef` as it is: nulling it there made the writer treat a pin it had
+      // already adopted as "not adopted yet" and push the track's own position over the Host's.
+      if (ultraSyncedRef.current !== sessionId) ultraSentRef.current = null;
+      ultraSyncedRef.current = null;
       turboRequest('read', sessionId).then(value => {
         if (cancelled) return;
         let nextLightning = value.lightning === true;
@@ -439,23 +593,43 @@ function registerModelUI(ctx) {
         // freeze whatever default happened to be in force at that moment. Only the Host's
         // own value counts as adopted — an inherited Ultra still has to be pushed.
         ultraSentRef.current = value.ultra === true;
+        ultraSyncedRef.current = sessionId;
         setLightning(nextLightning);
         setSuperfast(nextSuperfast);
         setUltraFlag(nextUltra);
         if (Number.isFinite(value.tokenMultiple) && value.tokenMultiple > 0) setBudget({ value: value.tokenMultiple, exact: value.tokenExact === true });
-        setTurboReady(true);
+        setTurboState(current => ({ sessionId, phase: 'ready', retrySeq: current.retrySeq }));
       }).catch(error => {
         if (cancelled) return;
-        setTurboReady(false);
+        // A failed read is its own answer, not "not ready yet". It still leaves the writer off —
+        // nothing about this session is known — but the surface says 未同步 and offers 重试, instead
+        // of the old silent dead switch that showed Ultra while the contract never moved.
+        setTurboState(current => ({ sessionId, phase: 'error', retrySeq: current.retrySeq }));
         setActionError(error.message || String(error));
       });
       return () => { cancelled = true; };
-    }, [sessionId]);
+    }, [sessionId, blank, turboState.retrySeq]);
+    // The retry lever for the popover's 未同步 line: raising `retrySeq` is the only way back into the
+    // effect above, and it also clears the stale phase so the surface reads "reading" while it runs.
+    const retryTurboRead = () => setTurboState(current => ({ sessionId, phase: 'idle', retrySeq: (current.retrySeq ?? 0) + 1 }));
     // Keep the Host flag equal to what the track shows, so every path that leaves the
     // Ultra step (drag, arrow keys, reset, model switch) — and the first sync after a
     // reload — converges on one writer.
+    //
+    // `ultraOn` only speaks for the Host once this model's levels are known. While the catalog is
+    // still empty the track cannot sit on Ultra at all (`virtualUltra` is false), so reading that
+    // "off" as the user's intent wrote `ultra: false` over a pin the Host had just reported as armed:
+    // the switch came back as Max and the stored row was rewritten on the way. Both inputs of this
+    // writer — the Host's answer for this session, and the level list — have to be in hand first.
+    //
+    // `indexUnknown` is the same rule for the other input: when the directory's effort matches no
+    // step, the position the writer would read is the clamp from `Math.max(0, ...)`, not a choice —
+    // writing `ultra: false` from it overwrote a pin the Host had legitimately reported as armed.
+    // Every path that leaves the unknown state (a drag, a model switch, a reset) makes the position
+    // a fact again and this writer catches up on the next pass.
     React.useEffect(() => {
-      if (!turboReady || typeof sessionId !== 'string' || !sessionId) return;
+      if (!turboSynced || indexUnknown || ultraSyncedRef.current !== sessionId || reasoning === undefined) return;
+      if (typeof sessionId !== 'string' || !sessionId) return;
       if (ultraSentRef.current === ultraOn) return;
       ultraSentRef.current = ultraOn;
       setUltraFlag(ultraOn);
@@ -463,7 +637,7 @@ function registerModelUI(ctx) {
         ultraSentRef.current = null;
         setActionError(error.message || String(error));
       });
-    }, [turboReady, ultraOn, sessionId]);
+    }, [turboSynced, indexUnknown, ultraOn, sessionId, reasoning]);
     // Landing on Ultra briefly replaces the tier name with what that tier costs. The notice
     // is fired by the move itself (see chooseLevel) rather than by watching the pinned flag,
     // so a session that merely opens already pinned does not flash it.
@@ -473,12 +647,12 @@ function registerModelUI(ctx) {
     // take the same path a drag to the Ultra step takes.
     React.useEffect(() => {
       if (!inheritEffortRef.current) return;
-      if (!turboReady || !blank) { inheritEffortRef.current = false; return; }
+      if (!turboSynced || !blank) { inheritEffortRef.current = false; return; }
       if (!ultraOn || !virtualUltra || !steps.length) return;
       if (effectiveIndex < 0 || effectiveIndex >= maxIndex) { inheritEffortRef.current = false; return; }
       inheritEffortRef.current = false;
       chooseLevel(String(maxIndex));
-    }, [turboReady, blank, ultraOn, virtualUltra, steps.length, effectiveIndex, maxIndex]);
+    }, [turboSynced, blank, ultraOn, virtualUltra, steps.length, effectiveIndex, maxIndex]);
     // One writer for the pair. 快速 and 超快 are mutually exclusive here even though the Host stores the two
     // flags independently: `superfast` already implies the flat Lightning contract in the prompt
     // (`turbo-policy.js`: `if (lightning || superfast) parts.push(LIGHTNING_POLICY)`), so showing both as on
@@ -560,6 +734,11 @@ function registerModelUI(ctx) {
       setOpen(true);
       focusPending.current = true;
       load();
+      // Opening the panel is the user's own next interaction after a failed read, so it is where the
+      // retry naturally belongs: no timer, no polling, and nothing happens at all unless the read is
+      // known to have failed. The line the user is looking at says 未同步; opening the panel is the
+      // cheapest way to ask again.
+      if (turboFailed) retryTurboRead();
     };
     const reset = () => {
       if (!state.current) return;
@@ -654,41 +833,44 @@ function registerModelUI(ctx) {
             }, h(Icon, { name: 'edit', size: 12 }))));
         return row;
       })));
-    return h('div', { className: 'cg-model-root', ref: rootRef, 'data-ultra': ultraOn, 'data-superfast': superfast, 'data-lightning': lightning, 'data-effort': effortTone },
-      h('button', { className: 'cg-model-trigger', type: 'button', ref: triggerRef, disabled: busy, 'aria-haspopup': 'dialog', 'aria-expanded': open, 'aria-label': `选择模型，当前 ${modelName}${steps.length || state.retainedEffort ? `，推理强度 ${label}` : ''}${lightning ? '，闪电编排已开启' : ''}${superfast ? '，超快编排已开启' : ''}`, onClick: () => open ? close() : show() },
+    return h('div', { className: 'cg-model-root', ref: rootRef, 'data-ultra': claimUltra, 'data-superfast': turboSynced ? superfast : 'unknown', 'data-lightning': turboSynced ? lightning : 'unknown', 'data-turbo': turboPhase, 'data-effort': effortTone },
+      h('button', { className: 'cg-model-trigger', type: 'button', ref: triggerRef, disabled: busy, 'aria-haspopup': 'dialog', 'aria-expanded': open, 'aria-label': `选择模型，当前 ${modelName}${steps.length || state.retainedEffort ? `，推理强度 ${turboFailed ? '未同步' : label}` : ''}${modeFast ? '，闪电编排已开启' : ''}${modeTree ? '，超快编排已开启' : ''}`, onClick: () => open ? close() : show() },
         // No leading bolt here: the lightning switch lives in the popover, and an armed
         // session shows its marker after the effort label instead.
         h('span', { className: 'cg-model-trigger-name' }, modelName),
-        (steps.length > 0 || state.retainedEffort) && h('span', { className: 'cg-model-trigger-effort', 'data-ultra': ultraOn, 'data-effort': effortTone, 'data-notice': ultraOn && ultraNotice }, effectiveIndex >= 0 ? displayLabel : state.retainedEffort || 'Off'),
-        (lightning || superfast) && h('span', { className: 'cg-model-trigger-bolt', 'data-tree': superfast }, boltGlyph(undefined, true, superfast ? 'gold' : undefined)),
+        (steps.length > 0 || state.retainedEffort) && h('span', { className: 'cg-model-trigger-effort', 'data-ultra': claimUltra, 'data-effort': effortTone, 'data-notice': claimUltra && ultraNotice },
+          turboFailed
+            ? h('span', { className: 'cg-model-sync-warn', role: 'status', title: '读不到本会话的编排状态，打开面板重试' }, '未同步')
+            : displayLabel),
+        (modeFast || modeTree) && h('span', { className: 'cg-model-trigger-bolt', 'data-tree': modeTree }, boltGlyph(undefined, true, modeTree ? 'gold' : undefined)),
         h(Icon, { name: 'down', size: 12 })),
-      open && h('div', { className: 'cg-model-popover', ref: popupRef, role: 'dialog', 'aria-label': '模型与推理强度', 'data-ultra': ultraOn, 'data-superfast': superfast, 'data-pane': pane, 'data-effort': effortTone, 'data-notice': ultraOn && ultraNotice },
+      open && h('div', { className: 'cg-model-popover', ref: popupRef, role: 'dialog', 'aria-label': '模型与推理强度', 'data-ultra': claimUltra, 'data-superfast': turboSynced ? superfast : 'unknown', 'data-turbo': turboPhase, 'data-pane': pane, 'data-effort': effortTone, 'data-notice': claimUltra && ultraNotice },
         // Keyed on the pane so switching replays the entrance: the two views cross over instead of
         // swapping in one frame. The wrapper changes nothing about layout — the popover styles no
         // direct children.
         pane === 'lightning' ? h('div', { className: 'cg-model-pane', key: 'lightning' },
           h('div', { className: 'cg-model-modes', role: 'menu', 'aria-label': '编排模式' },
-            h('button', { className: 'cg-model-mode', type: 'button', role: 'menuitemradio', 'aria-checked': !lightning && !superfast, 'data-on': !lightning && !superfast, 'data-mode': 'standard', disabled: busy || !sessionId, onClick: () => chooseMode('standard') },
+            h('button', { className: 'cg-model-mode', type: 'button', role: 'menuitemradio', 'aria-checked': turboSynced && !lightning && !superfast, 'data-on': turboSynced && !lightning && !superfast, 'data-mode': 'standard', disabled: busy || !sessionId, onClick: () => chooseMode('standard') },
               h('span', { className: 'cg-model-mode-text' },
                 h('strong', null, '标准'),
                 h('span', null, '默认速度')),
-              h('span', { className: 'cg-model-mode-check', 'aria-hidden': true }, !lightning && !superfast && h(Icon, { name: 'check', size: 14 }))),
-            h('button', { className: 'cg-model-mode', type: 'button', role: 'menuitemradio', 'aria-checked': lightning, 'data-on': lightning, 'data-mode': 'fast', disabled: busy || !sessionId, onClick: () => chooseMode('fast') },
+              h('span', { className: 'cg-model-mode-check', 'aria-hidden': true }, turboSynced && !lightning && !superfast && h(Icon, { name: 'check', size: 14 }))),
+            h('button', { className: 'cg-model-mode', type: 'button', role: 'menuitemradio', 'aria-checked': modeFast, 'data-on': modeFast, 'data-mode': 'fast', disabled: busy || !sessionId, onClick: () => chooseMode('fast') },
               h('span', { className: 'cg-model-mode-text' },
                 h('strong', null, '快速'),
                 h('span', null, '至少 1.5× 消耗 甚至更多')),
-              h('span', { className: 'cg-model-mode-check', 'aria-hidden': true }, lightning && h(Icon, { name: 'check', size: 14 }))),
-            h('button', { className: 'cg-model-mode', type: 'button', role: 'menuitemradio', 'aria-checked': superfast, 'data-on': superfast, 'data-mode': 'tree', disabled: busy || !sessionId, onClick: () => chooseMode('tree') },
+              h('span', { className: 'cg-model-mode-check', 'aria-hidden': true }, modeFast && h(Icon, { name: 'check', size: 14 }))),
+            h('button', { className: 'cg-model-mode', type: 'button', role: 'menuitemradio', 'aria-checked': modeTree, 'data-on': modeTree, 'data-mode': 'tree', disabled: busy || !sessionId, onClick: () => chooseMode('tree') },
               h('span', { className: 'cg-model-mode-text' },
                 h('strong', null, '超快'),
                 h('span', null, '至少 2.5× token 消耗 甚至更多')),
-              h('span', { className: 'cg-model-mode-check', 'aria-hidden': true }, superfast && h(Icon, { name: 'check', size: 14 })))))
+              h('span', { className: 'cg-model-mode-check', 'aria-hidden': true }, modeTree && h(Icon, { name: 'check', size: 14 })))))
         : pane === 'effort' ? h('div', { className: 'cg-model-pane', key: 'effort' },
           h('div', { className: 'cg-model-top' },
-            h('button', { className: 'cg-model-zap', type: 'button', 'data-on': lightning || superfast, 'data-mode': superfast ? 'tree' : lightning ? 'fast' : 'off', disabled: busy || !sessionId, 'aria-haspopup': 'menu', 'aria-expanded': pane === 'lightning', 'aria-label': superfast ? '编排模式：超快已开启，点击更换' : lightning ? '编排模式：快速已开启，点击更换' : '编排模式：选择快速或超快', onClick: () => setPane(pane === 'lightning' ? 'effort' : 'lightning') },
-              superfast ? boltGlyph('cg-model-zap-glyph', true, 'gold') : boltGlyph('cg-model-zap-glyph', lightning),
-              h('span', { className: 'cg-model-tooltip', role: 'tooltip' }, superfast ? `超快编排：已开启，每个子代理再开两个孙代理，${treeTokenLabel}` : lightning ? `快速编排：已开启，${tokenLabel}` : `编排模式：快速每轮至少并发 2 个子代理，${tokenLabel}`)),
-            h('button', { className: 'cg-model-summary', type: 'button', disabled: busy, 'aria-label': '更换模型', onClick: () => { setPane('model'); focusPending.current = true; } }, h('strong', { 'aria-live': 'polite', 'data-notice': ultraOn && ultraNotice }, steps.length ? displayLabel : '选择模型'), h('span', { className: 'cg-model-summary-name' }, modelName, h(Icon, { name: 'chevron', size: 11 }))),
+            h('button', { className: 'cg-model-zap', type: 'button', 'data-on': modeFast || modeTree, 'data-mode': !turboSynced ? 'unknown' : modeTree ? 'tree' : modeFast ? 'fast' : 'off', disabled: busy || !sessionId, 'aria-haspopup': 'menu', 'aria-expanded': pane === 'lightning', 'aria-label': !turboSynced ? '编排模式：状态未同步，点击查看' : modeTree ? '编排模式：超快已开启，点击更换' : modeFast ? '编排模式：快速已开启，点击更换' : '编排模式：选择快速或超快', onClick: () => setPane(pane === 'lightning' ? 'effort' : 'lightning') },
+              modeTree ? boltGlyph('cg-model-zap-glyph', true, 'gold') : boltGlyph('cg-model-zap-glyph', modeFast),
+              h('span', { className: 'cg-model-tooltip', role: 'tooltip' }, !turboSynced ? '编排模式：正在读取本会话的状态' : modeTree ? `超快编排：已开启，每个子代理再开两个孙代理，${treeTokenLabel}` : modeFast ? `快速编排：已开启，${tokenLabel}` : `编排模式：快速每轮至少并发 2 个子代理，${tokenLabel}`)),
+            h('button', { className: 'cg-model-summary', type: 'button', disabled: busy, 'aria-label': '更换模型', onClick: () => { setPane('model'); focusPending.current = true; } }, h('strong', { 'aria-live': 'polite', 'data-notice': claimUltra && ultraNotice }, turboFailed ? '未同步' : steps.length ? displayLabel : '选择模型'), h('span', { className: 'cg-model-summary-name' }, modelName, h(Icon, { name: 'chevron', size: 11 }))),
             h('button', { className: 'cg-model-reset', type: 'button', 'aria-label': '恢复默认强度', disabled: busy || !reasoning || !state.current, onClick: reset }, glyph('reset'), h('span', { className: 'cg-model-tooltip', role: 'tooltip' }, '重置为默认')),
             // The burst lives on the row, not inside the bolt: when the knob lands on Ultra the notice hides the
             // three controls — .cg-model-zap gets opacity:0 — and a parent's opacity cannot be undone by any child,
@@ -696,9 +878,16 @@ function registerModelUI(ctx) {
             // The three controls fade out while this stands in their row, so the popover
             // keeps its height and nothing jumps when the notice comes and goes.
             h('div', { className: 'cg-model-ultra-notice', role: 'status', 'aria-live': 'polite' },
-              ultraNotice && ultraOn ? '更快消耗 Token' : '')),
+              ultraNotice && claimUltra ? '更快消耗 Token' : '')),
+          // The one place the surface says out loud that it does not know. It sits where the track
+          // is, reuses two classes that already carry the styling (`cg-model-error` for the red,
+          // `cg-model-choice` for the retry row), and offers the same retry `show()` does — a failed
+          // read must never look like a settled answer.
+          turboFailed && h('div', null,
+            h('p', { className: 'cg-model-error', role: 'alert' }, '未同步：读不到本会话的编排状态，强度与开关可能未生效。'),
+            h('button', { className: 'cg-model-choice', type: 'button', disabled: busy || !sessionId, onClick: retryTurboRead }, '重试读取')),
           steps.length > 0 ? h('div', {
-          className: 'cg-model-slider-shell', ref: meteorShellRef, 'data-max': shownIndex === maxIndex && maxIndex > 0, 'data-ultra': ultraOn, 'data-effort': effortTone, 'data-depth': effortDepth,
+          className: 'cg-model-slider-shell', ref: meteorShellRef, 'data-max': !trackUnknown && shownIndex === maxIndex && maxIndex > 0, 'data-ultra': claimUltra, 'data-unknown': trackUnknown, 'data-effort': effortTone, 'data-depth': effortDepth,
           // Grow the knob only when the pointer is actually over it. The knob cannot receive pointer events
           // itself (`pointer-events: none`, or it would swallow the press and the native range could not be
           // dragged), so the test is geometric: distance from the pointer to the knob's centre against the
@@ -707,14 +896,22 @@ function registerModelUI(ctx) {
           onPointerMove: event => {
             const thumb = thumbRef.current;
             if (!thumb) return;
-            const box = thumb.getBoundingClientRect();
-            const dx = event.clientX - (box.left + box.width / 2);
-            const dy = event.clientY - (box.top + box.height / 2);
-            const over = Math.sqrt(dx * dx + dy * dy) <= box.width / 2 + 2;
-            if (over && thumb.getAttribute('data-over') !== 'true') thumb.setAttribute('data-over', 'true');
-            else if (!over && thumb.getAttribute('data-over') === 'true') thumb.removeAttribute('data-over');
+            // The shell's box is read once per hover gesture and reused: this used to call
+            // `thumb.getBoundingClientRect()` on every pointer sample, which is a forced synchronous layout, and
+            // it landed between React's writes to the knob's position. The centre does not need it — the shell's
+            // box plus the knob's own travel is the same point, and the travel is already in hand.
+            const box = shellRectRef.current || (shellRectRef.current = event.currentTarget.getBoundingClientRect());
+            const alreadyOver = thumb.getAttribute('data-over') === 'true';
+            // The knob is 1.08× while `data-over` holds, and the old test measured that grown box, so leaving the
+            // hit area took 1px more travel than entering it did. Same numbers here, kept on purpose.
+            const radius = alreadyOver ? 12 * 1.08 : 12;
+            const dx = event.clientX - (box.left + 12 + thumbX);
+            const dy = event.clientY - (box.top + 14);
+            const over = Math.sqrt(dx * dx + dy * dy) <= radius + 2;
+            if (over && !alreadyOver) thumb.setAttribute('data-over', 'true');
+            else if (!over && alreadyOver) thumb.removeAttribute('data-over');
           },
-          onPointerLeave: () => thumbRef.current?.removeAttribute('data-over')
+          onPointerLeave: () => { shellRectRef.current = null; thumbRef.current?.removeAttribute('data-over'); }
         },
             // The fill ends where the knob *ends*: `24px + (100% − 24px) × ratio` is the knob's right edge, so
             // the bar reaches the far side of the circle at every tier. The bare `ratio × 100%` stopped short of
@@ -722,13 +919,22 @@ function registerModelUI(ctx) {
             // not being covered by the dot. This form equals `100%` exactly at ratio 1, so the top tier cannot get
             // shorter; the earlier `ratio × (width − 24)` attempt did shorten it, which is what "you just made the
             // purple shorter" was about.
-            h('div', { className: 'cg-model-slider-fill', style: { width: `calc(24px + (100% - 24px) * ${knobRatio})` } }),
-            ultraOn && meteorField(meteorFieldRef),
+            // A track with no known position draws no fill: `knobRatio` is `Math.max(0, ...)`-derived
+            // and would claim the first tier, which is the same lie the knob used to tell.
+            h('div', { className: 'cg-model-slider-fill', style: { width: trackUnknown ? '0px' : `calc(24px + (100% - 24px) * ${knobRatio})` } }),
+            claimUltra && meteorField(meteorFieldRef),
             // A dot states whether the fill has reached it: inside the fill it has to read
-            // against the tier colour, outside it stays a track marker.
-            h('div', { className: 'cg-model-slider-dots', 'aria-hidden': true }, ...steps.map((step, index) => h('span', { key: step.id, 'data-ultra': step.id === '__ultra__', 'data-on': index <= shownIndex }))),
-            h('span', { className: 'cg-model-thumb', 'aria-hidden': true, ref: thumbRef, style: { left: `calc(12px + (100% - 24px) * ${knobRatio})` } }),
-            h('input', { className: 'cg-model-slider', type: 'range', min: 0, max: maxIndex, step: 1, value: shownIndex, disabled: locked || maxIndex < 1, 'aria-label': '推理强度', 'aria-valuetext': label,
+            // against the tier colour, outside it stays a track marker. With no known position no
+            // dot is lit — the bare tick marks stay, so the track still reads as a slider.
+            h('div', { className: 'cg-model-slider-dots', 'aria-hidden': true }, ...steps.map((step, index) => h('span', { key: step.id, 'data-ultra': step.id === '__ultra__', 'data-on': !trackUnknown && index <= shownIndex }))),
+            // Positioned by `translate` rather than `left`: `left` re-runs layout for the slider on every tier
+            // change, while this property is compositor work. The centre stays 12px in from the track's left edge
+            // because the stylesheet's `left: 12px` is cancelled by the knob's `-12px` margin and this travel is
+            // then added to it; the travel itself is the container-unit calc built above, so the browser — not a
+            // measurement — decides it. Not rendered at all while the position is unknown: any place it could
+            // stand would be an assertion, and the pointer test above already tolerates a missing node.
+            !trackUnknown && h('span', { className: 'cg-model-thumb', 'aria-hidden': true, ref: thumbRef, style: { translate: `${knobTravel} 0 0` } }),
+            h('input', { className: 'cg-model-slider', type: 'range', min: 0, max: maxIndex, step: 1, value: shownIndex, disabled: locked || maxIndex < 1, 'aria-label': '推理强度', 'aria-valuetext': trackUnknown ? '未同步' : label,
               // The notice belongs to the move itself, so it fires while the drag is still
               // held — not on release. Release paths (pointerup, keyup, blur) call
               // chooseLevel, and a blur right after a pointerup would announce it twice.
@@ -787,84 +993,32 @@ function registerModelUI(ctx) {
         error && h('p', { className: 'cg-model-error', role: 'alert' }, error),
         state.status === 'error' && h('button', { className: 'cg-model-choice', type: 'button', onClick: () => { setActionError(null); load(); }, disabled: busy }, '重新加载')))
   }
-  // Peak/off-peak badge for the session header row. Registered here because this block already holds the
-  // model directory, which is where the current provider comes from.
-  ctx.inject(['slots', 'modelDirectories'], scope => {
-    function PeakBadge({ sessionId }) {
-      const mode = React.useSyncExternalStore(peakSubscribe, peakModeSnapshot);
-      const [, tick] = React.useState(0);
-      const [peakTip, setPeakTip] = React.useState(false);
-      React.useEffect(() => { const timer = setInterval(() => tick(value => value + 1), 30000); return () => clearInterval(timer); }, []);
-      // The directory is created lazily per session, so cache it (a fresh one on every render would re-fetch the
-      // model list every frame), kick off its load once, and subscribe: a bare getSnapshot() never re-renders
-      // once the projection lands. An unknown provider must not hide the badge — 跟随模型 only hides when we
-      // positively know the current model is not DeepSeek.
-      const directory = React.useMemo(() => {
-        if (typeof sessionId !== 'string' || sessionId.length === 0) return undefined;
-        try {
-          const existing = peakDirectories.get(sessionId);
-          if (existing) return existing;
-          const created = scope.modelDirectories.directoryFor(sessionId);
-          peakDirectories.set(sessionId, created);
-          created.load?.().catch(() => {});
-          return created;
-        } catch { return undefined; }
-      }, [sessionId, scope]);
-      const modelState = React.useSyncExternalStore(
-        React.useCallback(listener => directory ? directory.store.subscribe(listener) : () => {}, [directory]),
-        React.useCallback(() => directory ? directory.store.getSnapshot() : undefined, [directory]),
-      );
-      const provider = modelState?.current?.provider;
-      // First paint runs before the model directory has reported, so the gate would flip the moment it arrives
-      // (visible pop, then it vanishes). Latch the first verdict that actually knows the provider.
-      // 有值就更新、没值就沿用上一次判定：既不会因为目录晚到而闪一下，也不会在换模型后卡住旧结论。
-      if (provider !== undefined) peakVerdict.set(sessionId, peakIsDeepSeek(provider));
-      const verdict = provider !== undefined ? peakIsDeepSeek(provider) : peakVerdict.get(sessionId);
-      if (mode === 'off') return null;
-      if (mode !== 'on' && verdict === false) return null;
-      const now = new Date();
-      const isPeak = peakLocal(now).peak;
-      const next = peakNextSwitch(now);
-      const hint = `${isPeak ? '峰' : '谷'} · 还有 ${peakCountdown(next, now)}转${isPeak ? '谷' : '峰'}`;
-      // A native title tooltip is a white system box with a visible delay, which reads as foreign next to the
-      // harness chrome — so the popover is drawn in-page and toggled on the very first pointer event.
-      return h('span', {
-        className: 'cg-peak-wrap',
-        role: 'status',
-        tabIndex: 0,
-        'aria-label': `峰谷时段：${hint}`,
-        onMouseEnter: () => setPeakTip(true),
-        onMouseLeave: () => setPeakTip(false),
-        onFocus: () => setPeakTip(true),
-        onBlur: () => setPeakTip(false),
-      },
-        h('span', { className: 'cg-peak', 'data-peak': isPeak ? 'peak' : 'offpeak' }, isPeak ? '峰' : '谷'),
-        peakTip && h('div', { className: 'cg-peak-tip', role: 'tooltip' },
-          h('div', { className: 'cg-peak-tip-title' }, isPeak ? '峰时段' : '谷时段'),
-          h('div', { className: 'cg-peak-tip-row' },
-            h('svg', { className: 'cg-peak-tip-icon', viewBox: '0 0 16 16', width: 12, height: 12, 'aria-hidden': true },
-              h('circle', { cx: 8, cy: 8, r: 6.2, fill: 'none', stroke: 'currentColor', strokeWidth: 1.3 }),
-              h('path', { d: 'M8 4.6V8l2.4 1.6', fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round' })),
-            h('span', null, hint))));
-    }
-    scope.slots.inject('conversation.session.header.actions', () => scope.slots.register({ name: 'conversation.session.header.actions', id: 'chatgpt.peak', order: 0, inject: sessionId => ({ sessionId }) }, PeakBadge));
-  });
-
-  ctx.inject(['slots', 'modelDirectories', 'sessions', 'remote', 'remote.session'], scope => {
-    const models = scope.modelDirectories;
-    const sessions = scope.sessions;
-    scope.slots.inject('conversation.input.model', () => scope.slots.register({
-      name: 'conversation.input.model',
-      priority: -10,
-      inject: sessionId => {
-        const directory = models.directoryFor(sessionId);
-        const available = sessions.subagentAddress(sessionId) === undefined;
-        return { available, directory: directory.store, load: () => { if (available) directory.load().catch(() => {}); }, select: selection => available ? directory.select(selection) : Promise.resolve(undefined) };
-      }
-    }, ModelControl));
+  // `conversation.input.model` is a single slot: registering it twice throws, and that throw happens
+  // inside the fiber rather than at the call site, so it reads as "the panel vanished" instead of "you
+  // mounted twice". The flag is reset by the disposer, so a reload re-registers as a fresh page would.
+  if (modelUiRegistered.has(ctx)) return
+  modelUiRegistered.add(ctx)
+  ctx.effect(() => {
+    ctx.inject(['slots', 'modelDirectories', 'sessions', 'remote', 'remote.session'], scope => {
+      const models = scope.modelDirectories;
+      const sessions = scope.sessions;
+      scope.slots.inject('conversation.input.model', () => scope.slots.register({
+        name: 'conversation.input.model',
+        priority: -10,
+        inject: sessionId => {
+          const directory = models.directoryFor(sessionId);
+          const available = sessions.subagentAddress(sessionId) === undefined;
+          return { available, directory: directory.store, load: () => { if (available) directory.load().catch(() => {}); }, select: selection => available ? directory.select(selection) : Promise.resolve(undefined) };
+        }
+      }, ModelControl));
+    });
+    return () => { modelUiRegistered.delete(ctx); };
   });
 }
 
 // Exported so the built artifact can be mounted by a test without running the whole
 // client surface; the bundle's own `apply` calls it exactly as a plugin would.
+// `ModelControl` stays inside `registerModelUI` (it closes over `ctx`, the tier table and the
+// glyph builders), so it is not exported — the same shape as dsh-codex-ui, whose bundle exports only
+// `registerModelUI`. `menuPlacement` / `runningTailOf` are client.js bindings and do not live here.
 export { registerModelUI };
