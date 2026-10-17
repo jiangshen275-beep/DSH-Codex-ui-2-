@@ -14,7 +14,7 @@
 - **自定义人设提示词**：人设不再硬编码成两个 id，`$DSH_HOME/personas/` 下每个 `.md` 就是一套，文件名即 id（大小写不敏感，重名跳过并 warn）；frontmatter 支持 `name` / `description` / `order` / `enabled` 与可选的 `temperature` / `top_p` / `max_tokens`，闭合之后的正文原样注入、不解析 Markdown 结构；没有 `description` 时取正文首个非空行截 40 字。面板内可新建 / 编辑 / 删除，写入走临时文件再 rename，崩在中途不会留下半个人设。内置 `DeepSeek` 是「什么都不注入」的哨兵，不是文件、改不了也删不掉；`codex` 必须始终可解析，文件缺失时从 `prompts/codex.txt` 自动重种，即使被 `enabled: false` 也仍解析出 Codex 行。坏文件只 warn 跳过，未闭合的 frontmatter 整篇按正文处理，非法采样值按「未设置」丢弃而不是夹到邻近值。
 - **Ultra 流星**：只在该档显示，其余档整层 `display: none`。十一条渐变条各带一个亮点头，全部使用负延迟，所以首帧就是满场、不会花两秒渐次出现；单颗 1.5–2.6s、`linear infinite`，横向位移由组件实测轨道宽度后写入，`--cg-meteor-travel: 420px` 只是测量完成前的回退值。`prefers-reduced-motion` 下关掉动画并把不透明度降到 .45。裁剪下放到流星层，滑条外壳不再 `overflow: hidden`——拖动时放大到 1.08× 的旋钮因此不再被切边；容器上的 `mix-blend-mode` 已移除，它让这一层每帧都要与背景重新合成、掉出 GPU 快路径，亮度改由尾部渐变 alpha 与光点光晕补回，深色主题单独补偿。
 - **闪电编排改为条件触发**：契约原先每轮强制两路、且声明无豁免，本版改成四条客观条件——答案依赖本机没有的事实、改动或判断跨两处以上、两个各自能翻盘的未知、明确要求多角度；四条都不成立时单路做完，并须在回答里点名哪条为假。`lightningNudge` 的每轮文案改成同一组条件与同一句自检口径。原因：强制期实测出的是仪式性派发，而纯文本豁免又会被判成「看起来简单」——把判断改成可外部核对的条件，是这两端之间唯一站得住的位置。
-- **模型面板另发独立包**：`dsh-codex-ui-reasoning` 是同一份面板的独立精简版，给只想要模型选择与推理强度条、不要整套 Codex 界面的人单独安装；它自带样式表、根属性 `data-chatgpt-ui` 与注入层，可独立工作。两者都向单种类槽位 `conversation.input.model`（`priority: -10`）注册，同装必有一个被拒，所以是二选一，不要同装。
+- **模型面板另发独立包**：`dsh-codex-ui-reasoning` 是同一份面板的独立精简版，给只想要模型选择与推理强度条、不要整套 Codex 界面的人单独安装；它自带样式表、根属性 `data-chatgpt-ui` 与注入层，`inject` 里不列 `personas` / `prompt-modes`，可完全独立工作。两者都向单种类槽位 `conversation.input.model`（`priority: -10`）注册，宿主对同优先级的第二次注册直接抛错；它们还各自注册自己的 effort 路由、写同一个 `storages/codex-ui-effort.json`，后写的整份覆盖先写的。所以是二选一，不要同装。
 
 ### 修正
 - **注入读实时值，不再吃注册快照**（`src/turbo.js` 的 `createEffortReader`）：拨动开关后下一步就用新状态；此前一直用进程启动那一刻的快照。
