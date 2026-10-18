@@ -6,7 +6,7 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 
 > **本包是完整版，同时我新增了子项目，单独的滑动推理强度条，输入框右下角那一整块（模型选择器 + 推理强度条 + 流星）都在里面。** 这独立插件 `dsh-codex-ui-reasoning`，给不想要整套 Codex 界面、只想要那个模型选择与强度条的人单独使用：它自带样式表、根属性与注入层，只装它也能工作。两者面板是同一份代码，都注册 `conversation.input.model` 这个**单一类槽位**（`priority: -10`），同时启用必有一个注册被拒，所以是二选一，不要同装。早期拆包版曾声明「必须一起装」，该叙述已作废——本仓库主干已把面板合回主包，时间线见 **[MIGRATION-2.0.zh.md](MIGRATION-2.0.zh.md)**。
 >
-> **This package is the complete one: the model selector, the reasoning-effort slider and the meteor effect all ship inside it — nothing else has to be installed.** `dsh-codex-ui-reasoning` is a separate, optional plugin for people who do not want the whole Codex skin but do want that picker and slider; it carries its own stylesheet, root attribute and injection layer, so it works on its own. Both packages mount the *same* panel code into the single-kind `conversation.input.model` slot at `priority: -10`, so enabling both means one registration is refused: pick one, do not install both. The 2.0.0 note that called the split breaking and required the companion is void — the main package has carried the full UI again since 2.0.1 / 2.0.2; see [MIGRATION-2.0.zh.md](MIGRATION-2.0.zh.md) for the timeline.
+> **This package is the complete one: the model selector, the reasoning-effort slider and the meteor effect all ship inside it — nothing else has to be installed.** `dsh-codex-ui-reasoning` is a separate, optional plugin for people who do not want the whole Codex skin but do want that picker and slider; it carries its own stylesheet, root attribute and injection layer, so it works on its own. Both packages mount the *same* panel code into the single-kind `conversation.input.model` slot at `priority: -10`, so enabling both means one registration is refused: pick one, do not install both. The 2.0.0 note that called the split breaking and required the companion is void — the main package has carried the full UI again since 2.0.1 / 2.0.0; see [MIGRATION-2.0.zh.md](MIGRATION-2.0.zh.md) for the timeline.
 
 ![界面预览：新对话页](assets/screenshot-1.0.0.png)
 
@@ -20,7 +20,7 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 - **编排契约**：快速 / 超快已开启的会话里，委派按四条客观条件触发——答案依赖本机没有的事实、改动或判断跨两处以上、两个各自能翻盘的未知、明确要求多角度；四条都不成立时单路做完，并须点名哪条为假。每轮 step 1–3 各注入一条带轮次号的短提醒（step 4 起不再注入）；超快模式下每个**一级**子代理再开两个孙代理，**二级即止**。
 - **界面与其它**：浅色 / 深色 / 窄窗口适配；超快模式滑条四段暖色递深（minimal·low / high / xhigh·max / ultra 渐变）；努力滑条旋钮 24×24 正圆（常态带投影，超快 + Ultra 态加描边与发光）；字体与图标随包分发（字体以 base64 内联进 `lib/client.js`）；设置菜单显示官方 DeepSeek API 余额（服务端缓存 30 秒，只有校验过的余额字段回到前端），并带刷新 / 控制台 / 设置 / 插件 / 帮助入口。
 
-**当前版本（2.0.2）**：产物 `dsh-codex-ui-2.0.2.tgz`（`npm pack` 生成，不入库）；2.0.1 / 2.0.2 仅为版本号调整（移除 `peerDependencies` 声明），功能与 2.0.0 相同；1.0.0 与 1.1.0 的历史要点见 [CHANGELOG.md](CHANGELOG.md)。界面类改动刷新页面即可，提示词契约类需重启 DSH。
+**当前版本（2.0.0）**：产物 `dsh-codex-ui-2.0.0.tgz`（`npm pack` 生成，不入库）；2.0.1 仅为版本号调整（移除 `peerDependencies` 声明），该调整已包含在 2.0.0 中；1.0.0 与 1.1.0 的历史要点见 [CHANGELOG.md](CHANGELOG.md)。界面类改动刷新页面即可，提示词契约类需重启 DSH。
 
 ## 安装
 
@@ -28,16 +28,16 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 
 **A. 本地 tarball（不依赖 registry）**
 
-拿到 `dsh-codex-ui-2.0.2.tgz` 后，在 DSH **插件 → 添加插件**里填该文件的绝对路径，或：
+拿到 `dsh-codex-ui-2.0.0.tgz` 后，在 DSH **插件 → 添加插件**里填该文件的绝对路径，或：
 
 ```powershell
-dsh plugin --profile <profile> add 'C:/path/dsh-codex-ui-2.0.2.tgz'
+dsh plugin --profile <profile> add 'C:/path/dsh-codex-ui-2.0.0.tgz'
 ```
 
 **B. npm**
 
 ```powershell
-dsh plugin --profile <profile> add dsh-codex-ui@2.0.2
+dsh plugin --profile <profile> add dsh-codex-ui@2.0.0
 ```
 
 > ⚠️ **这个包目前还没有发布到 npm**（公共 registry 上会返回 404）——现在执行上面这条会失败，首次安装请用上面的 A 或 C 方式。若你打算发布到 npm，这条命令在发布满 24 小时后即可用。

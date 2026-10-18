@@ -18,7 +18,7 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 - **编排契约**：快速 / 超快已开启的会话里，委派按四条客观条件触发——答案依赖本机没有的事实、改动或判断跨两处以上、两个各自能翻盘的未知、明确要求多角度；四条都不成立时单路做完，并须点名哪条为假。每轮 step 1–3 各注入一条带轮次号的短提醒（step 4 起不再注入）；超快模式下每个**一级**子代理再开两个孙代理，**二级即止**。
 - **界面与其它**：浅色 / 深色 / 窄窗口适配；超快模式滑条四段暖色递深（minimal·low / high / xhigh·max / ultra 渐变）；努力滑条旋钮 24×24 正圆（常态带投影，超快 + Ultra 态加描边与发光）；字体与图标随包分发（字体以 base64 内联进 `lib/client.js`）；设置菜单显示官方 DeepSeek API 余额（服务端缓存 30 秒，只有校验过的余额字段回到前端），并带刷新 / 控制台 / 设置 / 插件 / 帮助入口。
 
-**当前版本（2.0.2）**：产物 `dsh-codex-ui-2.0.2.tgz`（`npm pack` 生成，不入库）；2.0.1 / 2.0.2 仅为版本号调整（移除 `peerDependencies` 声明），功能与 2.0.0 相同；1.0.0 与 1.1.0 的历史要点见 [CHANGELOG.md](CHANGELOG.md)。界面类改动刷新页面即可，提示词契约类需重启 DSH。
+**当前版本（2.0.0）**：产物 `dsh-codex-ui-2.0.0.tgz`（`npm pack` 生成，不入库）；2.0.1 仅为版本号调整（移除 `peerDependencies` 声明），该调整已包含在 2.0.0 中；1.0.0 与 1.1.0 的历史要点见 [CHANGELOG.md](CHANGELOG.md)。界面类改动刷新页面即可，提示词契约类需重启 DSH。
 
 ## 新对话页：回复风格、标题与图标
 
@@ -43,16 +43,16 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 
 **A. 本地 tarball（不依赖 registry，最快）**
 
-拿到 `dsh-codex-ui-2.0.2.tgz` 后，在 DSH **插件 → 添加插件**里填该文件的绝对路径，或：
+拿到 `dsh-codex-ui-2.0.0.tgz` 后，在 DSH **插件 → 添加插件**里填该文件的绝对路径，或：
 
 ```powershell
-dsh plugin --profile <profile名称> add 'C:/路径/dsh-codex-ui-2.0.2.tgz'
+dsh plugin --profile <profile名称> add 'C:/路径/dsh-codex-ui-2.0.0.tgz'
 ```
 
 **B. npm**
 
 ```powershell
-dsh plugin --profile <profile名称> add dsh-codex-ui@2.0.2
+dsh plugin --profile <profile名称> add dsh-codex-ui@2.0.0
 ```
 
 > ⚠️ **这个包目前还没有发布到 npm**（公共 registry 上会返回 404）——现在执行上面这条会失败，首次安装请用 A 或 C 方式。若你打算发布到 npm，这条命令在发布满 24 小时后即可用。

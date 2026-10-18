@@ -1,6 +1,6 @@
-# 从 1.1.0 升到 2.0.2
+# 从 1.1.0 升到 2.0.0
 
-> **前提已变（2026-10-18 更正）。** 本文描述的是 2.0.2 那次发布时的拆包态，与当前主干不一致：主包后来把整套模型面板合了回来（`src/client.js:600` 无条件调用 `registerModelUI(ctx)`，`src/style.css` 仍有 365 行 `.cg-model-*`、596 处），而 `dsh-codex-ui-reasoning` 也已自带样式表、根属性 `data-chatgpt-ui` 与整套注入层，可以单独安装。因此下面「主包不再注册 `conversation.input.model`」「主包单独装会缺块」「必须一起装」「要给副包配 `promptInjection: false`」这几条都不再成立。现行关系是：**主包完整；副包是给只需要强度条、不想要整套 Codex 界面的人准备的可选独立件；两者都向单种类槽位 `conversation.input.model` 注册，同装必有一个被拒，二选一。** 本文其余部分保留为历史的升级与回滚记录，不要照它安装。
+> **前提已变（2026-10-18 更正）。** 本文描述的是 2.0.0 那次发布时的拆包态，与当前主干不一致：主包后来把整套模型面板合了回来（`src/client.js:600` 无条件调用 `registerModelUI(ctx)`，`src/style.css` 仍有 365 行 `.cg-model-*`、596 处），而 `dsh-codex-ui-reasoning` 也已自带样式表、根属性 `data-chatgpt-ui` 与整套注入层，可以单独安装。因此下面「主包不再注册 `conversation.input.model`」「主包单独装会缺块」「必须一起装」「要给副包配 `promptInjection: false`」这几条都不再成立。现行关系是：**主包完整；副包是给只需要强度条、不想要整套 Codex 界面的人准备的可选独立件；两者都向单种类槽位 `conversation.input.model` 注册，同装必有一个被拒，二选一。** 本文其余部分保留为历史的升级与回滚记录，不要照它安装。
 
 ## 一句话
 
@@ -8,7 +8,7 @@
 
 ## 升级后必须做的事
 
-**主包单独装会缺块。** 2.0.2 的主包：
+**主包单独装会缺块。** 2.0.0 的主包：
 
 - 不注册 `conversation.input.model`（`src/model-ui.js` 删掉 13 行注册块）；
 - `src/style.css` 里已无 `.cg-model-*` 选择器（79 条随面板搬走，文件 **148,820 → 71,360 字节**）；
@@ -62,7 +62,7 @@
 
 ## 对等依赖声明（`peerDependencies`）已整个删除
 
-原声明是 `"@deepseek-ai/dsh": "0.2.0-rc.2"`（精确版，`peerDependenciesMeta` 里标 `optional: true`）。2.0.1 / 2.0.2 把它删掉了：`package.json` 里现在既没有 `peerDependencies`，也没有 `peerDependenciesMeta`。
+原声明是 `"@deepseek-ai/dsh": "0.2.0-rc.2"`（精确版，`peerDependenciesMeta` 里标 `optional: true`）。2.0.1 / 2.0.0 把它删掉了：`package.json` 里现在既没有 `peerDependencies`，也没有 `peerDependenciesMeta`。
 
 删的原因不是「声明无效」，而是**它有效，而且是一道硬门槛**：DSH 的兼容门只读 `peerDependencies` 字段，用 `semver.satisfies(runtimeVersion, requirement, { includePrerelease: true })` 判版本，并且**不读 `peerDependenciesMeta`** —— 所以标 `optional: true` 也不免除拦截。写死 `0.2.0-rc.2` 的实际后果是别的 DSH 版本一律装不上，只能逐个 `allow-version` 精确豁免：1.1.0 那版装在 `dsh 0.2.1-alpha.3` 上就必须用 `--accept-risk` 豁免（见 [CHANGELOG.md](CHANGELOG.md) 的 `1.1.0+0.2.1-alpha.3` 条）。
 
@@ -79,7 +79,7 @@ dsh plugin --profile <profile> add 'C:/路径/dsh-codex-ui-1.1.0.tgz'
 
 再把 profile `cordis.patch.yml` 里那段 `codex-reasoning-ui` 删掉。留着也无害：包已卸载，这一行匹配不到模块。
 
-数据侧有一件事必须做。1.1.0 只认 `$DSH_HOME/storages/codex-ui-turbo.json` 这一个文件；2.0.2 已经把这份记录拆成 `codex-ui-persona.json` + `codex-ui-effort.json`，并把原文件改名为 `codex-ui-turbo.json.migrated`（重命名，不删数据）。不改名回去，1.1.0 会当成全新安装，三档开关全部回到未开启：
+数据侧有一件事必须做。1.1.0 只认 `$DSH_HOME/storages/codex-ui-turbo.json` 这一个文件；2.0.0 已经把这份记录拆成 `codex-ui-persona.json` + `codex-ui-effort.json`，并把原文件改名为 `codex-ui-turbo.json.migrated`（重命名，不删数据）。不改名回去，1.1.0 会当成全新安装，三档开关全部回到未开启：
 
 ```powershell
 Rename-Item "$env:DSH_HOME/storages/codex-ui-turbo.json.migrated" "codex-ui-turbo.json"

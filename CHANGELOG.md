@@ -1,4 +1,4 @@
-## 2.0.1 / 2.0.2 — 仅版本号调整
+## 2.0.1（未发布，内容已并入 2.0.0）— 仅版本号调整
 
 - 移除 `peerDependencies` 声明及其空的 `peerDependenciesMeta`。
   原因不是声明无效，而是它有效、且是一道硬门槛：DSH 的兼容门只读 `peerDependencies`、按 `includePrerelease` 判 semver，
