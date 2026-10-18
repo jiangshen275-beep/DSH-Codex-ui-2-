@@ -3583,4 +3583,68 @@ html.cg-settling.cg-settling.cg-settling *::after {
 html[data-chatgpt-ui] .markdown pre,
 html[data-chatgpt-ui] .compact pre {
   --shiki-foreground: var(--cg-text, #ececec);
+}/* Skill 面板：行结构与开关数值照宿主插件页——dsh-client-ui-plugin-manager 的 .cardHead
+   （padding 8 / gap 14 / 行高 65.6 含 48px 图标）与 primitives 的 Switch.module.css
+   （36×20、圆点 16、translateX(16)、padding 2）。颜色全部走 --dsw-alias-*，不写死。
+   这里没有 48px 图标，所以行高比宿主那页矮，其余数值一致。 */
+.cg-skills { padding: 28px 20px; overflow-y: auto; }
+.cg-skill-content { max-width: 880px; margin: 0 auto; }
+.cg-skill-list { display: flex; flex-direction: column; gap: 2px; margin: 16px 0 0; padding: 0; list-style: none; }
+.cg-skill-row { display: flex; align-items: center; gap: 14px; padding: 8px; border-radius: 10px; }
+.cg-skill-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, .05)); }
+.cg-skill-text { min-width: 0; flex: 1 1 auto; }
+.cg-skill-text strong {
+  display: block; font-size: 14px; font-weight: 500; line-height: 20px;
+  color: var(--dsw-alias-label-primary, #ececec);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.cg-skill-text p {
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+  margin: 0; font-size: 13px; line-height: 18px; color: var(--dsw-alias-label-tertiary, #adb2b8);
+}
+.cg-switch {
+  flex: 0 0 auto; position: relative; box-sizing: border-box;
+  width: 36px; height: 20px; padding: 2px; border: 0; border-radius: 999px;
+  background: var(--dsw-alias-border-l3, rgba(255, 255, 255, .16));
+  cursor: pointer; transition: background .12s ease;
+}
+.cg-switch-on { background: var(--dsw-alias-brand-primary, #f9fafb); }
+.cg-switch-knob {
+  display: block; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--dsw-alias-switch-thumb, #adb2b8);
+  transition: transform .12s ease, background .12s ease;
+}
+.cg-switch-on .cg-switch-knob {
+  transform: translateX(16px);
+  background: var(--dsw-alias-label-primary-foreground, #0f1115);
+}
+/* 展开的详情区：路径用等宽字、可换行；字段名灰、值白。 */
+.cg-skill-item { display: flex; flex-direction: column; }
+.cg-skill-row-open { background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, .06)); }
+.cg-skill-detail {
+  display: flex; flex-direction: column; gap: 10px;
+  margin: 2px 8px 10px; padding: 12px 14px;
+  border-radius: 10px; background: rgba(255, 255, 255, .04);
+}
+.cg-skill-field { display: flex; flex-direction: column; gap: 3px; }
+.cg-skill-field > span {
+  font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #adb2b8);
+}
+.cg-skill-field > p, .cg-skill-field > code {
+  margin: 0; font-size: 13px; line-height: 19px;
+  color: var(--dsw-alias-label-primary, #ececec);
+  white-space: pre-wrap; word-break: break-word;
+}
+.cg-skill-field > code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px; padding: 4px 8px; border-radius: 6px;
+  background: rgba(0, 0, 0, .28);
+}
+
+/* 第五个 rail 按钮（技能）的图标单独收小：external 那个方框+箭头在 20px 下视觉偏重，
+   和旁边几个线性图标不在一个重量上。用 aria-label 定位，不动其它 rail 按钮。 */
+/* 实测五个按钮的图标中心都在 24px（delta 全 0），几何上是对齐的；偏的是 external 这个图形本身：
+   方框在左下、箭头在右上，视觉重心落在左半，所以在同样居中的情况下看着往左歪。
+   用 margin-left 把整枚图形右推 1.5px 校正视觉重心——不用 translateX，因为 hover 的 scale(1.2) 也走 transform。 */
+.cg-rail > .cg-rail-item[aria-label="技能"] svg { width: 17px; height: 17px; margin-left: 1.5px; }
+

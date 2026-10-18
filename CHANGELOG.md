@@ -1,3 +1,25 @@
+## 2.1.0 — 技能面板与三处宿主行为的修正
+
+### 新功能
+
+- **技能面板**：侧栏新增第五个入口「技能」，向单种类槽位 `main` 以 `key: 'cg-skills'`、`priority: 1` 注册，与既有的 `cg-schedules` 并存（同优先级的第二次注册会被宿主静默拒掉，所以必须错开）。列表来自 `ctx.remote.skills.list({ sessionId })`，会话 id 依次取 `ctx.uiSession.adapter.current.getSnapshot().key`、`retainedBy.mainView > 0` 的行、`ids` 末位——`ctx.sessions` 上没有 `current`，直接读它恒为 `undefined`，会让 `skills/list` 收到空路径并抛 `SessionQueryError`。行结构照宿主插件页的 `.cardHead`：`padding: 8px`、`gap: 14px`、列表 `gap: 2px`、无分隔线；开关照 primitives 的 `Switch.module.css`：`36×20`、圆点 `16`、`translateX(16)`、`padding: 2px`，颜色全部走 `--dsw-alias-*`。点行展开详情，显示 `path`（宿主没给时显示占位）、`modelInvocable`、`whenToUse` 与完整 `description`；开关自己 `stopPropagation`，点它不会连带展开；整行带 `role="button"` / `aria-expanded`，支持 Enter 与 Space。展开状态只在内存，刷新后收起。
+- **技能开关是本地偏好，不写宿主**：宿主只提供 `#skills/list` 一个技能远程方法，`SkillEntry` 的五个字段全是 `readonly`，没有 `enabled`，也没有可写的设置命名空间。开关只写 `localStorage['cg-skill-disabled']`，仅影响本面板的显示，不改技能文件、不改下一次扫描结果。
+
+### 修正
+
+- **「新聊天」不再复用一个空会话**：宿主的 `uiWorkspace.startSession()` 会经 `connectWorkspace` → `reuseOrCreateBlank`（`dsh-client-ui-workspace/lib/client.js:789`）先找同工作区里 `blank: true` 的会话直接返回，于是已经有一个空会话时点「新聊天」只是跳过去。改为先调 `ctx.sessions.create({ workspaceId })` 拿到新 id，再用 `uiWorkspace.replaceMain(sessionId, signal, 'reveal')` 挂到主视图；创建失败才退回 `startSession()`，并在 console 留一条 `[dsh-codex-ui] create session failed` 供排查。`replaceMain` 是宿主内部方法而非公开 API，签名变化会静默走回退分支。
+- **品牌区人设名首屏就是当前人设**：原先拉列表的 effect 依赖 `brandMenu`，只有菜单打开才拉；首屏 `personaState.list` 为 `null`，于是 `personaList` 落到兜底列表 `FALLBACK_PERSONAS`，显示成第一项 `DeepSeek`，点开菜单才变成真实选择。补一个挂载时也拉一次的 effect，两个 effect 分工：挂载那次管首屏正确，菜单那次管人设改动后刷新。
+- **侧栏分组「最近」改为「会话」**：即宿主 `recent` 分组的中文标签。
+
+### 行为变更
+
+- **闪电 / 超快编排回到强制两路**：`src/turbo-policy.js` 第 1 条从「四条条件触发」改回 `MANDATORY, on every turn, with no exemption`，`lightningNudge` 的每轮文案同步改成同一口径，`SUPERFAST_POLICY` 第 2 条补上「No exemption exists」。原因：条件式写法在实战里退化成「看起来简单」的自我判断，而这正是上一版写条件时想避免的那一端；强制式至少可外部核对（数本轮派了几个子代理）。
+- **`precedence` / `factCheck` / `mandate` 跟随「Codex 提示词注入」总开关**：这三段此前无条件注入，把 Ultra、闪电、Codex 提示词全关掉、只留中文思考时它们照样进提示词，界面上看就是「没开对应功能却仍在注入」。现在由 `injection.codexPrompt !== false` 统管。
+
+### 兼容性
+
+- 对照 DSH **0.2.0-rc.2 / 0.2.1-rc.2**；技能面板依赖 `ctx.remote.skills` 与 `--dsw-alias-*` 变量，换版本需要重新校验。
+- `package.json` 与 `package-lock.json` 版本号同步升至 `2.1.0`。
 ## 2.0.1（未发布，内容已并入 2.0.0）— 仅版本号调整
 
 - 移除 `peerDependencies` 声明及其空的 `peerDependenciesMeta`。

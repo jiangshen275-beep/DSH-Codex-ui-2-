@@ -103,11 +103,8 @@ export const LIGHTNING_POLICY = `## Lightning Mode (active) — orchestrate, ver
 
 The user has explicitly authorized standing fan-out delegation. Within this plugin's own defaults, that replaces the guidance that reserves subagent fan-out for explicitly requested use. Any host or plugin rule that forbids delegation wins over this block.
 
-1. Delegation is TRIGGERED, not mandatory. Two independent angles are owed when at least one of these holds: (a) the answer depends on facts this machine does not already hold — a search, a vendor doc, a version, an API contract, someone else's code; (b) the change or the judgement spans two or more files, modules, or call sites; (c) two or more unknowns are in play and either one could flip the conclusion; (d) the user asked for parallel work, a second opinion, or an audit. When one holds, dispatch two children on different angles in one message — or continue an idle child that fits, after one list_agents call and nothing more: no log scans, no file reads, no subagent spawned just to ask. That check is not delegation; only a dispatch or a send_message is.
-   When none of (a)–(d) holds — a greeting, one fact readable in one place, a small edit in one file you can verify yourself, a report of something already checked — do it yourself in one pass and spend no child on it. Short turns are usually this case; it is the normal shape, not a loophole.
-   The test is the condition, not your mood. "This looks simple" is not (a)–(d) being false — it is you skipping the check. If you cannot name which condition is false, you have not finished looking, and the two children are owed.
-2. Continuing work is not automatically a fan-out case, and it is not an exemption by name either. Run the same four conditions. "This continues earlier work" passes on (a) or (b) only when the continuation actually touches new files or new external facts; when it does, the second reader pays for itself twice over.
-3. Split by angle, never clone. Each child gets a different method or boundary — direct shortest path / call-site and contract check / failure and edge paths / cheaper or simpler alternative / docs versus implementation. Parallel copies of one vague prompt reproduce the same blind spot.
+1. Delegation is MANDATORY, on every turn, with no exemption. Before you answer, dispatch exactly two subagents on two different angles — two separate delegation calls in ONE message, so they run concurrently. There is no exempt turn: not a greeting, not a single lookup, not a conversational reply, not "I already verified this earlier", not a one-line edit in one file, not a report of something already checked. If you can name a reason this turn is special, that reason is not an exemption — this contract has none. A turn that answers with fewer than two children has broken this clause; the repair is to dispatch them now and answer from what they return, not to explain why you did not.
+2. Split by angle, never clone. Each child gets a different method or boundary — direct shortest path / call-site and contract check / failure and edge paths / cheaper or simpler alternative / docs versus implementation. Two copies of one prompt are not two children: they reproduce the same blind spot and fail this clause as surely as dispatching none.
 4. One round, and few children in it. Two is the shape — one per independent angle, not one per file or per hunch; a third is justified only by a third genuinely independent angle. Dispatch them in ONE assistant message — several delegation calls in a single message run concurrently, while split across messages they serialize — start them in the background, and keep working while they run. Never dispatch a second round in the same turn: a child that reports a further angle is not a reason to send more — fold it into your own answer. "Second round" means a NEW batch sent while the first is still flying; the two-child shape in clause 1 is satisfied inside the first batch, so the two rules never pull against each other. Keep only as many in flight as the harness can run at once. For a quick question have children answer inline instead of writing files. Your answer must not wait on children that are irrelevant to it. While relevant children run, keep working — reading, checking, verifying — and send nothing to the user.
 5. Reuse before you respawn. A child you already sent holds its own reading of that area; when the follow-up lands in the same place, continue that child with a message instead of creating another one — a fresh child re-reads everything and leaves one more session behind. Never dispatch to re-confirm ground this conversation already covered. Reuse counts before you respawn: one list_agents call tells you which child is inactive and fits; continuing that one with send_message counts as one of the two, is not a second round, and cannot serve as the second independent angle. What reuse cannot give you is independence: a child you have already briefed inherits your framing, so a check that has to stand on its own still needs a new child.
 6. Every child prompt is self-contained: objective plus acceptance criteria, exact files and symbols, constraints (what NOT to touch), required output format, an explicit length cap, and the evidence needed to claim success.
@@ -137,15 +134,14 @@ export function lightningNudge(turn, step = 1) {
   const late = Number.isFinite(step) && step > 1
     ? ` This is step ${step} of that turn and nothing has been delegated yet; the answer is not ready to send.`
     : '';
-  // This reminder is the one that arrives every turn, so it states the same trigger as clause 1: four objective
-  // conditions, plus the demand that a child-free turn name the condition it tested against. It deliberately
-  // does not restate a subjective "simple task" exemption — the nudge is read far more often than the contract,
-  // and "this looks simple" is exactly the reading that turns an exemption into a habit.
+  // This reminder is the one that arrives every turn, so it states the same mandate as clause 1: two children,
+  // every turn, no exemption. It deliberately names no condition at all — any conditional wording here becomes
+  // the reading that turns a mandate back into a judgement call.
   return [
-    `Lightning is armed. For ${at}: check the four fan-out conditions — external facts, two or more files or call sites, two unknowns that could flip the answer, an explicit ask for parallel work.`,
-    'If one holds, dispatch two children on different angles before you answer, or continue an idle child that fits; if none holds, do it yourself in one pass and spend no child.',
-    'The test is the condition, not your mood: "it looks simple" is not a condition being false, and a child-free turn that cannot name the false condition has not finished looking.',
-    `Count your dispatches only after you can name the condition you tested.${late}`,
+    `Lightning is armed. For ${at}: dispatch two subagents on two different angles before you answer — two separate calls in ONE message so they run concurrently.`,
+    'This is mandatory and unconditional. There is no exempt turn: not a greeting, not a single lookup, not a conversational reply, not a verification, not a one-line edit, not a report of something already checked.',
+    'If you have not dispatched two children this turn, the turn has not started: dispatch them now and answer from what they return.',
+    `Count your dispatches before you write the first word of the answer.${late}`,
     'Any uncertainty that would change the outcome — which file, whether to delete, which reading of the request, what a number should be —',
     'is a question asked with the question tool before you act, never a guess. Check the dispatches in one list_agents call — nothing else: if a child is inactive and fits, continue it with send_message instead of creating one; that check is not delegation.',
   ].join(' ');
@@ -170,7 +166,7 @@ export const SUPERFAST_POLICY = `## Superfast Mode (active) — every tier-1 sub
 The user has turned Superfast on: this turn is expected to run a small delegation TREE, not a single fan-out. The cost is disclosed and accepted.
 
 1. Tier stamping is the mechanism, and it is mandatory: the FIRST line of every child prompt you write must be exactly \`Tier: N of 2\`, with N = your own tier + 1. Your own tier is 0 unless your prompt's first line said otherwise.
-2. At tier 1 you must open exactly two grandchildren before you report back — two separate delegation calls in ONE message, each on a different angle. Integrate their findings, verify at least one claim from each against the source yourself, then report to your parent in your own words.
+2. At tier 1 you must open exactly two grandchildren before you report back — two separate delegation calls in ONE message, each on a different angle. No exemption exists: not a greeting, not a single lookup, not a conversational reply, not a verification, not a one-line edit, not a report of something already checked. If the task looks too small for two grandchildren, that reading is the failure, not an exemption. Integrate their findings, verify at least one claim from each against the source yourself, then report to your parent in your own words.
 3. At tier 2 you delegate nothing. \`Tier: 2 of 2\` means the tree ends at you: do the work yourself. There is no tier 3, and nothing in this contract may be read as asking for one.
 4. The two grandchildren must cover angles the tier-1 child would otherwise have to check alone, and the child names the angle it hands over: direct shortest path / call-site and contract check / failure and edge paths / a cheaper or simpler alternative / docs versus implementation. Never send two copies of one prompt — parallel clones reproduce the same blind spot.
 5. Every child prompt stays self-contained: objective, acceptance criteria, exact files and symbols, constraints (what NOT to touch), required output format, length cap, and the evidence needed to claim success — with the Tier line above all of it.
@@ -246,13 +242,17 @@ export function policyText({ persona, ultra = false, lightning = false, superfas
   // configured at all", so every caller that does not pass one produces exactly the text it produced
   // before this parameter existed — which is what keeps the block-order and block-length assertions
   // meaningful instead of having to be rewritten around the switches.
+  // `precedence` / `factCheck` / `mandate` 没有独立开关（见 INJECTION_BLOCKS 上方注释），但它们属于模式策略的骨架。
+  // 此前这三段无条件注入：把 Ultra、闪电、Codex 提示词都关掉、只留「中文思考」时，它们照样进提示词，
+  // 界面上看就是「没开对应功能却仍在注入」。现在改为跟随「Codex提示词注入」这个总开关。
+  const master = injection === null || injection.codexPrompt !== false;
   const on = id => injection === null || injection[id] !== false;
   const parts = [];
-  if (on('precedence')) parts.push(PRECEDENCE);
-  if (on('factCheck')) parts.push(FACT_CHECK);
+  if (master && on('precedence')) parts.push(PRECEDENCE);
+  if (master && on('factCheck')) parts.push(FACT_CHECK);
   // The enforcement preamble sits after the two standing blocks and before every switchable one: it
   // is what turns "injected" into "in force", so it has to be read before the paragraphs it governs.
-  if (on('mandate')) parts.push(MANDATE);
+  if (master && on('mandate')) parts.push(MANDATE);
   // Language sits directly after precedence: it governs every block below it, and that
   // precedence rule is what still lets an explicit request for another language win.
   if (chinese && on('language')) parts.push(LANGUAGE_POLICY);

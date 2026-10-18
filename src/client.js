@@ -562,7 +562,7 @@ function startStyleWatch() {
  * This draws a single overlay bar and places it on the host's bar whenever anything may have moved;
  * the transform does the travelling, so it slides like the chat list's hover card.
  */
-export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 'sessions', 'remote', 'remote.agentPresets', 'remote.session'];export function apply(ctx) {
+export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 'sessions', 'uiSession', 'remote', 'remote.agentPresets', 'remote.session', 'remote.skills'];export function apply(ctx) {
   // Stylesheet first, before any slot registration. Slot registrations can throw (a single-kind slot
   // rejects a second entry at the same priority), and when that happened mid-apply the stylesheet
   // and the root attribute were never installed, leaving the sidebar rendered but unstyled.
@@ -666,7 +666,9 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
   ctx.effect(() => {
     const root = document.getElementById('root');
     if (!root) return undefined;
-    const heroOf = () => document.querySelector('.wSkVaW_composerHero') ?? document.querySelector('[class*="composerHero"]');
+    // Two spellings, because the host's CSS-module hash renames the class between builds: the
+    // hashed form is what ships today, and `composerHero` is what the previous generation used.
+    const heroOf = () => document.querySelector('[class*="composerHero"]') ?? document.querySelector('[class*="_hero"]') ?? null;
     const titleGroupOf = hero => [...hero.querySelectorAll('[class*="titleGroup"]')].find(node => !node.closest('.cg-hero-title')) ?? null;
     const projectOf = hero => {
       // Read the native chip only: the clone this effect appends also carries a workspaceLabel and
@@ -971,9 +973,10 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
       }
     };
     const scheduled = panel === 'cg-schedules';
+    const skillsOpen = panel === 'cg-skills';
     const [localSection, setLocalSection] = React.useState('home');
     // The usage rail is a link, not a section: it opens a browser tab, so no panel maps to it.
-    const section = scheduled ? 'clock' : panel === 'plugins' ? 'at' : panel === null ? localSection : '';
+    const section = scheduled ? 'clock' : skillsOpen ? 'external' : panel === 'plugins' ? 'at' : panel === null ? localSection : '';
     const rail = (icon, label, onClick) => h('button', { type: 'button', className: 'cg-button cg-rail-item' + (section === icon ? ' cg-rail-selected' : ''), 'aria-label': label, 'aria-current': section === icon ? 'page' : undefined, onClick }, h(Icon, { name: icon, active: section === icon }), h('span', { className: 'cg-rail-tooltip', role: 'tooltip' }, label));
     const [settingsMenu, setSettingsMenu] = React.useState(false);
     const [balance, setBalance] = React.useState(null);
@@ -1259,6 +1262,12 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
         patchPersona({ list: FALLBACK_PERSONAS });
       }
     };
+    // 挂载时先拉一次。品牌区显示的人设名来自 personaList[0]，不拉的话首屏用的是 FALLBACK_PERSONAS
+    // 的第一项（DeepSeek），要点开菜单才会变成真实选择——就是「显示 DeepSeek、点一下才变回来」。
+    // 菜单打开时再拉一次，是因为人设改动会改变列表，而普通渲染不会。
+    React.useEffect(() => {
+      loadPersonas();
+    }, []);
     React.useEffect(() => {
       if (!brandMenu) return undefined;
       loadPersonas();
@@ -1756,6 +1765,13 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
         rail('files', '用量', () => openExternal('https://platform.deepseek.com/usage')),
         rail('clock', '定时任务', () => go('cg-schedules')),
         rail('at', '插件', () => go('plugins')),
+        // 第 5 个 rail 按钮：Skill 管理。图标用 Icon 里已有的 'external'（paths.external，方框 + 右上箭头，与需求给的图一致）。
+        // 点击调用 go('plugins')，与上一行「插件」按钮完全相同的跳转方式。
+        // 依据：DSH 侧没有独立的 skill 主面板，设置侧的分页 id 只有 general / models / plugins / subagent 等
+        //（核对 @deepseek-ai/dsh-client-ui-settings-* 与 dsh-client-ui-plugin-manager 的 PANEL_ID），其中没有 skill 分页；
+        // skill 在 DSH 里以 dsh-skill、dsh-experimental-badge-skill-bundle 这类插件包存在，因此落到插件面板。
+        // 这是推断而非确认：若日后出现真正的 skill 面板，把这里的 go('plugins') 换成该 panel id 即可。
+        rail('external', '技能', () => go('cg-skills')),
         h('div', { className: 'cg-rail-bottom' },
           h('div', { className: 'cg-settings', ref: settingsAnchor },
             h(Button, { icon: 'settings', label: '设置菜单', className: 'cg-settings-trigger', 'aria-haspopup': 'menu', 'aria-expanded': settingsMenu, onClick: () => setSettingsMenu(!settingsMenu) }),
@@ -1785,7 +1801,36 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
           h('div', { className: 'cg-brand-actions' }, h(Button, { icon: 'bell', label: '会话通知', onClick: () => setNotice(!notice) }), h(Button, { icon: 'search', label: '搜索会话', onClick: searchSessions }))),
         notice && h('div', { className: 'cg-notice', role: 'status' }, waiting ? `${waiting} 个会话有待确认请求或新的完成消息。` : '暂无待确认请求或新的完成消息。'),
         modeError && h('div', { className: 'cg-notice', role: 'alert' }, modeError),
-        h(Button, { icon: 'edit', label: '新聊天', className: 'cg-new', onClick: () => ctx.uiWorkspace.startSession(), children: '新聊天' }),
+        // 宿主的 uiWorkspace.startSession() 走 connectWorkspace → reuseOrCreateBlank，会先找当前工作区里
+        // blank:true 的会话直接复用（dsh-client-ui-workspace/lib/client.js:789 的 reuseOrCreateBlank），
+        // 于是「新聊天」在已有空会话时只是跳过去。这里改成先显式 create 一个新会话，再把它挂到主视图；
+        // create 失败（没有工作区、权限不足等）才退回宿主原来的行为。
+        h(Button, {
+          icon: 'edit',
+          label: '新聊天',
+          className: 'cg-new',
+          onClick: async () => {
+            const ui = ctx.uiWorkspace;
+            try {
+              const snapshot = ui?.workspaces?.list?.getSnapshot?.();
+              const items = Array.isArray(snapshot?.items) ? snapshot.items : [];
+              const current = ui?.mainReference?.sessionId;
+              const owner = current === undefined ? undefined : items.find(item => item.sessionIds?.includes(current));
+              const target = owner ?? items.find(item => (item.sessionIds?.length ?? 0) > 0) ?? items[0];
+              const workspaceId = target?.workspaceId;
+              if (!workspaceId) throw new Error('no workspace');
+              const sessionId = await ctx.sessions.create({ workspaceId });
+              const signal = AbortSignal.any
+                ? AbortSignal.any([ctx.layout.beginNavigation()])
+                : new AbortController().signal;
+              ui.replaceMain(sessionId, signal, 'reveal');
+            } catch (error) {
+              console.warn('[dsh-codex-ui] create session failed, falling back to startSession:', error);
+              ui?.startSession?.();
+            }
+          },
+          children: '新聊天',
+        }),
         h('div', { className: 'cg-browse' },
           searchOpen && h('div', { className: 'cg-session-search', role: 'search' },
             h('input', {
@@ -1800,7 +1845,7 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
           ...(pinsOpen ? pins.filter(id => sessions[id] && !archivedSet.has(id) && !isBranchChild(id) && !purgedIds.has(id) && !ghostIds.has(id) && matchesQuery(id)).map(id => renderTask(id)) : []),
           h(Button, { label: '项目', className: 'cg-section-toggle', 'aria-expanded': projectsOpen, onClick: () => setProjectsOpen(!projectsOpen), children: ['项目', h('span', { key: 'arrow', className: 'cg-disclosure-arrow', 'aria-hidden': true }, h(Icon, { name: 'chevron', size: 13 }))] }),
           projectsOpen && h('div', { className: 'cg-projects' }, ...workspaces.items.map(project => { const title = !project.title || project.title === 'default-workspace' ? '默认工作区' : project.title; return h(Button, { key: project.workspaceId, icon: 'folder', label: title, onClick: () => ctx.uiWorkspace.openWorkspace(project.workspaceId).catch(error => setNavigationError(error.message || String(error))), children: title }); }), h(Button, { icon: 'plus', label: '添加项目', onClick: () => document.querySelector('.cg-workspaces [class*="headerActions"] button[class*="iconButton"]')?.click(), children: '添加项目' })),
-          h(Button, { label: '最近', className: 'cg-section-toggle', 'aria-expanded': recentOpen, onClick: () => setRecentOpen(!recentOpen), children: ['最近', h('span', { key: 'arrow', className: 'cg-disclosure-arrow', 'aria-hidden': true }, h(Icon, { name: 'chevron', size: 13 }))] }),
+          h(Button, { label: '会话', className: 'cg-section-toggle', 'aria-expanded': recentOpen, onClick: () => setRecentOpen(!recentOpen), children: ['会话', h('span', { key: 'arrow', className: 'cg-disclosure-arrow', 'aria-hidden': true }, h(Icon, { name: 'chevron', size: 13 }))] }),
           ...(recentOpen ? recentIds.map(id => renderTask(id)) : []),
           archivedList.length > 0 && h(Button, { label: '已归档', className: 'cg-section-toggle', 'aria-expanded': archivedOpen, onClick: () => setArchivedOpen(!archivedOpen), children: ['已归档', h('span', { key: 'arrow', className: 'cg-disclosure-arrow', 'aria-hidden': true }, h(Icon, { name: 'chevron', size: 13 }))] }),
           ...(archivedOpen ? archivedList.map(id => renderTask(id)) : []),
@@ -1920,6 +1965,141 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
       draft && h('div', { className: 'cg-task-modal-backdrop' }, h('form', { className: 'cg-task-modal', onSubmit: save }, h('h2', null, '新建任务'), h('label', null, '任务名称', h('input', { required: true, value: draft.title, onChange: e => field('title', e.target.value) })), h('label', null, '任务内容', h('textarea', { required: true, rows: 4, value: draft.prompt, onChange: e => field('prompt', e.target.value) })), h('label', null, '重复', h('select', { value: draft.frequency, onChange: e => field('frequency', e.target.value) }, ...['每天', '每周', '一次'].map(x => h('option', { key: x }, x)))), h('label', null, '时间', h('input', { type: 'time', required: true, value: draft.time, onChange: e => field('time', e.target.value) })), h('p', { className: 'cg-task-note' }, '保存为本地草稿，不会自动执行。'), h('div', { className: 'cg-task-form-actions' }, h(Button, { label: '取消', onClick: () => setDraft(null), children: '取消' }), h('button', { type: 'submit' }, '保存草稿'))))));
   }
   mountSlot('main', () => ctx.slots.register({ name: 'main', key: 'cg-schedules' }, ScheduledTasks));
+
+  // Skill 面板。宿主没有现成的 skill 管理界面：@deepseek-ai/dsh-client-ui-skill 只注册
+  // tool.call.toolview（key skill）和一个 `/` 输入源，设置侧分页也只有 general / models /
+  // plugins / subagent。技能数据唯一来源是客户端 API ctx.remote.skills.list(...)，实现在
+  // @deepseek-ai/dsh-api-session-controller 的 SessionSkillCatalog。所以这里自己画一个只读列表：
+  // 拿得到就列出来，拿不到就把原因写在页面上，而不是留一片空白。
+  // 注意 panel id 就是 main 槽注册里的 key（宿主用 options.key 判定 hasMainPanel），
+  // 所以 rail 那边必须 go('cg-skills') 与这里的 key 逐字一致。
+  // 参数不能写成解构 `({ useSessions })`：槽渲染不保证传 props，解构 undefined 会在渲染阶段抛错。
+  // 更要紧的是不能在这里调 `useSessions()`——它是 hook，而槽的 props 时有时无，条件调用会让
+  // 前后两次渲染的 hook 数量不同，React 直接报 #310（Rendered more hooks than during the previous render），
+  // 整个 main 槽变成 <div data-slot-error="main">。会话 id 走命令式读取。
+  function SkillsPanel(props) {
+    const [state, setState] = React.useState({ loading: true, items: [], error: '', note: '' });
+    // 开关状态只存在本地：宿主没有提供启停技能的写接口（skills 命名空间只有 list），
+    // 所以这里如实做成「本地偏好」——关掉只影响这一页的显示，不动宿主加载的技能。
+    const [disabled, setDisabled] = React.useState(() => {
+      try { return JSON.parse(localStorage.getItem('cg-skill-disabled') || '{}') || {}; } catch { return {}; }
+    });
+    const setEnabledFlag = (id, enabled) => {
+      setDisabled(prev => {
+        const next = { ...prev };
+        if (enabled) delete next[id]; else next[id] = true;
+        try { localStorage.setItem('cg-skill-disabled', JSON.stringify(next)); } catch { /* 存不下就只在内存里生效 */ }
+        return next;
+      });
+    };
+    // 展开状态只在内存里：点开一次看路径和完整简介，刷新后全部收起。
+    const [expanded, setExpanded] = React.useState({});
+    const setExpandedFlag = (id, open) => {
+      setExpanded(prev => {
+        const next = { ...prev };
+        if (open) next[id] = true; else delete next[id];
+        return next;
+      });
+    };
+    // sessionId 的来源（宿主原文）：
+    //   ctx.uiSession.adapter.current.getSnapshot().key —— UiSession 的 current binding，
+    //     注意是 .adapter.current，不是 .current；无 main 会话时 key 为 undefined。
+    //   ctx.sessions.list.getSnapshot().byId —— ClientSessions 的快照 { ids, byId }，
+    //     行里 retainedBy.mainView > 0 的那个就是当前主视图会话（ui-session publishMain 的判据）。
+    // 早先写成 ctx.sessions.current（ClientSessions 没有这个字段）和 list 当数组找，都是空。
+    const sessionId = (() => {
+      try {
+        const fromUi = ctx.uiSession?.adapter?.current?.getSnapshot?.()?.key;
+        if (typeof fromUi === 'string' && fromUi) return fromUi;
+        const snapshot = ctx.sessions?.list?.getSnapshot?.();
+        const byId = snapshot?.byId;
+        if (byId && typeof byId === 'object') {
+          const main = Object.values(byId).find(row => row && row.retainedBy && row.retainedBy.mainView > 0);
+          if (main && typeof main.id === 'string' && main.id) return main.id;
+          const ids = Array.isArray(snapshot.ids) ? snapshot.ids.filter(id => typeof id === 'string' && id) : [];
+          if (ids.length) return ids[ids.length - 1];
+        }
+        return '';
+      } catch { return ''; }
+    })();
+    React.useEffect(() => {
+      let alive = true;
+      const abort = new AbortController();
+      (async () => {
+        const api = ctx.remote?.skills;
+        if (!api || typeof api.list !== 'function') {
+          if (alive) setState({ loading: false, items: [], error: '', note: '当前宿主没有暴露 ctx.remote.skills，读不到技能列表。' });
+          return;
+        }
+        // 不在这里提前 return：会话 id 取不到时也让宿主自己回一句错误，把真实原因显示在页面上，
+        // 而不是用一句「先打开一个会话」把接口问题掩盖掉。
+        try {
+          const result = await api.list({ sessionId }, abort.signal);
+          if (!alive) return;
+          if (!result || result.ok !== true) {
+            const detail = result?.error ? `${result.error.code}: ${result.error.message}` : '未知错误';
+            setState({ loading: false, items: [], error: 'skills/list ' + detail, note: '' });
+            return;
+          }
+          const list = Array.isArray(result.value?.skills) ? result.value.skills : [];
+          setState({ loading: false, items: list, error: '', note: list.length === 0 ? '接口通了，这个会话没有解析到技能。' : '' });
+        } catch (error) {
+          if (alive) setState({ loading: false, items: [], error: String(error?.message || error), note: '' });
+        }
+      })();
+      return () => { alive = false; abort.abort(); };
+    }, [sessionId]);
+    return h('section', { className: 'cg-skills' },
+      h('div', { className: 'cg-skill-content' },
+        h('h1', null, '技能'),
+        h('p', { className: 'cg-task-subtitle' }, '宿主当前会话解析到的技能。开关状态保存在本地，仅影响这里显示。'),
+        state.loading && h('p', { className: 'cg-task-note' }, '读取中…'),
+        state.note && h('p', { className: 'cg-task-note' }, state.note),
+        state.error && h('p', { className: 'cg-task-note' }, '读取失败：' + state.error),
+        state.items.length > 0 && h('div', { className: 'cg-skill-list' }, ...state.items.map((item, index) => {
+          const id = item?.name || item?.path || ('skill-' + index);
+          const on = disabled[id] !== true;
+          const open = expanded[id] === true;
+          return h('div', { className: 'cg-skill-item', key: id },
+            h('article', {
+              className: 'cg-skill-row' + (open ? ' cg-skill-row-open' : ''),
+              // 整行可点开详情；开关自己 stopPropagation，否则点开关会连带展开。
+              onClick: () => setExpandedFlag(id, !open),
+              role: 'button',
+              tabIndex: 0,
+              'aria-expanded': open,
+              onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setExpandedFlag(id, !open); } },
+            },
+            h('div', { className: 'cg-skill-text' },
+              h('strong', null, id),
+              item?.description ? h('p', null, item.description) : null),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              'aria-checked': on,
+              'aria-label': (on ? '停用 ' : '启用 ') + id,
+              className: 'cg-switch' + (on ? ' cg-switch-on' : ''),
+              onClick: event => { event.stopPropagation(); setEnabledFlag(id, !on); },
+            }, h('span', { className: 'cg-switch-knob' }))),
+            open && h('div', { className: 'cg-skill-detail' },
+              h('div', { className: 'cg-skill-field' },
+                h('span', null, '路径'),
+                h('code', null, item?.path || '(宿主没有给出路径)')),
+              h('div', { className: 'cg-skill-field' },
+                h('span', null, '模型可调用'),
+                h('p', null, item?.modelInvocable === false ? '否' : '是')),
+              item?.whenToUse ? h('div', { className: 'cg-skill-field' },
+                h('span', null, '何时使用'),
+                h('p', null, item.whenToUse)) : null,
+              h('div', { className: 'cg-skill-field' },
+                h('span', null, '完整简介'),
+                h('p', null, item?.description || '(没有描述)'))));
+        }))));
+  }
+  // `main` 是 single-kind 槽：同 priority 的第二个 entry 会被拒（见 apply 开头那段注释）。
+  // cg-schedules 已经占了默认优先级，所以这里必须给一个不同的 priority，否则注册被静默 warn 掉，
+  // 表现就是按钮点了没反应、go('cg-skills') 抛 "main panel ... is not registered"。
+  mountSlot('main', () => ctx.slots.register({ name: 'main', key: 'cg-skills', priority: 1 }, SkillsPanel));
   // DeepSeek's usage dashboard lives on a host that refuses to be framed, so the rail opens it in
   // a browser tab instead of embedding it: `X-Frame-Options` / `frame-ancestors` leave an iframe
   // blank, and a blank panel is worse than a link. Nothing is registered in `main` for it.
