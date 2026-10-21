@@ -25,6 +25,8 @@ import { dirname, join } from 'node:path';
 import { policyText, lightningNudge, OFF_NOTICE, tokenMultiplier, presetSilences, INJECTION_BLOCKS } from './turbo-policy.js';
 import { setAliases, identityHealth, writeAliasesToDisk } from './model-identity.js';
 import { setInjection } from './injection-state.js';
+// 「聊天/工作」与用户选的人设是两套语气来源，冲突时人设说话（见 `personaTextOf` 的注释）。
+import { personaTextOf } from './prompt-modes.js';
 
 export const TURBO_EVENT = 'dsh-codex-ui/turbo';
 export const TURBO_PATH = '/api/dsh-codex-ui/turbo';
@@ -493,9 +495,14 @@ export function registerTurbo(ctx) {
   };
 
   // Field order is part of the response contract: the client reads all four off one object.
-  const flagsFor = (sessionId, position) => ({
-    persona: personaFor(sessionId, position),
-    ...effortFlags(sessionId),
+  // Two scopes on purpose. The three switches are a property of the conversation, so a delegated child
+  // reads its parent's row (`flagScope`). The persona is not read-only here — `personaFor` stamps the
+  // pending pick onto whatever id it is given on a first turn — so it always takes the session's own id.
+  // Passing the parent's id there made a child write its parent's persona row: a child spawned from a
+  // session that had never been resolved would claim that row and permanently pin the backend pick to it.
+  const flagsFor = (flagScope, personaScope, position) => ({
+    persona: personaFor(personaScope, position),
+    ...effortFlags(flagScope),
   });
   // The cost of the contract travels with the state so the interface never hard-codes it.
   const budget = tokenMultiplier();
@@ -536,7 +543,7 @@ export function registerTurbo(ctx) {
       at: Date.now(),
     };
     queueEffortWrite();
-    return { ...flagsFor(sessionId), tokenMultiple: budget.value, tokenExact: budget.exact };
+    return { ...flagsFor(sessionId, sessionId), tokenMultiple: budget.value, tokenExact: budget.exact };
   };
 
   const resolve = (sessionId, agent, position) => {
@@ -548,18 +555,39 @@ export function registerTurbo(ctx) {
     // including sessions with no persona and no switches, which is why it is decided here
     // and not in the state file. Flip this constant to make it optional again.
     const FORCE_CHINESE = true;
-    const flags = { ...flagsFor(sessionId, position), chinese: FORCE_CHINESE };
-    const armed = armedBySession.get(sessionId) ?? new Set();
     // `origin` alone is only a navigation classification, so the delegation depth is checked alongside it.
     // Unknowable (no header) means NOT a child: every fixture in the tests has no header, and defaulting the
     // other way would flip a dozen injection tests to the child semantics.
     const header = agent?.session?.header;
     const subagent = header?.origin === 'subagent' || (header?.delegationDepth ?? 0) > 0;
+    // A child session has no row of its own in the effort record — the switches are set on the parent — so
+    // reading `flagsFor(sessionId)` for a child always answered "everything off". That made `superfast`
+    // false inside every child, which selected SUBAGENT_GUARD instead of SUPERFAST_CHILD_NOTE: the child
+    // was told to ignore fan-out entirely, which is exactly the delegation the Superfast tree is built
+    // from. The switches are inherited from `parentSession` for that reason.
+    // The id is used verbatim: the record is keyed `session-<uuid>` and `parentSession` carries the same
+    // prefixed form. An earlier version stripped the prefix on the assumption that the rows were keyed
+    // bare; that made every lookup miss and reproduced the original bug exactly.
+    const parentId = typeof header?.parentSession === 'string' ? header.parentSession : '';
+    const scope = subagent && parentId ? parentId : sessionId;
+    const flags = { ...flagsFor(scope, sessionId, position), chinese: FORCE_CHINESE };
+    // 人设与「聊天/工作」不是二选一：两段都进，但通用那段的权重必须低于用户自己写的人设。
+    // 位置这件事是硬约束——这一块是以最近的 `role: user` 消息注入的，比系统提示词里的人设新，
+    // 所以只靠位置比不过；给它加一句从属声明，冲突时明确让位（正文照旧完整注入，不删条款）。
+    const personaDeferential = personaTextOf(agent?.session) !== '';
+    // Keyed by the session's own id, never by `scope`: what a session was told is a fact about that
+    // session, and a child must not overwrite its parent's record of the same switches.
+    const armed = armedBySession.get(sessionId) ?? new Set();
     // The switches ride in their own parameter rather than inside `flags`: `active` below is built from
     // `Object.keys(flags)`, so an object-valued entry would make every session look armed forever and
     // `emptied` would never fire again.
-    const text = policyText({ ...flags, subagent, injection: personaState.injection });
-    const active = new Set(Object.keys(flags).filter(key => flags[key] && flags[key] !== false));
+    const text = policyText({ ...flags, subagent, injection: personaState.injection, personaDeferential });
+    // `chinese` is a skeleton block, not an arming switch: it is forced true for every session, so
+    // counting it here made `active` non-empty forever and `emptied` could never fire. A session whose
+    // every real switch was turned off kept its `armed` record and was never told the contract was gone.
+    const active = new Set(Object.keys(flags).filter(key => key !== 'chinese' && flags[key] && flags[key] !== false));
+    // 边想边说双向注入（开=禁止段、关=允许段），任何会话都有一段，别的块全关也不能误发 OFF_NOTICE。
+    active.add('thinkingAloud');
     // A session with no persona and no switches carries nothing; if it previously carried a
     // contract, tell it once that the contract is gone.
     const emptied = armed.size > 0 && active.size === 0;
@@ -571,7 +599,7 @@ export function registerTurbo(ctx) {
   // The contract above is delivered once; this keeps the mandate in front of the model on every turn.
   // Without it the only copy sits hundreds of turns back in the log and steers nothing — measured on a live
   // armed session: 539 tool calls, zero delegations, with the contract demonstrably present in the log.
-  const nudgedStep = new Map();
+  const nudgedTurn = new Set();
   const nudgeHandler = async (payload, next) => {
     const decision = typeof next === 'function' ? await next() : undefined;
     try {
@@ -580,30 +608,35 @@ export function registerTurbo(ctx) {
       const sessionId = payload?.agent?.id;
       if (typeof sessionId !== 'string' || sessionId === '') return decision;
       if (presetSilences(payload?.agent)) return decision;
-      // `superfast` implies the tree contract, so either switch arms the reminder. Read through the same
-      // revalidating reader the injector uses: a snapshot would nag a session the user just disarmed and
-      // stay silent on one just armed — the switch and the reminder would disagree within one step.
-      const row = currentEffort().sessions[sessionId];
+      // Same two scopes as the injector: the switches come from the conversation this session belongs to,
+      // so a delegated child is nudged by the switches its parent carries rather than by a row that does
+      // not exist. Keyed by the parent id here too, or the one-shot contract is the only copy a child gets.
+      const header = payload?.agent?.session?.header;
+      const parentId = typeof header?.parentSession === 'string' ? header.parentSession : '';
+      const isChild = header?.origin === 'subagent' || (header?.delegationDepth ?? 0) > 0;
+      const scope = isChild && parentId ? parentId : sessionId;
+      // The reminder is for the two orchestration modes and for nothing else. With both switches off this
+      // session is not running a fan-out contract, so no reminder is injected — not a shortened one, not
+      // the generic body. Read through the same revalidating reader the injector uses: a snapshot would
+      // nag a session the user just disarmed and stay silent on one just armed.
+      const row = currentEffort().sessions[scope];
       if (row?.lightning !== true && row?.superfast !== true) return decision;
       const turn = payload?.turn;
       if (!Number.isFinite(turn)) return decision;
-      // Steps 1..3 of every turn, once each. The opener alone was not enough: measured across armed
-      // sessions, a single opening reminder still produced turns with zero delegations, because by the time
-      // the model is ready to answer the reminder is several tool results behind it. Repeating it on the
-      // next two steps keeps the demand in front of the model while it still has steps left to act on.
-      const step = Number.isFinite(payload?.step) ? payload.step : 1;
-      if (step < 1 || step > 3) return decision;
+      // Once per turn — and the turn, not the step, is what decides that. This used to require
+      // `step === 1`, which is only true on the first turn after a restart: the host opens a new turn
+      // by writing `phase.turn` and never resets `phase.step` (`dsh-agent-loop`'s `turn()`: `turn =
+      // phase.turn + 1` then `phase.turn = turn`, while the step is `phase.step + 1`), so turn two's
+      // first step is numbered above 1. The reminder was therefore delivered once per process.
       const key = `${sessionId}:${turn}`;
-      const seen = nudgedStep.get(key) ?? new Set();
-      if (seen.has(step)) return decision;
-      seen.add(step);
-      nudgedStep.set(key, seen);
+      if (nudgedTurn.has(key)) return decision;
+      nudgedTurn.add(key);
       return {
         ...decision,
         messages: [...decision.messages, {
           id: randomUUID(),
           role: 'user',
-          content: [{ type: 'text', text: lightningNudge(turn, step) }],
+          content: [{ type: 'text', text: lightningNudge(turn, 1) }],
           source: { kind: INJECTED_KIND, form: 'instructions' },
         }],
       };
@@ -739,7 +772,7 @@ export function registerTurbo(ctx) {
       // The hero arms a persona before a session exists, so an empty id is the "next
       // session" scope: reads answer with that default and updates record it as pending.
       const pending = payload.sessionId === '';
-      if (!pending && payload.action === 'read') return Response.json({ type: 'server-response', rpcId: envelope.rpcId, result: { ok: true, value: { ...flagsFor(payload.sessionId), tokenMultiple: budget.value, tokenExact: budget.exact } } });
+      if (!pending && payload.action === 'read') return Response.json({ type: 'server-response', rpcId: envelope.rpcId, result: { ok: true, value: { ...flagsFor(payload.sessionId, payload.sessionId), tokenMultiple: budget.value, tokenExact: budget.exact } } });
       const change = {};
       const effortChange = {};
       // The three effort switches are written here again, into `$DSH_HOME/storages/codex-ui-effort.json`

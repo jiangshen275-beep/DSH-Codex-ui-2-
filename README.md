@@ -14,13 +14,28 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 
 > **About this project**: a derivative of [Loliyer520/dsh-codex-ui](https://github.com/Loliyer520/dsh-codex-ui) (MIT), developed further here — three orchestration tiers, Ultra tier, enforced Chinese, session rename, archived-session deletion, subagent/branch grouping, plus a batch of fixes. **Not affiliated with or endorsed by OpenAI**; the bundled Codex icon and OpenAI Sans font belong to OpenAI — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
+## The three big things in 3.0.0
+
+**1. Replies become editable.** Every finished reply and every reasoning block gains an entry point; open it, rewrite the text, and it is written back into the session record. What gets written is the original event the host understands, not a display-layer patch — reopen, refresh, or let the model re-read the context and it sees the edited sentence. The previously separate `dsh-codex-ui-HF` (Reply Forge) now ships inside this package.
+
+**2. The sidebar is handed to the Agent.** Below the five hard-coded buttons there is now an extensible strip. Say "帮我增加侧边栏" and the Agent reads its manual, asks what the button should do when clicked, and only then installs it — pointing at one of four targets: a panel, a settings page, a URL, or a local program/document. Three custom slots at most (five built-ins, eight total); the rest wait in the "more" table, where any entry can be raised, hidden, or deleted. Links and programs are opened by the DSH host process, so `steam://`-style protocols and `D:\qq\QQ.exe` both work even when the GUI is used from a browser. Two manuals: [SIDEBAR-RAIL.zh.md](SIDEBAR-RAIL.zh.md) for the Agent, [SIDEBAR-RAIL-USER.zh.md](SIDEBAR-RAIL-USER.zh.md) for people.
+
+**3. DSH can drive the computer.** Screenshots, a window tree, pointer movement, clicks, typing, scrolling, dragging — while it controls, a hint stays at the top of the screen and its second line names the current target (e.g. "正在点击 (320, 480) · 记事本"). The previously separate `dsh-computer-use` now ships inside this package; turn it off with `computerUse.enabled: false`, leave it unset and it is on.
+
+
 - **侧栏**：紧凑会话列表、项目与最近会话分组、置顶（调用宿主 workspace 接口）、悬浮预览卡、重命名、归档（宿主能力）与**永久删除**（仅限已归档会话）、子代理 / 分支分组。
 - **模型面板**（面板 UI、滑条与流星都在本包内；`dsh-codex-ui-reasoning` 是同一份面板的独立精简版，二者不要同装）：原生模型与推理强度档位（列表来自宿主）、模型显示名自定义（同时写入"模型身份"提示词段落）、**编排模式三档菜单**（标准 / 快速 / 超快）、滑条末追加虚拟 **Ultra 格**并注入"最严验收"契约、开启编排时披露 token 成本倍率（1.5× / 2.5×）。
 - **提示词**：DeepSeek 模式不追加本插件的风格段（宿主原版系统提示词不受影响，中文策略与模型身份段仍生效）；Codex 模式追加"严谨、理性、严肃、简短"的回复规则；强制中文，模型身份段落同时约束思考过程；新对话页有回复风格页签与品牌图标。
 - **编排契约**：快速 / 超快已开启的会话里，委派按四条客观条件触发——答案依赖本机没有的事实、改动或判断跨两处以上、两个各自能翻盘的未知、明确要求多角度；四条都不成立时单路做完，并须点名哪条为假。每轮 step 1–3 各注入一条带轮次号的短提醒（step 4 起不再注入）；超快模式下每个**一级**子代理再开两个孙代理，**二级即止**。
+- **会话改写**：每条回复与每条思维链旁有入口，点开改写后写回会话记录（写的是宿主认得的原始事件，重开与重载都保留）；思维链的改写记录在本地重放，被宿主重绘覆盖时补回去。原 `dsh-codex-ui-HF` 并入本包。
+- **自定义侧边栏**：内置五颗按钮下方开放最多三格给自定义快捷项，四类目标（面板 / 设置页 / 网址 / 本机程序或文档），带图标的悬停说明、显示与隐藏、两段式确认的删除；条目可由 Agent 通过 `sidebar_rail` 工具增删，也可直接写 `$DSH_HOME/dsh-codex-ui-rail.json`，界面 15 秒内自己同步。
+- **模型面板**（面板 UI、滑条与流星都在本包内；`dsh-codex-ui-reasoning` 是同一份面板的独立精简版，二者不要同装）：原生模型与推理强度档位（列表来自宿主）、模型显示名自定义（同时写入"模型身份"提示词段落）、**编排模式三档菜单**（标准 / 快速 / 超快）、滑条末追加虚拟 **Ultra 格**并注入"最严验收"契约、开启编排时披露 token 成本倍率（1.5× / 2.5×）。
+- **提示词**：DeepSeek 模式不追加本插件的风格段（宿主原版系统提示词不受影响，中文策略与模型身份段仍生效）；Codex 模式追加"严谨、理性、严肃、简短"的回复规则；强制中文，模型身份段落同时约束思考过程；新对话页有回复风格页签与品牌图标。
+- **编排契约**：快速 / 超快已开启的会话里，委派按四条客观条件触发——答案依赖本机没有的事实、改动或判断跨两处以上、两个各自能翻盘的未知、明确要求多角度；四条都不成立时单路做完，并须点名哪条为假。每轮 step 1–3 各注入一条带轮次号的短提醒（step 4 起不再注入）；超快模式下每个**一级**子代理再开两个孙代理，**二级即止**。
+- **电脑控制**：截屏、窗口树检查、指针移动、点击、键入、滚动、拖拽；控制期间屏幕顶部常驻提示并实时显示当前目标（如「正在点击 (320, 480) · 记事本」）。原 `dsh-computer-use` 并入本包，配置 `computerUse.enabled: false` 可关（不写即开）。
 - **界面与其它**：浅色 / 深色 / 窄窗口适配；超快模式滑条四段暖色递深（minimal·low / high / xhigh·max / ultra 渐变）；努力滑条旋钮 24×24 正圆（常态带投影，超快 + Ultra 态加描边与发光）；字体与图标随包分发（字体以 base64 内联进 `lib/client.js`）；设置菜单显示官方 DeepSeek API 余额（服务端缓存 30 秒，只有校验过的余额字段回到前端），并带刷新 / 控制台 / 设置 / 插件 / 帮助入口。
 
-**当前版本（2.0.0）**：产物 `dsh-codex-ui-2.0.0.tgz`（`npm pack` 生成，不入库）；2.0.1 仅为版本号调整（移除 `peerDependencies` 声明），该调整已包含在 2.0.0 中；1.0.0 与 1.1.0 的历史要点见 [CHANGELOG.md](CHANGELOG.md)。界面类改动刷新页面即可，提示词契约类需重启 DSH。
+**当前版本（3.0.0）**：产物 `dsh-codex-ui-3.0.0.tgz`（`npm pack` 生成，不入库）。3.0.0 把三个原本独立的项目并回主干——回复锻造（会话改写）、可自定义侧边栏、电脑操控——安装方式没变，装一个包就有全部能力。2.x 的历史要点见 [CHANGELOG.md](CHANGELOG.md)。界面类改动刷新页面即可，提示词契约类与宿主侧改动（侧边栏的链接/程序启动、电脑控制）需要重启 DSH。
 
 ## 安装
 

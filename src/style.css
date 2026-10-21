@@ -898,6 +898,47 @@ body[data-ds-dark-theme] .cg-rail > .cg-rail-item:hover { box-shadow: 0 3px 10px
 
 .cg-rail-item.cg-rail-selected { background: #e7e7e7; color: #202123; }
 
+/* 侧栏按钮的进出场。入场在挂载时播一次就停；出场靠 .cg-rail-ghost——被撤下的按钮会在 DOM 里
+   多留 240ms（见 Sidebar 里的 railGhosts），不然 React 一卸载，动画连第一帧都来不及画。
+   图标只动 opacity，不碰 transform：悬停那个放大是 transform 做的，两套抢同一个属性会打架。 */
+@keyframes cg-rail-in {
+  from { opacity: 0; transform: translateX(-6px) scale(.94); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+@keyframes cg-rail-out {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to { opacity: 0; transform: translateX(-6px) scale(.94); }
+}
+
+@keyframes cg-rail-glyph-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 弹层里那几行是错开浮上来的，一起出现会糊成一块。 */
+@keyframes cg-rail-row-in {
+  from { opacity: 0; transform: translateX(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 「隐藏 / 放上去」互换时各跑一个：一个是收紧着弹出来，一个是先胀一点再落定。 */
+@keyframes cg-rail-pin-on {
+  from { opacity: .55; transform: scale(.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes cg-rail-pin-off {
+  from { opacity: .55; transform: scale(1.06); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.cg-rail-item { animation: cg-rail-in 240ms cubic-bezier(.22, .8, .28, 1) both; }
+
+.cg-rail-item svg { animation: cg-rail-glyph-in 300ms cubic-bezier(.22, .8, .28, 1) both; }
+
+.cg-rail-item.cg-rail-ghost { animation: cg-rail-out 220ms cubic-bezier(.4, 0, 1, 1) forwards; pointer-events: none; }
+
 /* The name label arrives: hidden by opacity + visibility rather than `display`, because `display`
 
    cannot be transitioned and a hard swap is what made it read as a twitch. It slides the last few
@@ -919,6 +960,96 @@ body[data-ds-dark-theme] .cg-rail-selected,body[data-ds-dark-theme] .cg-rail-ite
 .cg-rail-item:hover,.cg-rail-selected { --cg-icon-surface: #dfe0e5; }
 
 body[data-ds-dark-theme] .cg-rail-item { --cg-icon-surface: #171717; }
+
+/* 侧栏自定义项的「更多」弹层。侧栏只放三个自定义格，多出来的都在这张表里：
+   每一行既能点开，也能把它推上侧栏（或撤下来）。定位挂在按钮自己身上——
+   侧栏是 fixed 的窄条，absolute 相对那个格子最省事，也不会跟着内容滚动。 */
+.cg-rail-more { position: relative; flex: none; }
+
+/* 「更多」按钮套了一层 div（弹层要相对它定位），`> .cg-button` 那几条直系规则落不到它身上，
+   所以把尺寸与图标大小在这里再说一遍，否则它会按内容撑成一条奇怪的宽度。 */
+.cg-rail-more > .cg-button { flex: none; width: 36px; height: 36px; padding: 9px; justify-content: center; border-radius: 11px; color: #6b6b6b; }
+
+.cg-rail-more > .cg-button svg { width: 18px; height: 18px; flex: none; }
+
+.cg-rail-menu { position: absolute; z-index: 40; left: calc(100% + 6px); top: 0; width: 252px; box-sizing: border-box; padding: 6px; border: 1px solid #e5e5e5; border-radius: 17px; background: var(--cg-page); color: var(--cg-text); box-shadow: 0 8px 24px #00000014; animation: cg-model-enter 120ms ease-out; }
+
+/* 表头一行：左边标题，右边问号。问号是就地展开说明的开关，不做成外链——
+   跳出去看文档再找回来，为一句话不值当。 */
+.cg-rail-menu-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 6px 6px 8px; }
+
+.cg-rail-menu-title { margin: 0; font-size: 12px; line-height: 16px; color: var(--cg-muted); }
+
+.cg-rail-menu-help-toggle { flex: none; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--cg-muted); cursor: pointer; transition: background-color 150ms cubic-bezier(.22, .8, .28, 1), color 150ms cubic-bezier(.22, .8, .28, 1); }
+
+.cg-rail-menu-help-toggle:hover { background: #e7e7e7; color: var(--cg-text); }
+
+.cg-rail-menu-help-toggle.cg-on { background: #e7e7e7; color: var(--cg-text); }
+
+.cg-rail-menu-help-toggle svg { width: 15px; height: 15px; }
+
+.cg-rail-menu-help { margin: 0 8px 8px; font-size: 12px; line-height: 17px; color: var(--cg-muted); animation: cg-rail-row-in 180ms cubic-bezier(.22, .8, .28, 1) both; }
+
+.cg-rail-menu-help p { margin: 0 0 5px; }
+
+.cg-rail-menu-help p:last-child { margin-bottom: 0; }
+
+body[data-ds-dark-theme] .cg-rail-menu-help-toggle:hover,body[data-ds-dark-theme] .cg-rail-menu-help-toggle.cg-on { background: #343434; }
+
+.cg-rail-menu-empty { margin: 0 8px 8px; font-size: 12px; line-height: 17px; color: var(--cg-muted); }
+
+.cg-rail-menu-row { display: flex; align-items: center; gap: 4px; border-radius: 12px; transition: background-color 150ms cubic-bezier(.22, .8, .28, 1); animation: cg-rail-row-in 190ms cubic-bezier(.22, .8, .28, 1) both; }
+
+/* 行是错开进场的：一张表同时浮上来会显得糊，隔 26ms 一行就看得出层次。 */
+.cg-rail-menu-row:nth-child(2) { animation-delay: 26ms; }
+
+.cg-rail-menu-row:nth-child(3) { animation-delay: 52ms; }
+
+.cg-rail-menu-row:nth-child(4) { animation-delay: 78ms; }
+
+.cg-rail-menu-row:nth-child(5) { animation-delay: 104ms; }
+
+.cg-rail-menu-row:hover { background: #f1f1f1; }
+
+.cg-rail-menu-open { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; padding: 7px 8px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: opacity 140ms cubic-bezier(.22, .8, .28, 1); }
+
+.cg-rail-menu-open:active { opacity: .6; }
+
+.cg-rail-menu-open svg { flex: none; width: 18px; height: 18px; }
+
+.cg-rail-menu-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.cg-rail-menu-kind { flex: none; font-size: 11px; color: var(--cg-muted); }
+
+/* 「隐藏 / 放上去」这颗胶囊：状态切换不该是硬切。两种状态各挂一个动画名，
+   于是每次互换都会重新跑一遍——文字换掉的同时，按钮自己弹一下、底色滑过去。 */
+.cg-rail-menu-pin { flex: none; margin-right: 4px; padding: 5px 9px; border: 1px solid #dcdde1; border-radius: 999px; background: transparent; color: var(--cg-muted); font: inherit; font-size: 11px; cursor: pointer; animation: cg-rail-pin-off 200ms cubic-bezier(.22, .8, .28, 1) both; transition: background-color 160ms cubic-bezier(.22, .8, .28, 1), color 160ms cubic-bezier(.22, .8, .28, 1), border-color 160ms cubic-bezier(.22, .8, .28, 1), box-shadow 160ms cubic-bezier(.22, .8, .28, 1); }
+
+.cg-rail-menu-pin:hover { background: #e7e7e7; color: var(--cg-text); }
+
+.cg-rail-menu-pin:active { filter: brightness(.94); }
+
+.cg-rail-menu-pin.cg-on { border-color: transparent; background: #e7e7e7; color: var(--cg-text); animation: cg-rail-pin-on 200ms cubic-bezier(.22, .8, .28, 1) both; }
+
+/* 删除：平常只是一颗安静的图标，第一下把它点成红色的「删?」，三秒内再点才真删。
+   删掉一条再想加回来，得重新填一遍字段，而误点只要一下——两边代价不对等。 */
+.cg-rail-menu-remove { flex: none; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--cg-muted); cursor: pointer; transition: background-color 150ms cubic-bezier(.22, .8, .28, 1), color 150ms cubic-bezier(.22, .8, .28, 1), width 150ms cubic-bezier(.22, .8, .28, 1); }
+
+.cg-rail-menu-remove svg { width: 14px; height: 14px; }
+
+.cg-rail-menu-remove:hover { background: #ffe9e6; color: #c8372b; }
+
+.cg-rail-menu-remove.cg-armed { width: auto; padding: 0 7px; background: #c8372b; color: #fff; font-size: 11px; line-height: 1; }
+
+.cg-rail-menu-note { margin: 4px 8px 6px; font-size: 12px; line-height: 16px; color: #b04a3a; }
+
+body[data-ds-dark-theme] .cg-rail-menu { border-color: #3a3a3a; }
+
+body[data-ds-dark-theme] .cg-rail-menu-row:hover,body[data-ds-dark-theme] .cg-rail-menu-pin.cg-on,body[data-ds-dark-theme] .cg-rail-menu-pin:hover { background: #343434; }
+
+body[data-ds-dark-theme] .cg-rail-menu-pin { border-color: #4a4a4a; }
+
+body[data-ds-dark-theme] .cg-rail-menu-remove:hover { background: #3a2422; color: #ff6f5e; }
 
 
 
@@ -1092,6 +1223,13 @@ body[data-ds-dark-theme] .cg-task-actions .cg-pin-on { color: #6b9fff; }
 
 .cg-task-row.cg-task-child::before { content: ''; position: absolute; left: calc(10px + var(--cg-branch-indent, 0px)); top: 0; bottom: 0; width: 1px; background: var(--cg-hover); }
 
+/* The shared entrance animation ([role="tooltip"] -> cg-soft-in) animates transform, and an animated
+   transform outranks the inline translate(x, y) that positions this card. During its 160 ms the card
+   painted at left:0/top:0 and then jumped into place — the flash at the window corner. The card
+   positions itself on every show, so it needs no entrance animation; the 190 ms transform transition
+   below still makes it glide between rows. */
+html[data-chatgpt-ui] .cg-task-preview-floating { animation: none !important; }
+html[data-chatgpt-ui] .cg-rail-tooltip { animation: none !important; }
 .cg-task-preview { width: 300px; padding: 10px; box-sizing: border-box; z-index: 50; background: var(--cg-page); border: 1px solid #dbdce1; border-radius: 15px; box-shadow: 0 5px 12px #00000012; color: var(--cg-text); font-size: 13px; pointer-events: none; }
 
 /* The floating card is one element for the whole list. It is positioned by `transform`, which the
@@ -1100,12 +1238,20 @@ body[data-ds-dark-theme] .cg-task-actions .cg-pin-on { color: #6b9fff; }
 
    replayed) on every row. Hidden by opacity + visibility, since `display` cannot be transitioned. */
 
+/* No transform transition on purpose. The card is positioned with translate() from left: 0; top: 0, so animating the transform made a freshly created card fly in from the window's top-left corner on the first hover of a session — the flash. Only opacity animates now; position changes land instantly. */
 .cg-task-preview-floating { position: fixed; left: 0; top: 0; opacity: 0; visibility: hidden; transition: transform 190ms cubic-bezier(.22, .8, .28, 1), opacity 140ms cubic-bezier(.22, .8, .28, 1), visibility 0s linear 140ms; }
 
 .cg-task-preview-floating[data-on="true"] { opacity: 1; visibility: visible; transition: transform 190ms cubic-bezier(.22, .8, .28, 1), opacity 120ms cubic-bezier(.22, .8, .28, 1); }
 
-.cg-task-preview strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; margin-bottom: 8px; }
-
+/* The generic entrance animation above matches this card through `[role="tooltip"]` and its
+   keyframes animate `transform` — which overrides the inline `translate(x, y)` for 160 ms, so the
+   card painted at left:0/top:0 and then jumped into place. That was the flash. The card positions
+   itself every time it is shown, so it needs no entrance animation at all. */
+/* Same reason, one more element: the rail button's name label is a 
+ole="tooltip" too, and it is
+   positioned with 	ransform: translateY(-50%) translateX(-4px) (line ~907). The shared entrance
+   animation overwrote that transform, so during its 160 ms the label sat 4 px low and then snapped up.
+   It is normally hidden, which is why this only ever showed up right after mount. */
 .cg-task-preview > div { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 
 .cg-task-menu { position: absolute; z-index: 55; right: 0; top: 30px; padding: 4px; border: 1px solid #dbdce1; border-radius: 10px; background: var(--cg-page); box-shadow: 0 4px 12px #0001; }
@@ -2446,6 +2592,9 @@ body:not([data-ds-dark-theme]) .cg-model-meteor::after {
 
   .cg-model-pane, .cg-model-editor, .cg-model-viewer, .cg-menu, .cg-task-menu { animation: none; }
 
+  /* 侧栏的进出场也一并关掉：有人把系统设成减少动态效果，就是不想看这些。 */
+  .cg-rail-item, .cg-rail-item svg, .cg-rail-menu-row, .cg-rail-menu-pin, .cg-rail-menu-help { animation: none; }
+
   .cg-button, .cg-model-option, .cg-model-rename, .cg-model-alias-save, .cg-model-alias-cancel,
 
   .cg-model-summary, .cg-model-zap, .cg-model-reset, .cg-model-choice, .cg-rail-item,
@@ -3647,4 +3796,32 @@ html[data-chatgpt-ui] .compact pre {
    方框在左下、箭头在右上，视觉重心落在左半，所以在同样居中的情况下看着往左歪。
    用 margin-left 把整枚图形右推 1.5px 校正视觉重心——不用 translateX，因为 hover 的 scale(1.2) 也走 transform。 */
 .cg-rail > .cg-rail-item[aria-label="技能"] svg { width: 17px; height: 17px; margin-left: 1.5px; }
+
+
+
+/* 已归档多选：工具栏贴在分组标题下方，复选框在行首。 */
+.cg-archived-tools { display: flex; align-items: center; gap: 8px; padding: 4px 8px 6px; flex-wrap: wrap; }
+.cg-archived-tools .cg-button { font-size: 12px; padding: 3px 8px; }
+.cg-archived-bulk { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary, #adb2b8); }
+/* Archived rows become a flex line so the checkbox is a real sibling of the title button instead of
+   an absolutely positioned box sitting on top of it. Absolute positioning put the box at x=61..75
+   while the title button started at x=56, i.e. the control covered the button's own left edge and
+   stole its clicks. In flow, the title starts where the box ends. */
+.cg-task-row.cg-task-archived { display: flex; align-items: center; gap: 6px; }
+.cg-task-row.cg-task-archived .cg-archived-check {
+  flex: 0 0 auto; width: 14px; height: 14px; margin: 0 0 0 6px;
+  cursor: pointer; accent-color: #6b7280;
+}
+.cg-task-row.cg-task-archived .cg-pinned-row { flex: 1 1 auto; min-width: 0; padding-left: 0; }
+body[data-ds-dark-theme] .cg-archived-check { accent-color: #d1d5db; }
+/* 归档行里的展开键也必须回到流内。归档行是 flex 容器，复选框是流内第一个子元素（x 6..20），
+   而箭头仍是绝对定位的 left:4px / 16×19，正好压在复选框上；它自己还 stopPropagation，
+   于是复选框的点击全被箭头接走——带子代理或分支的归档会话根本选不上。放进流内之后顺序是
+   复选框 → 状态点 → 箭头 → 标题，每个控件各自占据一格、各自可点。
+   这条必须写在 .cg-task-child / .cg-task-stated 那几条之后：它们与它同为 (0,2,1)，只靠文件
+   顺序决胜负。position: static 之后 left/top 不再参与布局，所以那几条里的 left 不用改。 */
+.cg-task-row.cg-task-archived > .cg-children-toggle { position: static; left: auto; top: auto; flex: 0 0 auto; }
+/* 同一格上的状态点（待处理 / 已回复未读）也是绝对定位 left:4px，照样会盖住复选框。归档行一并
+   放回流内；它的垂直居中本来就交给 flex 的 align-items，translate 那条不再需要。 */
+.cg-task-row.cg-task-archived > .cg-task-status { position: static; left: auto; top: auto; translate: none; flex: 0 0 auto; }
 

@@ -1,6 +1,6 @@
 {
   "name": "dsh-codex-ui",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "description": "Codex-style interface and prompt modes for DeepSeek Harness",
   "type": "module",
   "main": "./lib/index.js",
@@ -18,20 +18,23 @@
     "locale",
     "prompts",
     "scripts",
+    "computer-use",
     "cordis.patch.yml",
     "CHANGELOG.md",
     "LICENSE",
     "README.md",
     "README.zh.md",
     "MIGRATION-2.0.zh.md",
+    "SIDEBAR-RAIL.zh.md",
+    "SIDEBAR-RAIL-USER.zh.md",
     "THIRD-PARTY-NOTICES.md",
     "RESOURCE-REFERENCE.zh.md",
     "SYSTEM-PROMPT-PLAN.zh.md"
   ],
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "check": "node --check src/client.js && node --check src/model-ui.js && node --check src/prompt-modes.js && node --check src/turbo.js && node --check src/turbo-policy.js && node --check lib/client.js",
-    "test": "node --test tests/*.test.mjs"
+    "build": "node scripts/build-reply-forge.mjs && node scripts/build.mjs",
+    "check": "node scripts/build-reply-forge.mjs --check && node --check src/client.js && node --check src/model-ui.js && node --check src/prompt-modes.js && node --check src/turbo.js && node --check src/turbo-policy.js && node --check lib/index.js && node --check lib/client.js",
+    "test": "node --test tests/*.test.mjs && node --test \"src/reply-forge/tests/*.test.mjs\""
   },
   "dsh": {
     "bundle": {

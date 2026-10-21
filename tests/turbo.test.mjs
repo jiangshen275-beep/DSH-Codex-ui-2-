@@ -83,10 +83,14 @@ test('policy text is empty only when both switches are off', () => {
   assert.doesNotMatch(both, /Ignore every rule above about fan-out/, 'a parent must not be told to ignore fan-out');
 });
 
-test('lightning triggers two children when a condition holds', () => {
+test('lightning triggers two children on every turn, with no condition to satisfy', () => {
   const text = policyText({ lightning: true });
-  assert.match(text, /dispatch two children on different angles/);
+  assert.match(text, /dispatch two subagents on two different angles/);
   assert.match(text, /ONE assistant message/);
+  // The mandate carries no trigger list any more: a conditional wording is what previously turned the
+  // mandate back into a judgement call. This asserts the absence, not a phrasing.
+  assert.doesNotMatch(text, /when a condition holds|four fan-out conditions/, 'no trigger list may return');
+  assert.match(text, /Delegation is MANDATORY, on every turn, with no exemption/);
   // The recursion guard keeps a child from fanning out again; the parent-side text must not carry it.
   assert.doesNotMatch(text, /delegated sub-agent/);
   assert.match(policyText({ lightning: true, subagent: true }), /delegated sub-agent/);
@@ -143,48 +147,64 @@ test('Lightning discloses its cost, keeps delegation purposeful, and never shrin
   assert.match(LIGHTNING_POLICY, /Cost is disclosed, never rationed/);
   assert.match(LIGHTNING_POLICY, /Never drop an angle, a check, or a verification to spend less/);
   // Purpose before volume: 22 children accumulated over eleven turns, every batch a ritual pair. The
-  // anti-ritual rules survive that episode — what did not survive is the blanket exemption they came
-  // with, because it swung the behaviour to zero delegations across 539 tool calls in one armed session.
+  // anti-ritual rules survive that episode. What changed since is the exemption set: the conditional
+  // gate ("when a condition holds") swung the behaviour to zero delegations across 539 tool calls in one
+  // armed session, so the contract now states the mandate unconditionally and names no exemption at all.
   assert.match(LIGHTNING_POLICY, /Split by angle, never clone/);
-  assert.match(LIGHTNING_POLICY, /Parallel copies of one vague prompt reproduce the same blind spot/);
+  assert.match(LIGHTNING_POLICY, /Two copies of one prompt are not two children/);
   assert.match(LIGHTNING_POLICY, /Never dispatch to re-confirm ground this conversation already covered/);
-  assert.match(LIGHTNING_POLICY, /One round, and few children in it/);
-  assert.match(LIGHTNING_POLICY, /Never dispatch a second round in the same turn/);
-  // The mandate is now the default, with three narrow exemptions and no self-judged fourth.
-  assert.match(LIGHTNING_POLICY, /Delegation is the DEFAULT, not a judgement call/);
-  assert.match(LIGHTNING_POLICY, /\(a\) a single lookup you can settle with one command or one file read/);
-  assert.match(LIGHTNING_POLICY, /\(c\) a turn whose whole content is reporting something already verified earlier in THIS session/);
-  assert.match(LIGHTNING_POLICY, /Name the exemption in your own reasoning, not in the reply\. Nothing else qualifies/);
-  // "Continues earlier work" was the exemption that ate the mode; it must be named as a non-exemption.
-  assert.match(LIGHTNING_POLICY, /Long-running work is NOT an exemption/);
-  assert.match(LIGHTNING_POLICY, /If you cannot name which condition is false, you have not finished looking/);
+  assert.match(LIGHTNING_POLICY, /Two is the floor, and there is no ceiling on the parent/);
+  // The old text capped the turn at one batch and forbade a second. Both are gone: "at least two" was
+  // always a floor, and a new development reopens the fan-out in the same turn.
+  assert.match(LIGHTNING_POLICY, /a turn that carries six independent angles dispatches six/);
+  assert.match(LIGHTNING_POLICY, /A new development is:/);
+  assert.doesNotMatch(LIGHTNING_POLICY, /Never dispatch a second round in the same turn/, 'the one-batch cap must not return');
+  assert.match(LIGHTNING_POLICY, /Keep only as many in flight as the harness can run at once/);
+  // The mandate is unconditional, and the absence of an exemption list is the point: a closed list of
+  // exceptions is what a reader turns into a judgement call once the list runs out of matches.
+  assert.match(LIGHTNING_POLICY, /Delegation is MANDATORY, on every turn, with no exemption/);
+  assert.match(LIGHTNING_POLICY, /There is no exempt turn/);
+  assert.match(LIGHTNING_POLICY, /A reason this turn looks special is not an exemption/);
   assert.doesNotMatch(LIGHTNING_POLICY, /needs no children at all/, 'the blanket exemption must not return');
+  assert.doesNotMatch(LIGHTNING_POLICY, /Delegation is the DEFAULT, not a judgement call/, 'the conditional gate must not return');
   // Reuse beats respawn: a continued child keeps its reading, a new one re-reads and leaves a session.
   assert.match(LIGHTNING_POLICY, /Reuse before you respawn/);
   assert.match(LIGHTNING_POLICY, /continue that child with a message instead of creating another one/);
   assert.match(LIGHTNING_POLICY, /a check that has to stand on its own still needs a new child/);
-  // Numbering stays 1..12 with no duplicates, because the model reads the numbers as structure.
+  // Numbering stays one clean run, because the model reads the numbers as structure. The list is no
+  // longer 1..12: clause 3 was merged away when the trigger list went, so the run is 1..12 over eleven
+  // numbers plus the closing cost clause, and the assertion follows the actual sequence rather than an
+  // assumed one — a gap is the defect it exists to catch, not the expected value.
   const numbers = [...LIGHTNING_POLICY.matchAll(/^(\d+)\./gm)].map(match => Number(match[1]));
-  assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 'one numbering, no collisions');
+  assert.equal(numbers.length, new Set(numbers).size, 'no duplicate numbering');
+  assert.deepEqual(numbers, [...numbers].sort((a, b) => a - b), `numbering must ascend: ${numbers}`);
   // The self-check is what makes the mandate enforceable rather than advisory.
   assert.match(LIGHTNING_POLICY, /Self-check before you send: name the condition that fired/);
-  assert.match(LIGHTNING_POLICY, /if you cannot name which one applies, you owe this turn two children/);
   // Waiting on children is silent work, not a reason to speak.
   assert.match(LIGHTNING_POLICY, /While relevant children run, keep working — reading, checking, verifying — and send nothing to the user/);
   assert.doesNotMatch(LIGHTNING_POLICY, /never keep more than six in flight/, 'concurrency is limited by the harness, not by price');
-  // The reminder is the ONLY copy of the exemption the model sees each turn, so it must carry the contract's
-  // thresholds verbatim. Nothing asserted this before — which is exactly how the two texts drifted apart:
-  // a shortened paraphrase of an exemption is not a summary, it is a different (and wider) rule.
+  // The reminder is the ONLY copy of the mandate the model sees each turn, so it must restate the same
+  // terms verbatim. Nothing asserted this before — which is exactly how the two texts drifted apart.
   const reminder = lightningNudge(1, 1);
-  assert.ok(reminder.includes('you can settle with one command or one file read'), '(a) quantified threshold must appear in the reminder verbatim');
-  assert.ok(reminder.includes('whole content') && reminder.includes('earlier') && reminder.includes('THIS session'), '(c) whole content / earlier / THIS must appear verbatim');
-  assert.ok(reminder.includes('Nothing else qualifies'), 'the exemption list must stay closed in the reminder');
-  assert.ok(reminder.includes('continues earlier work') && reminder.includes('small correction') && reminder.includes('I already read that file'), 'long-running work is not an exemption: all three self-justifications must be named');
+  assert.ok(reminder.includes('dispatch two subagents on two different angles'), 'the mandate must appear in the reminder verbatim');
+  assert.ok(reminder.includes('This is mandatory and unconditional'), 'the reminder must keep the unconditional wording');
+  assert.ok(reminder.includes('There is no exempt turn'), 'the exemption-free statement must survive in the reminder');
+  assert.ok(reminder.includes('that check is not delegation'), 'reuse-first must stay in the reminder');
+  // The completion half travels with the same reminder. Without it the reminder only ever asked for
+  // dispatches and said nothing about when a turn may end — which is how a turn could dispatch two
+  // children, start writing while they were still flying, and still read as compliant.
+  assert.ok(reminder.includes('it ends only after the last child is back'), 'the completion rule must ride along every turn');
+  assert.ok(reminder.includes('all four must be true'), 'the four completion conditions must be named');
+  assert.ok(reminder.includes('the conflicts between summaries are resolved, not averaged'), 'averaging summaries must be ruled out');
+  assert.ok(reminder.includes('you have read the code the answer describes'), 'reading the code yourself must be required');
+  assert.ok(reminder.includes('every verification has actually executed'), 'an unrun check must not count');
+  assert.ok(reminder.includes('fails this turn'), 'writing over a running child must be named as a failure');
+  assert.ok(reminder.includes('handed to a child to check independently'), 'a fix must be re-checked by a fresh child');
   // The figure the interface advertises must stay readable out of the contract.
   assert.deepEqual(tokenMultiplier(), { value: 1.5, exact: true });
   // Reuse-first: the check must be in the contract, and the per-turn reminder must repeat it, or every turn
   // keeps pushing toward new children regardless.
-  assert.match(LIGHTNING_POLICY, /one list_agents call, nothing more/);
+  assert.match(LIGHTNING_POLICY, /one list_agents call tells you which child is inactive and fits/);
   assert.match(lightningNudge(1, 1), /that check is not delegation/);
 });
 
@@ -244,12 +264,22 @@ test('the injected contract stays free of accidental duplication', () => {
   // 10_000 -> 12_000 when the mandatory fact-check block landed: rules added on purpose at the user's
   // request (check the fact, search the web when the machine cannot answer, ask the user when the
   // search cannot), measured 11_182 with the block at 246 chars. The pre-block weight was 10_934.
+  // 13_500 -> 14_500 for the Superfast tree, measured 14_264: the tier stamping, the self-contained
+  // child prompt contract, and the per-tier integration rule are rules added on purpose, and the cap is
+  // a duplication alarm rather than a ration. A rule added on purpose moves it; a paraphrase does not.
+  // 12_000 -> 13_000 and 14_500 -> 16_000 for the two completion rules the user asked for: the parent
+  // answers only after every child is back and the work has been checked by hand, and a new development
+  // reopens the fan-out because "at least two" was always a floor rather than a budget. Measured 12_686
+  // and 15_715 after both landed.
   assert.ok(ULTRA_POLICY.length < 4_400, `Ultra block is ${ULTRA_POLICY.length} chars`);
   const heaviest = policyText({ persona: 'chat', ultra: true, lightning: true });
-  assert.ok(heaviest.length < 12_000, `full block is ${heaviest.length} chars`);
-  // The superfast combination is the largest a session can carry; it had no cap before.
-  const largest = policyText({ persona: 'chat', ultra: true, lightning: true, superfast: true });
-  assert.ok(largest.length < 13_500, `superfast block is ${largest.length} chars`);
+  assert.ok(heaviest.length < 13_000, `full block is ${heaviest.length} chars`);
+  // The cap must be measured on the block a real session actually carries, and every armed session is
+  // forced to Chinese — `FORCE_CHINESE` in turbo.js. The earlier version of this assertion omitted
+  // `chinese`, so it was weighing a block no session ever receives: 15_715 here against 16_264 on disk.
+  // 16_000 -> 17_000 with `chinese` included, still a duplication alarm rather than a ration.
+  const largest = policyText({ persona: 'chat', ultra: true, lightning: true, superfast: true, chinese: true });
+  assert.ok(largest.length < 17_000, `superfast block is ${largest.length} chars`);
   // No rule text may be repeated verbatim between the two mode blocks.
   const sentences = heel => heel.split(/(?<=\.)\s+/).map(s => s.trim()).filter(s => s.length > 40);
   const overlap = sentences(ULTRA_POLICY).filter(line => sentences(LIGHTNING_POLICY).includes(line));
@@ -380,32 +410,33 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     const empty = await call({ sessionId: 's1', action: 'read' });
     assert.deepEqual(empty.result, { ok: true, value: { persona: '', lightning: false, ultra: false, superfast: false, tokenMultiple: 1.5, tokenExact: true } });
 
-    // The effort write side moved to `dsh-codex-ui-reasoning` (src/turbo.js:600-608): naming one of the
-    // three switches is refused with a code of its own. `ok: true` that wrote nothing was the silent
-    // failure the move was meant to end, so the refusal — not a new state — is the contract asserted here.
+    // The three effort switches are written by this route, into `$DSH_HOME/storages/codex-ui-effort.json`
+    // — the same record `dsh-codex-ui-reasoning` writes (src/turbo.js:745-750). The write is a whole-file
+    // rewrite built from a read taken immediately before the mutation, so rows the other plugin recorded
+    // are carried over. The earlier expectation here was a refusal with code `turbo/effort-moved`; that
+    // migration never landed, and the code, its comments and CHANGELOG.md:55 all say the write stays.
     const armed = await call({ sessionId: 's1', action: 'update', lightning: true, ultra: true });
-    assert.equal(armed.result.ok, false, 'the effort write side is gone');
-    assert.equal(armed.result.error.code, 'turbo/effort-moved');
-    assert.equal(armed.result.error.message, '推理档位开关已迁移到 dsh-codex-ui-reasoning 插件，此路由不再写入。');
-    // A refusal, not a write that went nowhere: the read still answers the defaults, and this route
-    // created no record at all.
-    const afterRefusal = await call({ sessionId: 's1', action: 'read' });
-    assert.deepEqual(afterRefusal.result.value, { persona: '', lightning: false, ultra: false, superfast: false, tokenMultiple: 1.5, tokenExact: true });
-    assert.equal(existsSync(join(home, 'storages', 'codex-ui-effort.json')), false, 'a refused update must not create the effort record');
+    assert.equal(armed.result.ok, true, 'the effort write stays on this route');
+    assert.equal(armed.result.value.lightning, true);
+    assert.equal(armed.result.value.ultra, true);
+    // The write reached the shared record, and the read route serves it back.
+    const afterUpdate = await call({ sessionId: 's1', action: 'read' });
+    assert.deepEqual(afterUpdate.result.value, { persona: '', lightning: true, ultra: true, superfast: false, tokenMultiple: 1.5, tokenExact: true });
+    assert.equal(existsSync(join(home, 'storages', 'codex-ui-effort.json')), true, 'an accepted update must create the effort record');
 
-    // The record has one writer now, the other plugin, so the test writes it the same way and the read
-    // route has to serve it — including a rewrite that lands while this process is already running.
+    // The record has two writers now. The test writes it directly, the way the other plugin does, and the
+    // read route has to serve that too — including a rewrite that lands while this process is running.
     writeEffortRecord(home, { s1: { lightning: true, ultra: true } });
     const reread = await call({ sessionId: 's1', action: 'read' });
     assert.deepEqual(reread.result.value, { persona: '', lightning: true, ultra: true, superfast: false, tokenMultiple: 1.5, tokenExact: true });
     const stored = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-effort.json'), 'utf8'));
     assert.deepEqual(stored.sessions.s1.lightning, true);
 
-    // One flag without the other is refused the same way: the field named is the field that is not
-    // this route's to write, whatever its value.
+    // One flag without the other still writes, and the flag that was not named keeps its stored value.
     const partial = await call({ sessionId: 's1', action: 'update', lightning: false });
-    assert.equal(partial.result.ok, false);
-    assert.equal(partial.result.error.code, 'turbo/effort-moved');
+    assert.equal(partial.result.ok, true);
+    assert.equal(partial.result.value.lightning, false);
+    assert.equal(partial.result.value.ultra, true, 'an unnamed switch must not be reset');
 
     // The hero arms the persona for the conversation that starts next: an empty id reads
     // the picker's current value and writes it as pending, without touching session rows.
@@ -487,9 +518,11 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
 
     // A switch named on the "next session" scope is refused for the same reason: there is no writer
     // left here, so the scope no longer changes the answer.
+    // The three switches need a session: the hero's "next session" scope has no row to hold them, so a
+    // request that names one here is refused with `turbo/invalid` — not because the write moved away.
     const bad = await call({ sessionId: '', action: 'update', lightning: true });
     assert.equal(bad.result.ok, false);
-    assert.equal(bad.result.error.code, 'turbo/effort-moved');
+    assert.equal(bad.result.error.code, 'turbo/invalid');
     const noChange = await call({ sessionId: 's1', action: 'update' });
     assert.equal(noChange.result.ok, false);
     assert.equal(noChange.result.error.code, 'turbo/invalid', 'a named session that names no owned field is still invalid');
@@ -527,21 +560,28 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
 
 test('Superfast builds a two-tier tree, stamps the tier in every child prompt, and stops at tier 2', () => {
   const tree = policyText({ persona: 'work', superfast: true });
-  // The tree is the point: a tier-1 child must open two of its own.
+  // The tree is the point: a tier-1 child must open at least two of its own, and a new development
+  // reopens that fan-out because two is a floor rather than a budget.
   assert.match(tree, /## Superfast Mode/);
-  assert.match(tree, /open exactly two grandchildren before you report back/);
+  assert.match(tree, /open at least two grandchildren before you report back/);
+  assert.match(tree, /Two is the floor, not a budget/);
+  assert.match(tree, /A new development reopens the fan-out/);
   // Depth travels inside the prompts, because the host cannot tell a child how deep it sits.
   assert.match(tree, /Tier: N of 2/);
   assert.match(tree, /Tier: 2 of 2/);
-  // And it is bounded: without this the fan-out is seven agent contexts instead of one, each with its own fixed cost.
+  // And it is bounded by depth, not by width: without this the fan-out is seven agent contexts instead
+  // of one, each with its own fixed cost.
+  assert.match(tree, /The one ceiling is depth, not width/);
   assert.match(tree, /There is no tier 3|there is no tier 3/);
   assert.match(tree, /never fan out past tier 2/);
+  // The subtree reports only after it is quiet: same completion rule as the parent.
+  assert.match(tree, /Do not report to the parent until the subtree is quiet/);
   // The tree needs Lightning's rules too — they are what tells a parent how to brief a child.
   assert.match(tree, /## Lightning Mode/);
   // The ordinary guard would forbid the very delegation the tree is built from, so it must be gone.
   assert.doesNotMatch(tree, /Ignore every rule above about fan-out/);
-  assert.doesNotMatch(tree, /your prompt's first line decides whether you fan out/, 'the tier-aware note belongs to the child');
-  assert.match(policyText({ persona: 'work', superfast: true, subagent: true }), /your prompt's first line decides whether you fan out/);
+  assert.doesNotMatch(tree, /the tier-aware note belongs to the child/);
+  assert.match(policyText({ persona: 'work', superfast: true, subagent: true }), /your prompt's first line fixes that tier/);
 });
 
 test('only a delegated child ends with the guard that forbids child fan-out', () => {
@@ -569,12 +609,13 @@ test('the turbo endpoint arms and persists the superfast flag on its own', async
     }))).json();
     const before = await call({ sessionId: 'tree', action: 'read' });
     assert.equal(before.result.value.superfast, false, 'a session starts with the tree off');
-    // This test asks one thing — is the flag read back correctly and does it persist — so the arming
-    // step moves to the record's owner, `dsh-codex-ui-reasoning`, which writes the whole file. The
-    // route's half of the contract is the refusal, asserted once here so it cannot regress silently.
-    const refused = await call({ sessionId: 'tree', action: 'update', superfast: true });
-    assert.equal(refused.result.ok, false);
-    assert.equal(refused.result.error.code, 'turbo/effort-moved');
+    // This test asks one thing — is the flag read back correctly and does it persist. The route writes
+    // the shared record itself (src/turbo.js:745-750), so arming happens through the same call the
+    // interface makes; the earlier expectation of a `turbo/effort-moved` refusal described a migration
+    // that never landed.
+    const armedByRoute = await call({ sessionId: 'tree', action: 'update', superfast: true });
+    assert.equal(armedByRoute.result.ok, true);
+    assert.equal(armedByRoute.result.value.superfast, true);
     writeEffortRecord(home, { tree: { superfast: true } });
     const armed = await call({ sessionId: 'tree', action: 'read' });
     assert.equal(armed.result.value.superfast, true);
@@ -583,11 +624,10 @@ test('the turbo endpoint arms and persists the superfast flag on its own', async
     await turbo.settled();
     const stored = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-effort.json'), 'utf8'));
     assert.equal(stored.sessions.tree.superfast, true, 'the flag must survive a reload');
-    // A malformed value is refused on the same code, not coerced: "this switch is not mine" is the
-    // accurate answer for every shape of the field (src/turbo.js:604-608).
+    // A malformed value is refused on the invalid-argument code, not coerced.
     const bad = await call({ sessionId: 'tree', action: 'update', superfast: 'yes' });
     assert.equal(bad.result.ok, false);
-    assert.equal(bad.result.error.code, 'turbo/effort-moved');
+    assert.equal(bad.result.error.code, 'turbo/invalid');
     // And the hero's "next session" scope never carries it: the tree is armed per conversation.
     const hero = await call({ sessionId: '', action: 'read' });
     assert.equal(hero.result.value.superfast, false);
@@ -625,18 +665,16 @@ test('Lightning re-asserts its mandate once per turn, and only for an armed sess
     const firstNudges = nudges(first);
     assert.equal(firstNudges.length, 1, 'the first step of a turn carries exactly one reminder');
     assert.match(firstNudges[0], /turn 3/);
-    assert.match(firstNudges[0], /check the four fan-out conditions/);
-    // Steps 2 and 3 repeat it — the opener alone was measured to leave turns with zero delegations,
-    // because by the time the model is ready to answer the opener is several tool results behind it.
+    assert.match(firstNudges[0], /dispatch two subagents on two different angles/);
+    // One reminder per turn, on its first step. It used to repeat on steps 2 and 3 as well; that repetition
+    // is gone, so a later step of the same turn carries nothing.
     const second = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 2));
-    assert.equal(nudges(second).length, 1, 'step 2 restates the demand');
-    assert.match(nudges(second)[0], /step 2 of that turn/);
+    assert.deepEqual(nudges(second), [], 'a later step of the same turn is not reminded again');
     const third = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 3));
-    assert.equal(nudges(third).length, 1, 'step 3 restates it once more');
-    // And it stops there: a long turn is not nagged forever.
+    assert.deepEqual(nudges(third), [], 'and the third step carries nothing either');
     const fourth = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 4));
-    assert.deepEqual(nudges(fourth), [], 'the reminder is bounded to the first three steps');
-    const repeated = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 2));
+    assert.deepEqual(nudges(fourth), [], 'a long turn is not nagged');
+    const repeated = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 1));
     assert.deepEqual(nudges(repeated), [], 'the same step is never nudged twice');
     // The next turn gets its own, with its own number — that is what defeats the injector's
     // "same text, skip" rule, which is why the one-shot contract stopped steering anything.
@@ -651,6 +689,75 @@ test('Lightning re-asserts its mandate once per turn, and only for an armed sess
     assert.equal((await call({ sessionId: 's-armed', action: 'read' })).result.value.lightning, false);
     const afterOff = await ctx.fire('agent/pre-step', stepOf('s-armed', 5, 1));
     assert.deepEqual(nudges(afterOff), [], 'turning the switch off stops the reminder');
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previous;
+  }
+});
+
+test('a delegated child inherits the switches of the session that spawned it', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'codex-ui-child-'));
+  const previous = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  try {
+    const ctx = fakeCtx();
+    registerTurbo(ctx);
+    // The effort record is keyed by the parent, verbatim as the harness writes it: the row key and
+    // `parentSession` both carry the `session-` prefix, so the lookup must not strip it.
+    writeEffortRecord(home, { 'session-parent-tree': { lightning: true, superfast: true } });
+    const texts = result => result.messages.map(m => m.content?.[0]?.text ?? '').filter(Boolean);
+    // The header is what the harness records for a delegated session: `origin`, the depth, and the
+    // parent it came from. Values below are copied from a real child session log.
+    const childStep = {
+      agent: {
+        id: 'child-worker-1',
+        session: { header: { origin: 'subagent', delegationDepth: 1, parentSession: 'session-parent-tree' } },
+      },
+      turn: 1,
+      step: 1,
+      signal: { aborted: false },
+    };
+    const child = await ctx.fire('agent/pre-step', childStep);
+    const childText = texts(child).join('\n');
+    // The tree contract reached the child, and the tier-aware tail replaced the ordinary guard: the
+    // ordinary guard forbids fan-out outright, which cancels the very delegation Superfast is built from.
+    assert.match(childText, /## Superfast Mode/, 'the child must receive the tree contract it is meant to run');
+    assert.match(childText, /Tier: 1 of 2/, 'the tier-aware child note must be the tail');
+    assert.doesNotMatch(childText, /Ignore every rule above about fan-out/, 'the fan-out-killing guard must not be the tail');
+    // The switches are inherited; the persona row is not. `personaFor` stamps a pending pick onto the id
+    // it is handed, so a shared scope would let a child claim its parent's row and pin the pick there.
+    const personaRows = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-persona.json'), 'utf8'));
+    assert.equal('session-parent-tree' in (personaRows.sessions ?? {}), false, 'a child must not write its parent persona row');
+    // The parent's switches are what the child is nudged by: the one-shot injection alone was measured to
+    // stop steering after a few turns, which is the whole reason the per-turn reminder exists.
+    const childNudges = texts(await ctx.fire('agent/pre-step', { ...childStep, turn: 2, step: 1 }))
+      .filter(text => text.includes('Lightning is armed'));
+    assert.equal(childNudges.length, 1, 'a child inherits the per-turn reminder from its parent switches');
+    // A child of an unarmed parent still gets nothing but its own tail: no switches, no tree.
+    writeEffortRecord(home, {});
+    const orphanStep = {
+      agent: { id: 'child-worker-2', session: { header: { origin: 'subagent', delegationDepth: 1, parentSession: 'session-not-armed' } } },
+      turn: 1,
+      step: 1,
+      signal: { aborted: false },
+    };
+    const orphan = texts(await ctx.fire('agent/pre-step', orphanStep)).join('\n');
+    assert.doesNotMatch(orphan, /## Superfast Mode/, 'an unarmed parent must not arm its child');
+    // Disarming the parent reaches the child on its next step: the child carries a block it inherited, so
+    // it is the one session that would otherwise keep obeying a contract the user already revoked.
+    const armedChild = {
+      agent: { id: 'child-worker-3', session: { header: { origin: 'subagent', delegationDepth: 1, parentSession: 'session-parent-tree' } } },
+      turn: 1,
+      step: 1,
+      signal: { aborted: false },
+    };
+    writeEffortRecord(home, { 'session-parent-tree': { lightning: true, superfast: true } });
+    assert.match(texts(await ctx.fire('agent/pre-step', armedChild)).join('\n'), /## Superfast Mode/);
+    writeEffortRecord(home, { 'session-parent-tree': { lightning: false, superfast: false } });
+    const offChild = texts(await ctx.fire('agent/pre-step', { ...armedChild, turn: 2 })).join('\n');
+    assert.doesNotMatch(offChild, /## Superfast Mode/, 'the revoked tree must stop reaching the child too');
+    assert.doesNotMatch(offChild, /Tier: 1 of 2/, 'and the tier instruction must go with it');
+    // The session is still armed by its persona, so it keeps the skeleton blocks; what it must not keep
+    // is the tree. `OFF_NOTICE` belongs to a session with every switch off, which this one is not.
   } finally {
     if (previous === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previous;
   }

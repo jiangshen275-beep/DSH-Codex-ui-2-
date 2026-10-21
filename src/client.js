@@ -375,9 +375,14 @@ function TurnProcessStatus({ node, turnProcess }) {
  * plus `visibility`, because `display` cannot be transitioned and unmounting is what made the
  * entrance replay per row.
  */
+
 let hoverCard = null;
 function hoverCardNode() {
   if (hoverCard !== null && hoverCard.isConnected) return hoverCard;
+  // A hot reload re-evaluates this module, so `hoverCard` comes back as null while the old node is
+  // still in the body. Appending a second one left a stale card behind — sometimes still visible,
+  // because nothing removed it. Sweep any leftovers before creating the new one.
+  document.querySelectorAll('.cg-task-preview-floating').forEach(node => node.remove());
   const node = document.createElement('div');
   node.className = 'cg-task-preview cg-task-preview-floating';
   node.setAttribute('role', 'tooltip');
@@ -398,6 +403,19 @@ function placeHoverCard({ title, right, top }) {
   // back inside the window.
   const x = Math.max(8, Math.min(right + 4, window.innerWidth - node.offsetWidth - 8));
   const y = Math.max(8, Math.min(top, window.innerHeight - node.offsetHeight - 8));
+  // A node that is not currently shown has no transform yet, so it sits at `left: 0; top: 0`. Writing
+  // the position while the CSS transform transition is live would animate that jump — the card flying
+  // in from the window corner. Only the transform is suppressed for this first write: `transition-property`
+  // is narrowed to opacity, so the card still fades in, and the full CSS transition returns afterwards
+  // for every later move between rows.
+  if (node.dataset.on !== 'true') {
+    node.style.transitionProperty = 'opacity';
+    node.style.transform = `translate(${x}px, ${y}px)`;
+    void node.offsetWidth;
+    node.dataset.on = 'true';
+    node.style.transitionProperty = '';
+    return;
+  }
   node.style.transform = `translate(${x}px, ${y}px)`;
   node.dataset.on = 'true';
 }
@@ -405,7 +423,6 @@ function placeHoverCard({ title, right, top }) {
 function hideHoverCard() {
   if (hoverCard !== null && hoverCard.isConnected) hoverCard.dataset.on = 'false';
 }
-
 // One stylesheet per page, kept installed by a watcher that outlives any single plugin instance.// Nothing in this plugin removes the stylesheet or the root attribute any more: the earlier hot
 // reload disposed the old instance (which removed both) without the replacement reinstalling them,
 // leaving the sidebar rendered with no styles at all.
@@ -553,6 +570,141 @@ function startStyleWatch() {
   // guard: the next reader would build on it.
 }
 /**
+ * 侧栏 rail 的扩展点：`window.__dshCodexUiRail`。
+ *
+ * 为什么要有：rail 那五个按钮是写死的，别的插件——或者只想加一条快捷方式的用户——要把自己的
+ * 界面挂上侧栏，过去只能改本插件源码再重新打包，这件事对任何作者都不友好。这里把它改成一张
+ * 登记表：登记一条就多一个按钮，点下去要么切到某个 `main` 面板，要么打开网址，要么跑一个回调。
+ *
+ * 为什么走 window 而不是 ctx：客户端这边每个插件拿到的是自己那份 ctx，跨插件没有共享面，宿主
+ * 留给大家的公共对象只有页面的全局。键名固定为 `__dshCodexUiRail`，版本写在 `version` 上。
+ *
+ * 为什么还需要队列：别的插件可能比本包先加载，那时全局对象还不存在。约定是它们先
+ * `window.__dshCodexUiRailQueue.push(entry)`，本包初始化时消费掉——谁先谁后都挂得上。
+ *
+ * 面板目标就是宿主 `main` 槽的 key（`ctx.slots.register({ name: 'main', key })` 里那个 key），
+ * 点击走 `ctx.layout.selectPanel(key)`，与内置五个按钮的 `go()` 是同一条路。
+ */
+const RAIL_API_KEY = '__dshCodexUiRail';
+const RAIL_QUEUE_KEY = '__dshCodexUiRailQueue';
+/** id -> entry；Map 保留登记顺序，`order` 相同时按登记先后排。 */
+const railEntries = new Map();
+const railListeners = new Set();
+/** 当前渲染侧栏时的打开动作，由 Sidebar 装上（它才拿得到 go / openExternal / collapsed）。 */
+let railOpen = null;
+/** 内置图标名；不在表里的一律当 svg path 处理。 */
+const RAIL_ICON_NAMES = new Set(['home', 'files', 'clock', 'search', 'edit', 'bell', 'chevron', 'down', 'folder', 'more', 'check', 'settings', 'refresh', 'help', 'external', 'chat', 'trace', 'target', 'plus', 'trash', 'at']);
+/**
+ * 内置那几颗按钮已经画出来的图标。自定义项不能再用：侧栏上出现两个外链箭头，
+ * 用户没法知道哪个点开是什么——这正是「中转站」那条踩过的坑。
+ */
+const RAIL_RESERVED_ICONS = new Set(['more', 'home', 'files', 'clock', 'at', 'external', 'settings']);
+/** 没给图标、或给了保留图标时落到这里。`target` 是内置按钮没占用的那一个。 */
+const RAIL_FALLBACK_ICON = 'target';
+function railSnapshotList() {
+  return [...railEntries.values()].sort((a, b) => a.order - b.order);
+}
+function railEmit() {
+  for (const listener of [...railListeners]) {
+    // 一个监听器抛错不该带走别的监听器，更不该带走渲染。
+    try { listener(); } catch { /* ignore */ }
+  }
+}
+function railSubscribe(listener) {
+  railListeners.add(listener);
+  return () => railListeners.delete(listener);
+}
+/**
+ * 把外部给的对象整理成一条可以渲染的条目，不合格返回 null。
+ *
+ * 三个目标（panel / url / onClick）一个都没有的条目，点下去什么也不会发生；与其在侧栏放一个
+ * 死按钮，不如拒绝并留一行 warn，让作者当场看见自己的问题。
+ */
+function normalizeRailEntry(raw) {
+  if (raw === null || typeof raw !== 'object') return null;
+  const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+  const label = typeof raw.label === 'string' ? raw.label.trim() : '';
+  if (id === '' || id.length > 64 || label === '' || label.length > 40) return null;
+  const panel = typeof raw.panel === 'string' && raw.panel.trim() !== '' ? raw.panel.trim() : '';
+  const section = typeof raw.section === 'string' ? raw.section.trim() : '';
+  // url 不再只收 http(s)：`steam://`、`tencent://` 这类自定义协议由 Electron 的 shell 打开，
+  // 侧栏挂一个「打开 QQ」就是这么来的。只挡掉会把脚本送进页面的那几个协议。
+  const rawUrl = typeof raw.url === 'string' ? raw.url.trim() : '';
+  const blocked = /^(?:javascript|data|vbscript|file):/i.test(rawUrl);
+  const url = rawUrl !== '' && !blocked && /^[a-z][a-z0-9+.-]*:/i.test(rawUrl) ? rawUrl : '';
+  // `exec` 是本机程序的完整路径，点击时由宿主进程直接启动。它绕开了应用协议那一层——
+  // 协议经常被别的版本抢注册，点下去弹出来的是别人的报错。
+  const exec = typeof raw.exec === 'string' ? raw.exec.trim() : '';
+  const onClick = typeof raw.onClick === 'function' ? raw.onClick : null;
+  if (panel === '' && section === '' && url === '' && exec === '' && onClick === null) return null;
+  const iconName = typeof raw.icon === 'string' ? raw.icon.trim() : '';
+  const iconPath = typeof raw.iconPath === 'string' ? raw.iconPath.trim() : '';
+  return {
+    id,
+    label,
+    panel,
+    section,
+    url,
+    exec,
+    onClick,
+    // `code` = 客户端登记（插件调用 register）；`config` = 从宿主配置文件同步来的。
+    // 两边同 id 时以 code 为准：插件手上是活的函数，文件里只是一份快照。
+    source: raw.source === 'config' ? 'config' : 'code',
+    icon: RAIL_ICON_NAMES.has(iconName) && !RAIL_RESERVED_ICONS.has(iconName) ? iconName : RAIL_FALLBACK_ICON,
+    iconPath,
+    // 自定义 path 的 viewBox 一并支持：16×16 的图（宿主 primitives 里很多）直接塞进 24 的框会缩水。
+    iconViewBox: typeof raw.iconViewBox === 'string' && raw.iconViewBox.trim() !== '' ? raw.iconViewBox.trim() : '0 0 24 24',
+    order: Number.isFinite(raw.order) ? raw.order : 100,
+    // 三种态，不能压成布尔：true 上侧栏、false 收进弹层、undefined 从没表过态（老配置、插件直接登记）。
+    // 界面靠「有没有人表过态」决定要不要退回到默认取前三条，压成 false 就再也分不出这两件事了。
+    pinned: raw.pinned === true ? true : raw.pinned === false ? false : undefined
+  };
+}
+function railRegister(raw) {
+  const entry = normalizeRailEntry(raw);
+  if (entry === null) {
+    console.warn('[dsh-codex-ui] rail entry rejected (needs id, label and one of panel/url/onClick):', raw);
+    return () => {};
+  }
+  railEntries.set(entry.id, entry);
+  railEmit();
+  // 返回销毁函数：React 那边用它做 effect 清理，非 React 调用方直接调用也行。
+  return () => railRemove(entry.id);
+}
+function railRemove(id) {
+  const removed = railEntries.delete(typeof id === 'string' ? id : '');
+  if (removed) railEmit();
+  return removed;
+}
+/** 轮询直到 probe 返回非空，或者超时。DOM 什么时候就绪只能这样等，没有事件可听。 */
+function waitForNode(probe, timeout) {
+  return new Promise(resolve => {
+    const started = Date.now();
+    const tick = () => {
+      let value = null;
+      try { value = probe(); } catch { value = null; }
+      if (value !== null && value !== undefined) { resolve(value); return; }
+      if (Date.now() - started >= timeout) { resolve(null); return; }
+      setTimeout(tick, 60);
+    };
+    tick();
+  });
+}
+/**
+ * 账号菜单里的「设置」项。
+ *
+ * 按语义找，不靠类名：宿主给菜单项的就是 `button[role="menuitem"]`，文本由 locale 决定，
+ * 所以中英文都认。账号菜单就那么几行，和别的菜单不会同时开着。
+ */
+function findSettingsMenuItem() {
+  const items = [...document.querySelectorAll('button[role="menuitem"]')];
+  return items.find(node => /(设置|Settings|Preferences)/i.test(node.textContent ?? '')) ?? null;
+}
+/** 宿主设置弹窗的根节点：既能判断开没开，也能在里面找分区导航。 */
+function settingsModalNode() {
+  return document.querySelector('[data-shortcut-modal="settings"]');
+}
+/**
  * The turn rail's active marker, made to travel.
  *
  * The host does not move one element down the rail: it renders a 2px bar inside whichever row holds
@@ -563,6 +715,17 @@ function startStyleWatch() {
  * the transform does the travelling, so it slides like the chat list's hover card.
  */
 export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 'sessions', 'uiSession', 'remote', 'remote.agentPresets', 'remote.session', 'remote.skills'];export function apply(ctx) {
+  // 回复锻造（原 dsh-codex-ui-HF）先起：它自带样式注入与 DOM 扫描，不依赖本包其余
+  // 模块的初始化顺序，挂不上也不该拖累下面任何一步，所以单独包一层。
+  // ReplyForgeBundle 由 build.mjs 在工厂里注入；单独跑 src/client.js 时它不存在，
+  // typeof 保护让那两种情况都不报错。
+  try {
+    if (typeof ReplyForgeBundle !== 'undefined' && ReplyForgeBundle !== null && typeof ReplyForgeBundle.apply === 'function') {
+      ReplyForgeBundle.apply(ctx);
+    }
+  } catch (error) {
+    console.warn('[dsh-codex-ui] reply-forge client unavailable:', String(error));
+  }
   // Stylesheet first, before any slot registration. Slot registrations can throw (a single-kind slot
   // rejects a second entry at the same priority), and when that happened mid-apply the stylesheet
   // and the root attribute were never installed, leaving the sidebar rendered but unstyled.
@@ -572,6 +735,8 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
   // stylesheet is far worse than a style element surviving an unload (a real uninstall restarts the
   // host and reloads the page).
   startStyleWatch();
+  // 完成提醒要读会话 store，而模块顶层拿不到 ctx，所以只能在这里启动。
+  typeof startDoneNotify === 'function' && startDoneNotify(ctx);
   // Measure the sheet's host-module assumptions against the live DOM, then twice more as the shell
   // settles. Deliberately NOT on the 1s style timer below: that sheet is written for a host
   // generation, which changes on install, not on a page update — a per-second diagnostic would only
@@ -598,6 +763,107 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     return ctx.connection?.rpc?.call?.('/api', 'dsh-codex-ui/turbo', { action: 'aliases', sessionId: '', ...payload });
   });
   registerModelUI(ctx);
+  // 侧栏扩展点对外发布。写一个全局对象而已，放哪都行；放在槽注册之前，是为了让"本包初始化时
+  // 顺带消费队列"这件事发生在第一帧渲染之前——先登记的那一条不该等到用户点一下才出现。
+  try {
+    const host = typeof window === 'undefined' ? null : window;
+    if (host !== null && host[RAIL_API_KEY] === undefined) {
+      host[RAIL_API_KEY] = {
+        version: 1,
+        register: railRegister,
+        remove: railRemove,
+        // `unregister` 是同一件事的另一个叫法，两边习惯都照顾到，省得作者翻文档确认。
+        unregister: railRemove,
+        list: () => railSnapshotList().map(entry => ({ id: entry.id, label: entry.label, panel: entry.panel, url: entry.url, order: entry.order })),
+        // 点按钮之外，也能被别的插件用代码打开某一条（比如它自己的快捷键）。
+        open: id => { if (railOpen !== null) railOpen(railEntries.get(typeof id === 'string' ? id : '') ?? null); }
+      };
+      // 先于本包加载的插件只能 push 到队列里，这里一次性收编。
+      const queued = host[RAIL_QUEUE_KEY];
+      if (Array.isArray(queued)) {
+        for (const raw of queued.splice(0, queued.length)) railRegister(raw);
+      }
+    }
+  } catch (error) {
+    console.warn('[dsh-codex-ui] rail api unavailable:', String(error));
+  }
+  // 不写插件也想加一条的路径：localStorage 里放一个 JSON 数组即可，形如
+  // [{ "id": "gh", "label": "GitHub", "icon": "external", "url": "https://github.com" }]
+  // 这是给普通用户准备的，插件作者走上面那个 register 更合适（能拿到 dispose、能传回调）。
+  try {
+    const stored = window.localStorage?.getItem?.('dsh-codex-ui/rail-items');
+    if (typeof stored === 'string' && stored !== '') {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) for (const raw of parsed) railRegister(raw);
+      else console.warn('[dsh-codex-ui] rail-items 需要一个数组');
+    }
+  } catch (error) {
+    console.warn('[dsh-codex-ui] rail-items unreadable:', String(error));
+  }
+  // 配置文件通道：宿主把 `$DSH_HOME/dsh-codex-ui-rail.json` 经由 rpc 读出来。用户自己改文件、
+  // 或者他的 Agent 用 `sidebar_rail` 工具写文件，都从这条路进来，界面上 15 秒内出现。
+  // 轮询而不是订阅文件：这个面板可能同时开好几个窗口，轮询是唯一不依赖宿主额外能力、
+  // 且在任何窗口都成立的做法，15 秒一次本地调用也不值得优化。
+  let railConfigIds = new Set();
+  const syncRailFromHost = async () => {
+    let items;
+    try {
+      const result = await ctx.connection?.rpc?.call?.('/api', 'dsh-codex-ui/rail', { action: 'list' });
+      if (!result?.ok) return;
+      items = Array.isArray(result.value?.items) ? result.value.items : [];
+    } catch {
+      // 宿主没有这条路（旧版插件、路由没起来）时安静退出，localStorage 与插件登记照常。
+      return;
+    }
+    const incoming = [];
+    for (const item of items) {
+      const entry = normalizeRailEntry({ ...item, source: 'config' });
+      if (entry !== null) incoming.push(entry);
+    }
+    const nextIds = new Set(incoming.map(entry => entry.id));
+    let changed = false;
+    // 文件里删掉的条目要跟着消失。只清 config 来源的，插件登记的不受文件影响。
+    for (const id of railConfigIds) {
+      if (!nextIds.has(id) && railEntries.get(id)?.source === 'config') { railEntries.delete(id); changed = true; }
+    }
+    railConfigIds = nextIds;
+    for (const entry of incoming) {
+      const existing = railEntries.get(entry.id);
+      if (existing !== undefined && existing.source === 'code') continue;
+      railEntries.set(entry.id, entry);
+      changed = true;
+    }
+    if (changed) railEmit();
+  };
+  // 把"当前有哪些 main 面板可以挂"上报给宿主，Agent 才能查到该往 panel 里填什么。
+  // 面板只在浏览器这边可见（`entriesOfSlot` 是客户端的服务），工具却在宿主侧跑，所以要中转。
+  const reportRailPanels = async () => {
+    let panels;
+    try {
+      const entries = ctx.slots?.entriesOfSlot?.('main');
+      if (!Array.isArray(entries)) return;
+      panels = entries
+        .map(entry => ({
+          key: typeof entry?.options?.key === 'string' ? entry.options.key : '',
+          // registrant 在 entry 顶层，不在 options 里（dsh-client-ui-slots 组装 entry 时提升了）。
+          by: typeof entry?.registrant === 'string' ? entry.registrant : ''
+        }))
+        .filter(panel => panel.key !== '');
+    } catch {
+      return;
+    }
+    try {
+      await ctx.connection?.rpc?.call?.('/api', 'dsh-codex-ui/rail', { action: 'panels', panels });
+    } catch { /* 上报失败不影响侧栏，也不该在控制台刷屏 */ }
+  };
+  syncRailFromHost();
+  reportRailPanels();
+  try {
+    const timer = setInterval(() => { syncRailFromHost(); reportRailPanels(); }, 15000);
+    const stop = () => clearInterval(timer);
+    if (typeof ctx.effect === 'function') ctx.effect(() => stop);
+    else window.addEventListener('pagehide', stop, { once: true });
+  } catch { /* 定时器起不来时至少有首次同步那一次 */ }
   // A host that does not expose this extension point must lose one feature, not the whole interface:
   // every registration below goes through here, so an older build without `slots.inject` still gets
   // the styles, the model panel and the window-level chrome.
@@ -977,7 +1243,180 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     const [localSection, setLocalSection] = React.useState('home');
     // The usage rail is a link, not a section: it opens a browser tab, so no panel maps to it.
     const section = scheduled ? 'clock' : skillsOpen ? 'external' : panel === 'plugins' ? 'at' : panel === null ? localSection : '';
-    const rail = (icon, label, onClick) => h('button', { type: 'button', className: 'cg-button cg-rail-item' + (section === icon ? ' cg-rail-selected' : ''), 'aria-label': label, 'aria-current': section === icon ? 'page' : undefined, onClick }, h(Icon, { name: icon, active: section === icon }), h('span', { className: 'cg-rail-tooltip', role: 'tooltip' }, label));
+    const rail = (icon, label, onClick, selected = section === icon, entry = null, extra = '') => h('button', { type: 'button', className: 'cg-button cg-rail-item' + (selected ? ' cg-rail-selected' : '') + (extra === '' ? '' : ' ' + extra), 'aria-label': label, 'aria-current': selected ? 'page' : undefined, onClick }, entry === null ? h(Icon, { name: icon, active: selected }) : railGlyph(entry, selected), h('span', { className: 'cg-rail-tooltip', role: 'tooltip' }, label));
+    // 外部登记的条目：自定义 path 就用 path 画，没给就退回内置图标名。尺寸跟内置按钮的 svg 对齐（18px）。
+    const railGlyph = (entry, selected) => entry.iconPath === ''
+      ? h(Icon, { name: entry.icon, active: selected })
+      : h('svg', { width: 18, height: 18, viewBox: entry.iconViewBox, fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, 'data-icon': entry.id }, h('path', { d: entry.iconPath }));
+    // 订阅登记表：别的插件在本页已经渲染之后才登记时，按钮应当立刻出现，而不是等用户刷新。
+    const [railItems, setRailItems] = React.useState(() => railSnapshotList());
+    React.useEffect(() => {
+      setRailItems(railSnapshotList());
+      return railSubscribe(() => setRailItems(railSnapshotList()));
+    }, []);
+    // 打开宿主设置弹窗。三条约束叠在一起才显得绕：
+    //   · 宿主把「开没开、当前哪一页」关在设置外壳自己的 store 里（`createSettingsShellStore` 建在
+    //     `sidebar.settings` 的 inject 作用域内），没有 provide 出来，外部拿不到它的 `openSection`；
+    //   · 侧栏里藏着的那个开关只拉账号菜单（设置 / 意见反馈 / 退出登录），弹窗在菜单的第一项里；
+    //   · 快捷键命令倒是公开注册的，所以先试合成一个 Ctrl+,，不行再点菜单。
+    const openSettingsDialog = async () => {
+      if (settingsModalNode() !== null) return true;
+      // 合成按键不弹菜单，视觉上最干净。宿主若只认真实按键，这一步什么也不会发生，也没有副作用。
+      try {
+        const press = target => target.dispatchEvent(new KeyboardEvent('keydown', { key: ',', code: 'Comma', keyCode: 188, which: 188, ctrlKey: true, bubbles: true, cancelable: true }));
+        press(document);
+        press(window);
+      } catch { /* 合成事件被挡下就走菜单 */ }
+      await waitForNode(settingsModalNode, 260);
+      if (settingsModalNode() === null) {
+        document.querySelector('.cg-native-settings button')?.click();
+        const item = await waitForNode(findSettingsMenuItem, 800);
+        if (item !== null) item.click();
+        await waitForNode(settingsModalNode, 1500);
+      }
+      return settingsModalNode() !== null;
+    };
+    // 打开设置并翻到某一页。分区清单是公开的（`settings.section` 槽），顺序和文案都能复刻，
+    // 所以不用猜位置——宿主渲染那排导航读的就是同一份数据、同一种排序。
+    const openSettingsSection = async sectionId => {
+      if (!await openSettingsDialog()) return false;
+      const node = settingsModalNode();
+      if (node === null) return false;
+      let rows = [];
+      try {
+        rows = ctx.slots.entries('settings.section').map(entry => ({
+          id: entry?.options?.id ?? '',
+          order: entry?.options?.order ?? 0,
+          // 与宿主的 resolveSlotLabel 同一规则：是函数就调用。
+          label: typeof entry?.options?.label === 'function' ? entry.options.label() : entry?.options?.label ?? ''
+        })).sort((a, b) => a.order - b.order);
+      } catch { return false; }
+      const nav = node.querySelector('nav');
+      const buttons = nav === null ? [] : [...nav.querySelectorAll('button')];
+      if (buttons.length === 0) return false;
+      const target = rows.find(row => row.id === sectionId);
+      // 先按文案找：导航标签与这里同源，平时这条就够。
+      if (target !== undefined && String(target.label) !== '') {
+        const wanted = String(target.label).trim();
+        const hit = buttons.find(button => (button.textContent ?? '').trim() === wanted);
+        if (hit !== undefined) { hit.click(); return true; }
+      }
+      // 文案被改了措辞就按位置找：同一份清单、同一种排序，位置一定对得上。
+      const index = rows.findIndex(row => row.id === sectionId);
+      if (index >= 0 && buttons[index] !== undefined) { buttons[index].click(); return true; }
+      return false;
+    };
+    // 侧栏上的链接和程序都交给宿主进程去开。
+    // 页面上两条路都不通：`window.dshDesktop` 只在 `dsh-app:` 协议下才注入，用浏览器打开 GUI
+    // 时根本不存在；`window.open` 又被宿主只放行 http/https，其余协议一律 deny。结果就是
+    // `steam://`、`tencent://` 这类点了没反应。宿主是普通 Node 进程，由它起子进程交给系统的
+    // 协议处理器、或者直接启动程序，不受那两层限制。
+    const launchRailTarget = async entry => {
+      try {
+        const result = await ctx.connection?.rpc?.call?.('/api', 'dsh-codex-ui/rail', { action: 'open', id: entry.id });
+        if (result?.ok) return;
+        // 插件直接登记的条目压根不在配置文件里，宿主找不到它，退回页面的老办法。
+        console.warn('[dsh-codex-ui] 宿主没能打开这一条，退回页面跳转：', result?.error?.message ?? entry.id);
+      } catch (error) {
+        console.warn('[dsh-codex-ui] 打开失败，退回页面跳转：', String(error?.message ?? error));
+      }
+      if (entry.url !== '') openExternal(entry.url);
+    };
+    const openRailEntry = entry => {
+      if (!entry) return;
+      if (entry.panel !== '') go(entry.panel);
+      if (entry.section !== '') {
+        openSettingsSection(entry.section).then(ok => {
+          if (!ok) console.warn('[dsh-codex-ui] 设置里没有这一页，或没能打开设置弹窗：', entry.section);
+        });
+      }
+      if (entry.url !== '' || entry.exec !== '') launchRailTarget(entry);
+      if (entry.onClick !== null) {
+        // 别人的回调，出错只记一行，不能把本页的渲染带下水。
+        try { entry.onClick(entry); } catch (error) { console.warn('[dsh-codex-ui] rail entry failed:', entry.id, String(error)); }
+      }
+      if (collapsed) ctx.layout.toggleSidebar();
+    };
+    // 侧栏只放得下 3 个自定义按钮（内置五项之后的空间就这么宽），其余收进「更多」弹层。
+    // 三这个数字与宿主侧 rail-config 的 MAX_PINNED 是同一个约束，改一处必须改另一处。
+    const RAIL_SLOTS = 3;
+    const [railMenu, setRailMenu] = React.useState(false);
+    const [railNotice, setRailNotice] = React.useState('');
+    // 右上角那个问号：就地展开一段说明，不往外跳文档——跳出去还得找回来。
+    const [railHelp, setRailHelp] = React.useState(false);
+    // 删除是两段式：第一下把按钮武装起来，第二下才真的删。撤销一条删掉的快捷方式得回去
+    // 重新填一遍字段，而误点只需要一下——不对称，所以中间必须隔一道。
+    const [railPendingRemove, setRailPendingRemove] = React.useState('');
+    // 谁上侧栏由 `pinned` 说了算。只有「所有条目都没写过 pinned」（老配置、插件直接登记，没人表过态）
+    // 时才退回按顺序取前三个；一旦有任何人表过态，就严格按 pinned 来——否则用户把三个全取消以后，
+    // 它们会自己冒回来，等于根本关不掉。
+    const railHasPinChoice = railItems.some(entry => entry.pinned !== undefined);
+    const railShown = (railHasPinChoice ? railItems.filter(entry => entry.pinned === true) : railItems).slice(0, RAIL_SLOTS);
+    // 撤下去的按钮要在 DOM 里多留一拍：React 一卸载，CSS 的淡出动画就没机会开始，用户只会看到它
+    // 「啪」地消失。这里存着上一帧的清单，差集就是正在离场的那些，等它们播完再真正移除。
+    const [railGhosts, setRailGhosts] = React.useState([]);
+    const railPrevRef = React.useRef(railShown);
+    React.useEffect(() => {
+      const previous = railPrevRef.current;
+      const liveIds = new Set(railShown.map(entry => entry.id));
+      const leaving = previous.filter(entry => !liveIds.has(entry.id));
+      railPrevRef.current = railShown;
+      if (leaving.length === 0) return undefined;
+      setRailGhosts(current => [...current.filter(item => !leaving.some(entry => entry.id === item.id)), ...leaving]);
+      const timer = setTimeout(() => {
+        setRailGhosts(current => current.filter(item => !leaving.some(entry => entry.id === item.id)));
+      }, 240);
+      return () => clearTimeout(timer);
+    }, [railItems]);
+    const setRailPinned = async (entry, pinned) => {
+      setRailNotice('');
+      if (entry.source === 'config') {
+        try {
+          const result = await ctx.connection?.rpc?.call?.('/api', 'dsh-codex-ui/rail', { action: 'pin', id: entry.id, pinned });
+          if (result?.ok) { await syncRailFromHost(); return; }
+          setRailNotice(result?.error?.message ?? '保存失败，请重试。');
+        } catch (error) {
+          setRailNotice(String(error?.message ?? error));
+        }
+        return;
+      }
+      // 插件直接登记的条目写不回配置文件：这次页面里生效，刷新后回到它登记时的样子。
+      const current = railEntries.get(entry.id);
+      if (current !== undefined) { railEntries.set(entry.id, { ...current, pinned }); railEmit(); }
+    };
+    const railKind = entry => entry.panel !== '' ? '面板' : entry.section !== '' ? '设置页' : entry.exec !== '' ? '程序' : '链接';
+    const removeRailEntry = async entry => {
+      setRailNotice('');
+      if (railPendingRemove !== entry.id) {
+        setRailPendingRemove(entry.id);
+        // 武装状态三秒后自己解除：用户点了一下又改了主意，回来时按钮不该还架着。
+        setTimeout(() => setRailPendingRemove(current => current === entry.id ? '' : current), 3000);
+        return;
+      }
+      setRailPendingRemove('');
+      if (entry.source === 'config') {
+        try {
+          const result = await ctx.connection?.rpc?.call?.('/api', 'dsh-codex-ui/rail', { action: 'remove', id: entry.id });
+          if (result?.ok) { await syncRailFromHost(); return; }
+          setRailNotice(result?.error?.message ?? '删除失败，请重试。');
+        } catch (error) {
+          setRailNotice(String(error?.message ?? error));
+        }
+        return;
+      }
+      // 插件直接登记的条目不在配置文件里，从登记表里摘掉就是删了它（插件重新注册时还会回来）。
+      railRemove(entry.id);
+    };
+    React.useEffect(() => {
+      if (!railMenu) return;
+      const dismiss = event => { if (!(event.target instanceof Element) || event.target.closest('.cg-rail-more') === null) setRailMenu(false); };
+      const escape = event => { if (event.key === 'Escape') setRailMenu(false); };
+      document.addEventListener('pointerdown', dismiss);
+      document.addEventListener('keydown', escape);
+      return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape); };
+    }, [railMenu]);
+    // 供 `__dshCodexUiRail.open(id)` 使用；每次渲染刷新闭包，拿到的永远是最新状态。
+    railOpen = openRailEntry;
     const [settingsMenu, setSettingsMenu] = React.useState(false);
     const [balance, setBalance] = React.useState(null);
     const [balanceLoading, setBalanceLoading] = React.useState(false);
@@ -1082,6 +1521,12 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     }, [taskHover]);
     const [recentOpen, setRecentOpen] = React.useState(false);
     const [archivedOpen, setArchivedOpen] = React.useState(false);
+    // Multi-select for the archived list. Only archived rows carry a checkbox, and the archive header
+    // grows a 全选 / 取消全选 pair plus a batch delete once anything is picked. The set is keyed by
+    // session id and pruned against `archivedList` at render time, so an id that leaves the archive
+    // (or gets purged) can never stay selected invisibly.
+    const [archivedSelected, setArchivedSelected] = React.useState(() => new Set());
+    const [archiveBulk, setArchiveBulk] = React.useState('');
     // Child Sessions live in two groups that disclose independently: subagents and user branches.
     // Every set here is keyed by the spawning Session, so one group's disclosure can never move
     // the other's, and nothing but a click ever opens one. Three levels, opened in order: the row's
@@ -1524,7 +1969,9 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     };
     const status = useSessionStatus(s => s);
     const waiting = Array.from(status.values()).filter(s => s.pendingInteraction || s.completionUnread).length;
-    const settings = () => { setSettingsMenu(false); document.querySelector('.cg-native-settings button')?.click(); };
+    // 侧栏自己那个「设置」菜单项：走同一个入口。只点隐藏的账号开关只会拉出账号菜单，
+    // 用户还得再点一次「设置」，这一步本来就该省掉。
+    const settings = () => { setSettingsMenu(false); openSettingsDialog(); };
     // Rename goes over the same client remote the native sidebar uses: `sessions.using` borrows the
     // Session's binding for the call, and the accepted title updates its title projection, so the
     // row follows the store instead of being patched locally. A refusal arrives as `!ok`.
@@ -1620,11 +2067,11 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     // removes the log directory of an archived Session and this side only asks. The row is offered
     // on archived Sessions alone, disappears the moment the Host confirms, and the list itself drops
     // it on the next load because the log is what the list is built from.
+    // No confirmation dialog: the delete entry only exists on already-archived Sessions and the owner
+    // asked for the extra NativeDialog step gone (2.1.0). Failures still surface through `navigationError`.
     const purgeSession = async id => {
-      const title = sessions[id]?.title || '该会话';
       setTaskMenu(null);
       setNavigationError('');
-      if (!window.confirm(`永久删除「${title}」的会话日志？\n\n日志文件会被删除，无法恢复。`)) return;
       try {
         const result = await ctx.connection.rpc.call('/api', 'dsh-codex-ui/purge-session', { sessionId: id });
         if (!result?.ok) throw new Error(result?.error?.message || '删除失败，请重试。');
@@ -1637,6 +2084,31 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
         // a 404 means the running Host predates the endpoint, not that the Session is undeletable.
         setNavigationError(/not[ -]?found|404/i.test(message) ? '删除服务未加载：请重启 DSH 后再试。' : message);
       }
+    };
+    // Batch delete for the archived multi-select. One request per id, run serially on purpose: the
+    // Host half does readdir + rmSync per Session, and firing 160 of those at once is how a delete
+    // queue turns into a stalled event loop. The counter is the progress the user sees.
+    const purgeArchivedSelection = async ids => {
+      if (!Array.isArray(ids) || ids.length === 0) return;
+      setNavigationError('');
+      setArchiveBulk(`正在删除 0/${ids.length}`);
+      let done = 0;
+      let failed = 0;
+      let firstError = '';
+      for (const id of ids) {
+        try {
+          const result = await ctx.connection.rpc.call('/api', 'dsh-codex-ui/purge-session', { sessionId: id });
+          if (!result?.ok) throw new Error(result?.error?.message || '删除失败，请重试。');
+          setPurgedIds(prev => { const next = new Set(prev); next.add(id); return next; });
+        } catch (error) {
+          failed += 1;
+          firstError ||= error?.message || String(error);
+        }
+        done += 1;
+        setArchiveBulk(`正在删除 ${done}/${ids.length}${failed ? `（失败 ${failed}）` : ''}`);
+      }
+      setArchiveBulk(`已删除 ${done - failed}/${ids.length}${failed ? `，${failed} 个失败：${firstError}` : ''}`);
+      setArchivedSelected(new Set());
     };
     // One disclosure per child group. The header names the group and carries its own count; a group
     // longer than one page renders only that page plus the remaining count, which is what keeps a
@@ -1685,14 +2157,18 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
       // The store carries its own display name (`displayTitle`: title → cwd → id). Reading only
       // `title` left every unnamed Session — most subagent rows — falling through to the archive
       // wording, so archived-looking labels appeared on rows that were never archived.
+      // The fallback used to be `String(id).slice(0, 8)`, which on a `session-<uuid>` id yields the
+      // literal "session-" for every row — a dozen archived Sessions all read `已归档会话 session-`,
+      // distinguishable by nothing. Strip the prefix first so the shown part is the uuid.
+      const shortId = String(id).replace(/^session-/, '').slice(0, 8);
       const title = openable
         // A blank Session has no title yet, and `displayTitle` would then show the working directory's
         // basename (title → cwd → id) — a new conversation read as "default-workspace". The host's own
         // sidebar labels blank rows with the localized New Session string; match that rule.
         ? entry.blank === true
           ? '新会话'
-          : entry.displayTitle || entry.title || String(id).slice(0, 8)
-        : `已归档会话 ${String(id).slice(0, 8)}`;
+          : entry.displayTitle || entry.title || shortId
+        : `已归档会话 ${shortId}`;
       const archiveLabel = isArchived ? '取消归档' : '归档会话';
       const isPinned = openable && pins.includes(id);
       const groups = openable ? childGroupsOf.get(id) : undefined;
@@ -1728,6 +2204,21 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
         onMouseEnter: event => { const rect = event.currentTarget.getBoundingClientRect(); setTaskHover({ title, right: rect.right, top: rect.top }); },
         onMouseLeave: () => setTaskHover(null)
       },
+        // The archived checkbox comes first so the hit target sits where every other selection UI puts
+        // it. `stopPropagation` keeps the row's own click (open Session) from firing with it.
+        isArchived && h('input', {
+          key: 'pick',
+          type: 'checkbox',
+          className: 'cg-archived-check',
+          'aria-label': '选择 ' + title,
+          checked: archivedSelected.has(id),
+          onChange: event => {
+            event.stopPropagation();
+            const on = event.target.checked;
+            setArchivedSelected(prev => { const next = new Set(prev); if (on) next.add(id); else next.delete(id); return next; });
+          },
+          onClick: event => event.stopPropagation(),
+        }),
         // One chevron, no permanent headers: the panel below carries the two group names and their
         // counts once it is open. The counts live on the button for tests and screen readers.
         childCount > 0 && h('button', {
@@ -1761,6 +2252,49 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     const recentIds = Object.keys(sessions).filter(id => sessions[id]?.origin !== 'subagent' && !pins.includes(id) && !archivedSet.has(id) && !isBranchChild(id) && !purgedIds.has(id) && !ghostIds.has(id) && matchesQuery(id)).sort((a, b) => stamp(sessions[b]) - stamp(sessions[a]));
     return h('div', { className: `cg-sidebar${collapsed ? ' cg-collapsed' : ''}` },
       h('nav', { className: 'cg-rail', 'aria-label': '应用导航' },
+        // 「全部快捷方式」常驻最上面。它是自定义入口唯一的发现路径：藏在「装不下才出现」后面，
+        // 就意味着没装满三条时用户永远看不到它，也不会知道这功能存在——他一开始就抱怨过侧栏是空的。
+        h('div', { className: 'cg-rail-more' },
+          rail('more', `全部快捷方式（${railItems.length}/${RAIL_SLOTS}）`, () => setRailMenu(!railMenu), railMenu),
+          railMenu && h('div', { className: 'cg-rail-menu', role: 'dialog', 'aria-label': '全部快捷方式' },
+            h('div', { className: 'cg-rail-menu-head' },
+              h('p', { className: 'cg-rail-menu-title' }, `侧边栏自定义上限 ${railShown.length}/${RAIL_SLOTS}`),
+              h('button', {
+                type: 'button',
+                className: 'cg-rail-menu-help-toggle' + (railHelp ? ' cg-on' : ''),
+                'aria-expanded': railHelp,
+                'aria-label': '侧边栏快捷项说明',
+                title: '说明',
+                onClick: () => setRailHelp(!railHelp)
+              }, h(Icon, { name: 'help' }))
+            ),
+            railHelp && h('div', { className: 'cg-rail-menu-help' },
+              h('p', null, '侧边栏上限为三个，本信息框包含所有新增的侧边栏按钮。点右边的「隐藏 / 显示」能把任意一条换上或撤下。'),
+              h('p', null, '想要新的，对 Agent 说一句「帮我增加侧边栏」，Agent 会自动阅读文档说明书，再回来问你。')
+            ),
+            railItems.length === 0 && h('p', { className: 'cg-rail-menu-empty' }, '对 Agent 说一句「往侧栏加个 XX」，装好的就会出现在这里。'),
+            ...railItems.map(entry => h('div', { key: entry.id, className: 'cg-rail-menu-row' },
+              h('button', { type: 'button', className: 'cg-rail-menu-open', onClick: () => { setRailMenu(false); openRailEntry(entry); } },
+                railGlyph(entry, false),
+                h('span', { className: 'cg-rail-menu-name' }, entry.label),
+                h('span', { className: 'cg-rail-menu-kind' }, railKind(entry))),
+              h('button', {
+                type: 'button',
+                className: 'cg-rail-menu-pin' + (entry.pinned === true ? ' cg-on' : ''),
+                'aria-pressed': entry.pinned === true,
+                onClick: () => setRailPinned(entry, entry.pinned !== true)
+              }, entry.pinned === true ? '隐藏' : '显示'),
+              h('button', {
+                type: 'button',
+                className: 'cg-rail-menu-remove' + (railPendingRemove === entry.id ? ' cg-armed' : ''),
+                'aria-label': railPendingRemove === entry.id ? `确认删除 ${entry.label}` : `删除 ${entry.label}`,
+                title: railPendingRemove === entry.id ? '再点一次就删掉' : '删除',
+                onClick: () => removeRailEntry(entry)
+              }, railPendingRemove === entry.id ? '删?' : h(Icon, { name: 'trash' }))
+            )),
+            railNotice !== '' && h('p', { className: 'cg-rail-menu-note', role: 'status' }, railNotice)
+          )
+        ),
         rail('home', '主页', () => { setLocalSection('home'); go(null); if (collapsed) ctx.layout.toggleSidebar(); }),
         rail('files', '用量', () => openExternal('https://platform.deepseek.com/usage')),
         rail('clock', '定时任务', () => go('cg-schedules')),
@@ -1772,6 +2306,25 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
         // skill 在 DSH 里以 dsh-skill、dsh-experimental-badge-skill-bundle 这类插件包存在，因此落到插件面板。
         // 这是推断而非确认：若日后出现真正的 skill 面板，把这里的 go('plugins') 换成该 panel id 即可。
         rail('external', '技能', () => go('cg-skills')),
+        // 其它插件 / 配置文件登记的条目，排在五个内置按钮之后、rail-bottom 之前，最多三个。
+        // 高亮只对 panel 目标判定：url 和 section 没有「当前面板」这个概念，强行高亮会误导。
+        ...railShown.map(entry => rail(
+          entry.iconPath !== '' ? entry.id : entry.icon,
+          entry.label,
+          () => openRailEntry(entry),
+          entry.panel !== '' && panel === entry.panel,
+          entry
+        )),
+        // 正在离场的条目：还占着原来的位置播淡出，点了也没反应。
+        ...railGhosts.map(entry => rail(
+          entry.iconPath !== '' ? entry.id : entry.icon,
+          entry.label,
+          () => {},
+          false,
+          entry,
+          'cg-rail-ghost'
+        )),
+        // 「全部快捷方式」按钮已上移到 rail 最顶端（home 之前）并改为常驻，这里不再重复渲染。
         h('div', { className: 'cg-rail-bottom' },
           h('div', { className: 'cg-settings', ref: settingsAnchor },
             h(Button, { icon: 'settings', label: '设置菜单', className: 'cg-settings-trigger', 'aria-haspopup': 'menu', 'aria-expanded': settingsMenu, onClick: () => setSettingsMenu(!settingsMenu) }),
@@ -1848,6 +2401,23 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
           h(Button, { label: '会话', className: 'cg-section-toggle', 'aria-expanded': recentOpen, onClick: () => setRecentOpen(!recentOpen), children: ['会话', h('span', { key: 'arrow', className: 'cg-disclosure-arrow', 'aria-hidden': true }, h(Icon, { name: 'chevron', size: 13 }))] }),
           ...(recentOpen ? recentIds.map(id => renderTask(id)) : []),
           archivedList.length > 0 && h(Button, { label: '已归档', className: 'cg-section-toggle', 'aria-expanded': archivedOpen, onClick: () => setArchivedOpen(!archivedOpen), children: ['已归档', h('span', { key: 'arrow', className: 'cg-disclosure-arrow', 'aria-hidden': true }, h(Icon, { name: 'chevron', size: 13 }))] }),
+          // Archive toolbar, only while the group is open. 全选 / 取消全选 flips the whole visible list
+          // (it is already filtered by the search query, so "all" means "all I can see").
+          archivedOpen && archivedList.length > 0 && h('div', { className: 'cg-archived-tools' },
+            h(Button, {
+              label: archivedList.every(id => archivedSelected.has(id)) ? '取消全选' : '全选',
+              className: 'cg-archived-all',
+              onClick: () => setArchivedSelected(archivedList.every(id => archivedSelected.has(id)) ? new Set() : new Set(archivedList)),
+              children: archivedList.every(id => archivedSelected.has(id)) ? '取消全选' : '全选',
+            }),
+            archivedSelected.size > 0 && h(Button, {
+              icon: 'trash',
+              label: `删除选中的 ${archivedSelected.size} 个会话日志`,
+              className: 'cg-archived-purge',
+              onClick: () => purgeArchivedSelection(archivedList.filter(id => archivedSelected.has(id))),
+              children: `删除 ${archivedSelected.size} 个`,
+            }),
+            archiveBulk && h('span', { className: 'cg-archived-bulk', role: 'status' }, archiveBulk)),
           ...(archivedOpen ? archivedList.map(id => renderTask(id)) : []),
           navigationError && h('div', { className: 'cg-notice', role: 'status' }, navigationError)),
         h('div', { className: 'cg-workspaces', hidden: true }, renderSlot('sidebar.workspaces', { wide: !collapsed, expandSidebar: () => ctx.layout.toggleSidebar() })),
@@ -2346,4 +2916,443 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
   };
   settle();
   new MutationObserver(settle).observe(shell, { attributes: true, attributeFilter: ['data-ds-dark-theme'] });
+})();
+
+// 回答结束后播一声提示音。
+//
+// 判据是宿主自己的 `[data-chat-running="true"]` 节点：ui-chat 在生成期间挂着它，生成结束就卸载。
+// 但"从有到无"只是必要条件，不是充分条件 —— 至少两种情况会让它消失，而回答远没有说完：
+//   · 用户主动中止（发送键变成停止键被点掉，或者连按两次 Esc）；
+//   · 生成途中切到另一个会话，视图整个换掉，原会话还在后台继续跑。
+// 所以这里同时读宿主挂在会话容器上的 `data-conversation-session`，并把中止手势记成一个时间窗：
+// 只有"会话没变 + 没踩中止窗 + 节点 240ms 内没重新挂上"才算说完了。
+//
+// 另外两个必须守住的边界：
+//   · 页面首次加载、或切到一个空闲会话时，基准取当下状态，不会凭空响一声；
+//   · 音频解码失败、或浏览器拒绝自动播放（初次未交互）时静默吞掉 —— 提示音不该影响回答本身。
+// 通知点开时要跳会话，而卡片/通知在模块顶层就装好了，那时还没有 ctx；这里留一个位置，
+// 由 apply 启动时填进来。运行时用到的都是填好之后的值。
+let doneCtx = null;
+const DONE_SOUND_URL = '/api/dsh-codex-ui/agent-done-sound';
+// "说完了"只判断一次，卡片和其它提示都听这个事件，免得各自猜一套、各自漏一种情况。
+const DONE_EVENT = 'dsh-codex-ui:answer-done';
+/**
+ * 回答完成提醒。
+ *
+ * 判据从"页面上那个 running 节点消失"换成了"会话自己的 running 从真变假"。理由很实在：页面只渲染
+ * 当前这一条会话，别的会话在后台跑完时 DOM 一点变化都没有，靠它根本看不见；而会话 store 里每条会话
+ * 都带 running，谁跑完了一目了然。
+ *
+ * 规则也跟着变干净：**完成的是当前会话就不提醒**，最小化也算当前会话 —— 人回来就看得见的东西，
+ * 不必叫；只有别的会话在后台跑完，才值得一声响加一条通知。
+ * 顺带把"点停止"这类中止也解决了：中止发生在当前会话，天然被这条规则过滤掉。
+ */
+function startDoneNotify(ctx) {
+  if (typeof document === 'undefined') return;
+  doneCtx = ctx ?? null;
+
+  // 插件热重载会让 apply 再跑一遍。旧订阅装在上一份闭包里，不会自己消失，两个订阅各播一次
+  // 就成了一轮两声。所以先拆掉上一次的，再装新的。
+  try {
+    if (typeof window.__cgDoneStop === 'function') window.__cgDoneStop();
+  } catch {
+    // 拆不掉也要继续，下面的去抖还能兜住重复。
+  }
+  window.__cgDoneStop = null;
+
+  let audio = null;
+  const play = () => {
+    try {
+      if (audio === null) {
+        audio = new Audio(DONE_SOUND_URL);
+        audio.preload = 'auto';
+      }
+      audio.currentTime = 0;
+      const started = audio.play();
+      if (started && typeof started.catch === 'function') started.catch(() => {});
+    } catch (error) {
+      // 播不出来不能变成页面上的错误，但要留痕迹方便查。
+      window.__cgLastSoundError = String(error);
+    }
+  };
+  // 手动验货用：控制台 __cgDoneSound() 只测音频这一环。
+  window.__cgDoneSound = play;
+
+  // 当前会话 id：ui-session 的 current 优先；读不到再从会话表里挑主视图持有者。
+  // 读到的值一律缓存：切换和重挂的瞬间会读到空，若把空当成"没有当前会话"，当前会话的完成就会
+  // 被误判成别的会话 —— 暂停时那声不该来的提示就是这么冒出来的。
+  let lastCurrentId = '';
+  const currentSessionId = () => {
+    // DOM 优先：宿主把正在显示的会话 id 直接写在容器上，这是"此刻在看哪条会话"最直接的证据，
+    // 不依赖 UI 服务的内部结构，最小化时也照样读得到。
+    try {
+      const fromDom = document
+        .querySelector('[data-conversation-content]')
+        ?.getAttribute('data-conversation-session');
+      if (typeof fromDom === 'string' && fromDom !== '') {
+        lastCurrentId = fromDom;
+        return fromDom;
+      }
+    } catch {
+      // 继续往下试。
+    }
+    try {
+      const fromUi = ctx?.uiSession?.adapter?.current?.getSnapshot?.()?.key;
+      if (typeof fromUi === 'string' && fromUi !== '') {
+        lastCurrentId = fromUi;
+        return fromUi;
+      }
+    } catch {
+      // 继续往下试。
+    }
+    try {
+      const snapshot = ctx?.sessions?.list?.getSnapshot?.();
+      const byId = snapshot?.byId;
+      const rows =
+        byId !== null && typeof byId === 'object'
+          ? Object.values(byId)
+          : Array.isArray(snapshot?.items)
+            ? snapshot.items
+            : [];
+      const main = rows.find(row => row && row.retainedBy && row.retainedBy.mainView > 0);
+      const mainId =
+        typeof main?.id === 'string' ? main.id : typeof main?.sessionId === 'string' ? main.sessionId : '';
+      if (mainId !== '') {
+        lastCurrentId = mainId;
+        return mainId;
+      }
+    } catch {
+      // 读不到就沿用上一次。
+    }
+    return lastCurrentId;
+  };
+
+  // 同一次完成只宣布一次。标记挂在 window 上而不是闭包里：热重载之后是两个实例，
+  // 闭包里的标记各算各的，只有挂在 window 上才拦得住第二个。
+  const announce = detail => {
+    const now = Date.now();
+    if (now - (window.__cgLastDoneAt ?? 0) < 1500) return;
+    window.__cgLastDoneAt = now;
+    try {
+      window.dispatchEvent(new CustomEvent(DONE_EVENT, { detail }));
+    } catch {
+      // 事件发不出去不该连累音频。
+    }
+    play();
+  };
+
+  // "正在看"= 窗口在前台、页面可见、而且看的正是这条会话。三者同时成立才不提醒。
+  // 最小化、切到别的应用、看着别的会话，这三种情况人其实都看不见这条回答，都该叫一声
+  // —— 早先把"最小化"也算成在看，结果最小化之后反而没声了。
+  const watching = id => {
+    try {
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) return false;
+    } catch {
+      return false;
+    }
+    return id === currentSessionId();
+  };
+
+  const store = ctx?.sessions?.list;
+  if (store !== undefined && store !== null && typeof store.subscribe === 'function') {
+    const snapshotOf = () => (typeof store.getSnapshot === 'function' ? store.getSnapshot() : null);
+    // 快照的形状在宿主这边有两种可能：{ ids, byId } 或者 { items }。两种都读，不去赌是哪一种。
+    const rowsOf = snapshot => {
+      if (snapshot === null || snapshot === undefined) return [];
+      const byId = snapshot.byId;
+      if (byId !== null && typeof byId === 'object') return Object.values(byId);
+      return Array.isArray(snapshot.items) ? snapshot.items : [];
+    };
+    const idOf = row =>
+      typeof row?.id === 'string' ? row.id : typeof row?.sessionId === 'string' ? row.sessionId : '';
+    // 基线：插件加载时已经在跑的会话照常记录，它结束时仍然算一次完成。
+    const known = new Map();
+    for (const row of rowsOf(snapshotOf())) {
+      const id = idOf(row);
+      if (id !== '') known.set(id, row?.running === true);
+    }
+    const unsubscribe = store.subscribe(() => {
+      const rows = rowsOf(snapshotOf());
+      const seen = new Set();
+      for (const row of rows) {
+        const id = idOf(row);
+        if (id === '') continue;
+        seen.add(id);
+        const running = row?.running === true;
+        const previous = known.has(id) ? known.get(id) : running;
+        known.set(id, running);
+        if (!previous || running) continue;
+        // 正看着这条会话才不提醒；最小化、或看着别的会话都要叫。
+        if (watching(id)) continue;
+        announce({ sessionId: id, title: typeof row?.title === 'string' ? row.title : '' });
+      }
+      for (const id of [...known.keys()]) if (!seen.has(id)) known.delete(id);
+    });
+    if (typeof unsubscribe === 'function') window.__cgDoneStop = unsubscribe;
+    window.__cgDoneMode = 'store';
+    return;
+  }
+
+  // 退路：拿不到会话 store 时退回 DOM 观察。这条路上只看得见当前会话，而当前会话不提醒，
+  // 因此实际上不会出声 —— 留着它是为了"没有 store"这件事不要变成一片静默的坏状态。
+  window.__cgDoneMode = 'dom';
+  const runningNow = () => document.querySelector('[data-chat-running="true"]') !== null;
+  const sessionNow = () =>
+    document.querySelector('[data-conversation-content]')?.getAttribute('data-conversation-session') ?? null;
+  let wasRunning = runningNow();
+  let seenSession = sessionNow();
+  let settleTimer = null;
+  const evaluate = () => {
+    const running = runningNow();
+    const session = sessionNow();
+    // 容器被 React 重挂的瞬间读不到 id，那不是"换了会话"，只有读到真实 id 才比较。
+    if (session !== null && session !== seenSession) {
+      seenSession = session;
+      wasRunning = running;
+      clearTimeout(settleTimer);
+      return;
+    }
+    if (!running && wasRunning) {
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => {
+        if (runningNow()) return;
+        const current = sessionNow();
+        if (current !== null && current !== seenSession) return;
+        // 这条退路只看得到当前会话，于是"看着没看着"退化成窗口在不在前台。
+        if (current !== null && watching(current)) return;
+        if (current === null) return;
+        announce({ sessionId: current, title: '' });
+      }, 240);
+    }
+    wasRunning = running;
+  };
+  new MutationObserver(evaluate).observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['data-chat-running'],
+  });
+  wasRunning = runningNow();
+}
+
+// 回答完成卡片，形态照 ChatGPT 桌面端那条通知：小标题、正文摘要、一个回复输入框、一个 Reply。
+//
+// 两个设计上的取舍，都是被具体场景逼出来的：
+//   · 只在人不在这个窗口前的时候浮出来。正看着当前会话时，回答就在眼前，再糊一张卡只会挡住输入框。
+//     窗口失焦、或者页面被切到后台，才是"这条回答你可能没看见"的时刻。
+//   · Reply 不自己发明发送通道，而是把字灌进宿主自己的 composer 再点它的发送键。这样发出去的是
+//     一条普通消息，历史、附件、插话规则全部沿用宿主那一套，插件不需要知道会话协议。
+const DONE_NOTICE_STYLE_ID = 'cg-done-notice-style';
+const DONE_NOTICE_ID = 'cg-done-notice';
+(() => {
+  if (typeof document === 'undefined') return;
+
+  // 注意：这里不再判断"该不该提醒"。事件只会在"别的会话跑完了"时发出，
+  // 当前会话（含最小化）在源头就被过滤掉了，两处各判一次只会判出分歧。
+  const shouldAnnounce = () => true;
+
+  const injectStyle = () => {
+    if (document.getElementById(DONE_NOTICE_STYLE_ID) !== null) return;
+    const style = document.createElement('style');
+    style.id = DONE_NOTICE_STYLE_ID;
+    style.textContent = `
+#${DONE_NOTICE_ID}{position:fixed;right:24px;bottom:24px;width:380px;max-width:calc(100vw - 32px);box-sizing:border-box;
+  background:#fff;color:#1f2023;border-radius:12px;padding:14px 16px 12px;z-index:2147483000;
+  box-shadow:0 12px 36px rgba(0,0,0,.26),0 1px 3px rgba(0,0,0,.14);
+  font:14px/1.55 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  opacity:0;transform:translateY(12px);transition:opacity .18s ease,transform .18s ease}
+#${DONE_NOTICE_ID}[data-show="true"]{opacity:1;transform:none}
+#${DONE_NOTICE_ID} .cg-head{display:flex;align-items:center;gap:8px;color:#5f6368;font-size:13px}
+#${DONE_NOTICE_ID} .cg-app{font-weight:600;color:#3c4043}
+#${DONE_NOTICE_ID} .cg-x{margin-left:auto;border:0;background:transparent;color:#8a8f98;font-size:18px;line-height:1;
+  width:26px;height:26px;border-radius:6px;cursor:pointer}
+#${DONE_NOTICE_ID} .cg-x:hover{background:rgba(0,0,0,.06)}
+#${DONE_NOTICE_ID} .cg-title{margin:10px 0 4px;font-size:15px;font-weight:700;color:#1f2023}
+#${DONE_NOTICE_ID} .cg-body{margin:0 0 12px;color:#3c4043;max-height:4.6em;overflow:hidden;white-space:pre-wrap;
+  overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+#${DONE_NOTICE_ID} .cg-row{display:flex;gap:8px;align-items:center}
+#${DONE_NOTICE_ID} .cg-input{flex:1;min-width:0;box-sizing:border-box;border:1px solid #d6d9de;border-radius:8px;
+  padding:8px 10px;font:inherit;color:inherit;background:#fff;outline:none}
+#${DONE_NOTICE_ID} .cg-input:focus{border-color:#8ab4f8;box-shadow:0 0 0 3px rgba(138,180,248,.28)}
+#${DONE_NOTICE_ID} .cg-send{border:1px solid #d6d9de;background:#f6f7f9;border-radius:8px;padding:8px 14px;
+  font:inherit;font-weight:600;color:#3c4043;cursor:pointer}
+#${DONE_NOTICE_ID} .cg-send:hover{background:#eef0f3}
+#${DONE_NOTICE_ID} .cg-row[data-busy="true"] .cg-send{opacity:.55;pointer-events:none}
+html[data-ds-dark-theme] #${DONE_NOTICE_ID}{background:#232529;color:#e8eaed;box-shadow:0 12px 36px rgba(0,0,0,.6),0 1px 3px rgba(0,0,0,.4)}
+html[data-ds-dark-theme] #${DONE_NOTICE_ID} .cg-title{color:#f1f3f4}
+html[data-ds-dark-theme] #${DONE_NOTICE_ID} .cg-body{color:#c8ccd2}
+html[data-ds-dark-theme] #${DONE_NOTICE_ID} .cg-app{color:#e8eaed}
+html[data-ds-dark-theme] #${DONE_NOTICE_ID} .cg-input{background:#2b2e33;border-color:#3c4046;color:#e8eaed}
+html[data-ds-dark-theme] #${DONE_NOTICE_ID} .cg-send{background:#2f3238;border-color:#3c4046;color:#e8eaed}
+html[data-ds-dark-theme] #${DONE_NOTICE_ID} .cg-x:hover{background:rgba(255,255,255,.08)}
+`.trim();
+    document.head.appendChild(style);
+  };
+
+  // 摘要来源：聊天区里最后一个有文字的对话节点。取不到就退化成整块文本的尾巴。
+  const summarize = () => {
+    const root = document.querySelector('[data-conversation-content]');
+    if (root === null) return '回答已完成。';
+    const nodes = root.querySelectorAll('[data-chat-node-key]');
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const text = (nodes[index].innerText || '').replace(/\s+/g, ' ').trim();
+      if (text.length > 0) return text;
+    }
+    const tail = (root.innerText || '').replace(/\s+/g, ' ').trim();
+    return tail.length > 0 ? tail.slice(-160) : '回答已完成。';
+  };
+
+  const editorNode = () =>
+    document.querySelector('[data-composer-seat] [contenteditable="true"]') ??
+    document.querySelector('[data-lexical-editor]') ??
+    document.querySelector('[contenteditable="true"]');
+
+  // 把文字灌进 composer：Lexical 靠 beforeinput/input 认字，execCommand 是不碰内部 API 的唯一办法；
+  // 万一浏览器把它禁了，退到粘贴事件，Lexical 的 paste handler 同样会收下。
+  const fillComposer = text => {
+    const editor = editorNode();
+    if (editor === null) return null;
+    editor.focus();
+    let inserted = false;
+    try {
+      inserted = document.execCommand('insertText', false, text);
+    } catch {
+      inserted = false;
+    }
+    if (!inserted || !(editor.innerText || '').includes(text)) {
+      try {
+        const data = new DataTransfer();
+        data.setData('text/plain', text);
+        editor.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+      } catch {
+        // 粘贴也不行就只剩"内容留在卡片输入框里"，由用户自己复制。
+      }
+    }
+    return editor;
+  };
+
+  const clickSend = editor => {
+    const button =
+      document.querySelector('[aria-label="发送消息"]') ??
+      document.querySelector('[aria-label="Send message"]') ??
+      null;
+    if (button !== null) {
+      button.click();
+      return;
+    }
+    editor.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true, cancelable: true }),
+    );
+  };
+
+  const close = () => {
+    const node = document.getElementById(DONE_NOTICE_ID);
+    if (node === null) return;
+    node.dataset.show = 'false';
+    setTimeout(() => node.remove(), 200);
+  };
+
+  // 系统通知：桌面版会把它落进 Windows 通知中心。
+  // 点它应该做两件事：把程序叫到前台、跳到那条会话 —— 后者靠宿主自己的 openSession。
+  const notify = (text, sessionId = '') => {
+    try {
+      if (typeof Notification === 'undefined') return;
+      if (Notification.permission === 'default') {
+        Promise.resolve(Notification.requestPermission()).catch(() => {});
+      }
+      if (Notification.permission !== 'granted') return;
+      const note = new Notification('DeepSeek 回答完成', {
+        body: text.slice(0, 140),
+        // 自己的音效已经在播了，系统再来一声就重复。
+        silent: true,
+        tag: 'dsh-codex-ui-done',
+      });
+      note.onclick = () => {
+        try {
+          window.focus();
+        } catch {
+          // 聚焦失败不影响跳转。
+        }
+        if (sessionId !== '' && typeof doneCtx?.uiWorkspace?.openSession === 'function') {
+          try {
+            Promise.resolve(doneCtx.uiWorkspace.openSession(sessionId)).catch(() => {});
+          } catch {
+            // 会话可能已经关掉了，跳不过去就算了。
+          }
+        }
+        note.close();
+      };
+    } catch {
+      // 通知发不出去不该连累音效。
+    }
+  };
+
+  const open = (summary = null) => {
+    injectStyle();
+    const existing = document.getElementById(DONE_NOTICE_ID);
+    if (existing !== null) existing.remove();
+
+    const node = document.createElement('div');
+    node.id = DONE_NOTICE_ID;
+    node.dataset.show = 'false';
+    node.innerHTML = `
+      <div class="cg-head"><span class="cg-app">DeepSeek</span><button class="cg-x" type="button" title="关闭">×</button></div>
+      <div class="cg-title">回答完成</div>
+      <div class="cg-body"></div>
+      <div class="cg-row"><input class="cg-input" type="text" placeholder="回复 DeepSeek" /><button class="cg-send" type="button">Reply</button></div>`;
+    node.querySelector('.cg-body').textContent = summary ?? summarize();
+    document.body.appendChild(node);
+    requestAnimationFrame(() => {
+      node.dataset.show = 'true';
+    });
+
+    const input = node.querySelector('.cg-input');
+    const row = node.querySelector('.cg-row');
+    node.querySelector('.cg-x').addEventListener('click', close);
+
+    const submit = () => {
+      const text = input.value.trim();
+      if (text === '') return;
+      // 先看 composer 里有没有草稿：有的话只灌字、不替他按发送，否则两段话会被并成一次请求。
+      const current = editorNode();
+      const composerEmpty = current === null ? true : (current.innerText || '').trim() === '';
+      const editor = fillComposer(text);
+      if (editor === null) {
+        input.placeholder = '找不到输入框，请手动复制';
+        input.select();
+        return;
+      }
+      row.dataset.busy = 'true';
+      setTimeout(() => {
+        if (composerEmpty) clickSend(editor);
+        row.dataset.busy = 'false';
+        close();
+      }, 90);
+    };
+
+    node.querySelector('.cg-send').addEventListener('click', submit);
+    input.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' || event.isComposing) return;
+      event.preventDefault();
+      submit();
+    });
+
+    const timer = setTimeout(close, 60000);
+    node.addEventListener('mouseenter', () => clearTimeout(timer));
+    return node;
+  };
+
+  window.addEventListener(DONE_EVENT, event => {
+    if (!shouldAnnounce()) return;
+    const detail = event?.detail ?? {};
+    const title = typeof detail.title === 'string' ? detail.title.trim() : '';
+    const sessionId = typeof detail.sessionId === 'string' ? detail.sessionId : '';
+    // 后台会话没在页面上渲染，正文取不到；用会话标题说话，比编一段摘要老实。
+    const text = title !== '' ? `「${title}」回答完成了` : '有一个会话回答完成了';
+    // 程序里不再自己弹卡片：提醒交给系统通知，点通知跳回去就够。
+    notify(text, sessionId);
+  });
+
+  // 手动验货用：控制台执行 __cgDoneNotice() 就能直接看卡片长什么样，不用等它自己弹。
+  window.__cgDoneNotice = open;
 })();

@@ -3,3 +3,9 @@
 - insert:
     - id: codex-style-ui
       name: dsh-codex-ui
+      config:
+        computerUse:
+          enabled: true
+          mode: full
+          autoScreenshot: true
+          visualPointer: true

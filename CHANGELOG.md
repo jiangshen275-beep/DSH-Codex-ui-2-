@@ -1,9 +1,46 @@
+## 3.0.0 — 侧边栏对外开放、回复锻造并入本包
+
+### 新功能
+
+- **侧边栏快捷项交给 Agent 管**：原本写死的五颗按钮下面多出一个可扩展区，Agent 用 `sidebar_rail` 工具（或直接写 `$DSH_HOME/dsh-codex-ui-rail.json`）往里加条目，15 秒内界面自己同步，不用重启。每条指向四类目标之一：`panel`（切到某个插件注册的主面板）、`section`（打开设置并落到某一页）、`url`（网址或应用协议）、`exec`（本机程序或文档的完整路径）。
+- **链接和程序由宿主进程去开**：页面那两条路都不通——`window.dshDesktop` 只在 `dsh-app:` 协议下注入，浏览器访问 GUI 时根本不存在；`window.open` 又被宿主只放行 http/https。改成页面发一次 RPC，宿主起子进程交给系统的协议处理器（win32 走 `cmd /c start`），所以 `steam://` 这类协议、`D:\qq\QQ.exe` 这种程序、`D:\速记.txt` 这种文档，在浏览器里用 DSH 时也一样能唤起。
+- **`exec` 优先于应用协议**：应用协议经常被同机另一个版本的程序抢注册，`tencent://` 在装了两个 QQ 的机器上会弹出别人的报错（「你的QQ版本不支持本功能」）。给软件做快捷方式时 `exec` 指 exe 路径不会踩这个坑。只接受绝对路径与 `.exe` / `.lnk` / `.bat` / `.cmd` / `.txt` / `.md` / `.log` / `.pdf`，文件必须真实存在。
+- **三个位子 + 弹层**：自定义项同时最多三颗上侧栏（内置五项另算，合计最多八个），超出的收进「更多」里那张表，那里能把任意一条换上或撤下，位置在主页按钮上方，常驻。
+- **弹层里能删**：每行最右边一颗垃圾桶，点第一下变成红色的「删?」，三秒内再点一次才真删——删掉一条要重新填一遍字段，误点只要一下，两边代价不对等。
+- **图标不许跟内置的撞**：`more` / `home` / `files` / `clock` / `at` / `external` / `settings` 这七个图标被内置按钮占着，自定义项传了会被 `add` 拒绝并给出可用名单。读旧配置时是降级成 `target` 而不是报错——报错会让整份列表读不出来，侧栏一次全空，比图标重复严重。
+- **两份说明书**：`SIDEBAR-RAIL.zh.md` 给 Agent（先读文档、再问用户、最后才动手这三步的顺序不能跳），`SIDEBAR-RAIL-USER.zh.md` 给用户。工具描述里指向 Agent 那份的绝对路径——路径按包自身位置算，装到哪个 profile 都不会指丢。
+- **回复锻造（原 `dsh-codex-ui-HF`）并进来**：会话里每条跑完的回复旁多一个入口，点开可改写文本并写回会话记录（思维链同理）。宿主半在 `src/reply-forge/`（`index.mjs` 注册 `reply-forge/patch` 投影、`ignorable` 标记 shim、`/api/reply-forge-v3/*` 路由），`lib/index.js` 以 `applyReplyForge(ctx)` 接入，`inject` 增加 `webServer`；浏览器半由 `scripts/build-reply-forge.mjs` 打成 `src/reply-forge/client-bundle.js`（一个 `ReplyForgeFactory(require)` 表达式），再由 `scripts/build.mjs` 内联进本包自己的 `__ModuleLoader__` 工厂——宿主只认一个 client 入口，两包合一必须共用工厂。两侧各自 try 包裹：回复锻造装不上不牵连同包其余能力。
+
+### 修复
+
+- **`sidebar_rail` 工具静默不在工具表里**：`ctx.tools.register()` 见到定义里没有 `output.render` 就抛 `TypeError`，而入口那层 `try/catch` 把它吞成一行 `console.warn`。于是 Agent 手上根本没有这个工具，遇到「帮我加个侧边栏」就跑去翻工作区找代码。补上 `output` 后正常。
+- **`pinned` 被压成布尔**：客户端解析配置时只认 `true` / 省略，`false` 被当成「没表过态」，界面于是退回「取前三条」，条目根本藏不掉。改成三态：`true` 上侧栏、`false` 收进弹层、`undefined` 从没表过态。
+- **「更多」按钮只在溢出时出现**：满三条以下时那颗按钮不存在，被隐藏的条目就再也捞不回来。改为常驻。
+- **改写只写进一条宿主不认的事件**：在线写入追加的是 `reply-forge/patch`，宿主既不拿它渲染、也不把它放进模型上下文；而「块已有 patch 就拒绝落盘」的闸门又把另一条路堵死，于是改什么都等于没改。现在在线写入成功后补一次落盘改写（改的是宿主认得的原始事件），陈旧校验基准改为投影文本。
+- **思维链改完看不见**：思考内容不会随宿主重绘保持，改完当场变了、下一次重绘又刷回旧文本。改为把「旧文本 → 新文本」记进 localStorage，每轮扫描重放一次，被覆盖就补回去；直改页面上的思考块时也不再走整块 markdown 重渲染（那会抹掉折叠外壳）。
+- **图标一闪一闪**：两个成因。一是宿主重渲染会把它不认识的子节点清掉，我们插进 markdown 容器/操作排的操作条首当其冲，被删掉到下一轮扫描（220ms 防抖）补回之间那段空档就是肉眼看到的闪——改成在 MutationObserver 回调里同步补回，和宿主那次重渲染同一帧完成，中间态画不出来。二是判定本身会摆（记录每 700ms 可能重读、`_running` 类反复出现消失），一判 false 就撤、下一轮又挂——加了 1.5 秒迟滞，判成「不该挂」之后要持续 1.5 秒才真撤。
+- **边想边说的途中冒出修改图标**：宿主把行内代码和命令预览渲染成独立的 markdown 容器，形状和一条回复一样，`openTurnNow`、`sameMatch` 这种单个标识符因此被当成正文接管（诊断里长度 9~11 的块）。分类器增加碎片判据：无空白、无标点、不含中文的符号串一律拒绝；同时未收尾轮次里所有未定位块一律不挂入口。
+- **暂停后也冒出修改图标**：`turn.completed` 早就算出来了，但 `final` 判定只用 `closed`，于是 interrupted / aborted 都被当成正常收尾。改为只有 `reason.kind === 'completed'` 才给入口——暂停时那条回答还没写完。
+- **模型选择弹层上也挂了修改入口**：那是本包自己的面板（`src/model-ui.js` 的 `h('p', { className: 'cg-model-message' }, '当前模型未提供推理强度设置。')`），而候选块的兜底路径只按标签名找 `<p>`，浮层里的段落跟消息正文长得一模一样。现在先排除浮层（`role="dialog"` / `menu` / `listbox` / `tooltip`、`aria-modal`、`cg-model-*`），再加一条通用判据：不在聊天节点里、且祖先链上有绝对/固定定位的，一律不算消息正文。
+
+## 3.1.0 — 电脑操控并入本包
+
+### 新功能
+
+- **电脑操控（原 `dsh-computer-use`）并进来**：包内 `computer-use/` 保留它自己的 `lib/` 与 `scripts/` 层级，`lib/index.js` 在 `apply` 末尾以 `applyComputerUse(ctx, config.computerUse)` 接入，`inject` 增加 `tools`。它装不上只影响自己，UI 其余能力照常。控制期间屏幕顶部显示提示，第二行实时显示当前目标（如「正在点击 (320, 480) · 记事本」）。
+- **指针换成圆角黑底白边**：按 `SM_CXCURSOR` 取系统光标尺寸（高 DPI 下画 64×64），每 2 秒重设一次，并且只有最后一个 HUD 实例退出时才恢复系统光标，避免旧实例把新实例设好的指针顶掉。
+
+### 修复
+
+- **HUD 从来不显示**：`spawn` 带了 `detached: true`，Windows 下 powershell 拿不到控制台，进程瞬间以 `exit 0` 退出、完全没执行脚本，日志上却看不出异常。去掉 `detached` 后正常。
+- **中文乱码、C# 编译失败**：`scripts/control-overlay.ps1` 原本是无 BOM 的 UTF-8，PowerShell 5.1 按 GBK 读它，中文字面量和注释会把整行代码吞掉。改为带 BOM。
+- **提示文字发糊**：WPF 透明窗口用不了 ClearType，改用 `TextFormattingMode.Display` 按像素网格排布，并去掉原来的黑色描边——压在深色底衬上的白字不需要描边。
+
 ## 2.1.0 — 技能面板与三处宿主行为的修正
 
 ### 新功能
 
 - **技能面板**：侧栏新增第五个入口「技能」，向单种类槽位 `main` 以 `key: 'cg-skills'`、`priority: 1` 注册，与既有的 `cg-schedules` 并存（同优先级的第二次注册会被宿主静默拒掉，所以必须错开）。列表来自 `ctx.remote.skills.list({ sessionId })`，会话 id 依次取 `ctx.uiSession.adapter.current.getSnapshot().key`、`retainedBy.mainView > 0` 的行、`ids` 末位——`ctx.sessions` 上没有 `current`，直接读它恒为 `undefined`，会让 `skills/list` 收到空路径并抛 `SessionQueryError`。行结构照宿主插件页的 `.cardHead`：`padding: 8px`、`gap: 14px`、列表 `gap: 2px`、无分隔线；开关照 primitives 的 `Switch.module.css`：`36×20`、圆点 `16`、`translateX(16)`、`padding: 2px`，颜色全部走 `--dsw-alias-*`。点行展开详情，显示 `path`（宿主没给时显示占位）、`modelInvocable`、`whenToUse` 与完整 `description`；开关自己 `stopPropagation`，点它不会连带展开；整行带 `role="button"` / `aria-expanded`，支持 Enter 与 Space。展开状态只在内存，刷新后收起。
-- **技能开关是本地偏好，不写宿主**：宿主只提供 `#skills/list` 一个技能远程方法，`SkillEntry` 的五个字段全是 `readonly`，没有 `enabled`，也没有可写的设置命名空间。开关只写 `localStorage['cg-skill-disabled']`，仅影响本面板的显示，不改技能文件、不改下一次扫描结果。
 
 ### 修正
 

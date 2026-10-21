@@ -1,7 +1,8 @@
 import { presetSilences, SECTION_MANDATE } from './turbo-policy.js';
 import { isBlockOn } from './injection-state.js';
-import { BUILTIN_ID, deletePersona, ensurePersonasDir, listPersonas, readPersonaFile, resolvePersonaId, textFor, writePersona } from './personas.js';
-import { readFileSync } from 'node:fs';
+import { BUILTIN_ID, deletePersona, ensurePersonasDir, listPersonas, loadPersonas, readPersonaFile, resolvePersonaId, textFor, writePersona } from './personas.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
 export const MODE_KEY = 'cgPromptMode';
@@ -14,6 +15,8 @@ export const PERSONA_PATH = '/api/chatgpt-ui/personas';
  * the first `codex.md` on a machine is written from exactly this text.
  */
 export const CODEX_PROMPT = readFileSync(new URL('../prompts/codex.txt', import.meta.url), 'utf8').trim();
+/** 侧栏快捷项的安装说明。系统提示词里交给 Agent 的必须是绝对路径，它才能直接打开。 */
+const RAIL_GUIDE_URL = new URL('../SIDEBAR-RAIL.zh.md', import.meta.url);
 // A persona id is now any file stem, so the stored value can no longer be an enum. What keeps a
 // stale or mistyped value out is the whitelist in `selectMode`, not the schema: the projection has to
 // parse whatever an older build persisted (`DeepSeek`, `Codex`), or one bad row would stop every
@@ -85,6 +88,22 @@ export function currentModeOf(session) {
 }
 
 /**
+ * The persona body in force for one Session, or '' when it carries none (the built-in `DeepSeek`
+ * row, an empty file, or a Session this process has not resolved yet).
+ *
+ * Exported because `turbo.js` needs the same answer for a different decision: 「聊天/工作」is a
+ * generic voice template (`CHAT_PERSONA` / `WORK_PERSONA`) delivered as a `pre-step` message, i.e.
+ * *nearer* the newest turn than the system-prompt section this file owns — so the two together read
+ * as "the persona was ignored", with the template winning. Whoever holds the concrete persona is the
+ * one that should speak, and this is how `turbo.js` asks whether that is the case.
+ */
+export function personaTextOf(session) {
+  const mode = currentModeOf(session);
+  if (typeof mode !== 'string' || mode.trim() === '') return '';
+  try { return textFor(mode); } catch { return ''; }
+}
+
+/**
  * `init`'s answer: a new Session continues on the persona the user chose last.
  *
  * The stored id is re-resolved rather than trusted. The persona it names may have been deleted or
@@ -122,7 +141,9 @@ export const modeProjection = {
   wire: { viewSchema: modeSchema, view: state => state },
 };
 
-export const inject = ['systemPrompt', 'sessionProjections', 'sessionController', 'sessions', 'connection', 'storage', 'storage.backend.json'];
+// 'webServer' 是 3.0.1 为并入的回复锻造加的：它要注册 /api/reply-forge-v3/* 路由。
+// 宿主缺这个服务时插件照常加载，只是那条能力自然失效（见 reply-forge/index.mjs）。
+export const inject = ['systemPrompt', 'sessionProjections', 'sessionController', 'sessions', 'webServer', 'connection', 'storage', 'storage.backend.json'];
 
 export async function apply(ctx) {
   // First, because the section below reads the directory on every turn: create it and write the
@@ -152,7 +173,44 @@ export async function apply(ctx) {
   }));
   let writes = Promise.resolve();
   ctx.effect(() => async () => { await writes.catch(() => {}); await unit.close(); });
-  const modeFor = session => modes.get(session.id) ?? ctx.sessionProjections.stateOf(session, MODE_KEY) ?? 'Codex';
+  /**
+   * Every id this build can inject right now, lowercased. Null when the directory cannot be read at
+   * all, which is the one case where a stored value must be trusted: an unreadable home is not
+   * evidence that the persona the user picked is gone.
+   */
+  function livePersonaIds() {
+    try {
+      return new Set(loadPersonas().map(item => item.id.toLowerCase()));
+    } catch {
+      return null;
+    }
+  }
+  /** Sessions already healed below, so a dead row is rewritten once instead of on every assembly. */
+  const healed = new Set();
+  /**
+   * The persona a Session actually resolves to.
+   *
+   * The stored value is checked before it is used. It can name a persona that is gone — the file was
+   * deleted or renamed after the switch, or an older build wrote something that was never an id (one
+   * row on this machine reads `1`). `textFor` answers '' for those, so the section renders zero bytes
+   * and the Session silently loses its style while the menu keeps showing the old name: that is the
+   * "the model forgot my persona" report, and it is invisible from both ends. A dead value is
+   * therefore replaced by `Codex` — the one id that always resolves — and written back, so the loss
+   * is repaired rather than repeated on every turn.
+   */
+  const modeFor = session => {
+    const stored = modes.get(session.id) ?? ctx.sessionProjections.stateOf(session, MODE_KEY) ?? DEFAULT_MODE;
+    const live = livePersonaIds();
+    const known = typeof stored === 'string' && stored.trim() !== '';
+    if (live === null || (known && live.has(stored.trim().toLowerCase()))) return stored;
+    if (healed.has(session.id)) return DEFAULT_MODE;
+    healed.add(session.id);
+    modes.set(session.id, DEFAULT_MODE);
+    writes = writes.catch(() => {}).then(() => unit.putRecord('sessions', session.id, DEFAULT_MODE));
+    writes.catch(error => ctx.logger?.warn?.(`prompt mode heal save failed: ${error.message}`));
+    ctx.logger?.warn?.(`prompt mode row healed: ${session.id} -> ${DEFAULT_MODE}（原值 ${String(stored).slice(0, 64)} 已不存在）`);
+    return DEFAULT_MODE;
+  };
   // Hand the same resolution to `persona-notice.js`: it has to answer "which persona is in force
   // for this session right now" on every pre-step, and duplicating the lookup would let the two
   // answers drift (the durable row and the projection are updated by different callers).
@@ -187,6 +245,27 @@ export async function apply(ctx) {
       } catch { return ''; }
     },
   });
+
+  // 用户在会话里说「帮我在侧栏加个 XX」时，Agent 得知道去哪读说明书——它没有别的途径知道
+  // 这个插件带了文档。路径从本文件的位置推，装到哪个 profile、目录叫什么名字都对；写死一个
+  // 绝对路径，换个安装位置就指丢了（和上面 prompts/codex.txt 是同一个路子）。
+  // 常驻三行值得：让 Agent 凭空猜一个 panel key，代价是用户点了没反应还得回来问。
+  // 文档被删掉时干脆不挂这一段——指向一个不存在的文件，比不给路径更糟。
+  const railGuide = fileURLToPath(RAIL_GUIDE_URL);
+  if (existsSync(railGuide)) {
+    ctx.systemPrompt.section({
+      name: 'chatgpt-ui:sidebar-rail',
+      order: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_SUFFIX') + 2,
+      interpolate: false,
+      text: () => [
+        '### 侧栏快捷项（dsh-codex-ui）',
+        `用户在会话里提出「往左侧栏加一个按钮」「换个侧栏快捷方式」「把侧栏那个删掉」这类要求时，按这个顺序做，不要跳过前两步：`,
+        `1. 先完整读 ${railGuide}，照里面的步骤做，不要凭记忆猜格式；`,
+        '2. 读完再来问用户：点下去希望看到什么（DSH 里已有的界面 / 设置里的某一页 / 一个网址 / 打开电脑上的某个程序）、叫什么名字、要不要占用侧栏那三个位子之一；',
+        '3. 拿到他的答案再调用 sidebar_rail 去装。他答得含糊就再问一句，别自己替他选。',
+      ].join('\n'),
+    });
+  }
 
   // Use DSH's authenticated Connection carrier; no extra HTTP server or token.
   async function selectMode(payload, signal) {
@@ -280,7 +359,25 @@ export async function apply(ctx) {
       // Explicit rather than a fallthrough: this arm used to be the tail of the function, so any
       // action it did not recognise arrived here and deleted the persona it was given.
       if (action === 'delete') {
-        deletePersona(id ?? '');
+        const removed = deletePersona(id ?? '');
+        // 删文件不等于删引用。指过去那个 id 的会话仍留着它，`textFor` 又只会回答空串，
+        // 于是那些会话静默失去风格、菜单却还显示旧名字——本机就有两条这样的历史记录。
+        // 删除是这个问题的源头，就在源头把它们迁到 Codex（唯一恒可解析的 id）。
+        const gone = typeof removed?.id === 'string' ? removed.id.trim().toLowerCase() : '';
+        if (gone !== '') {
+          for (const [sessionId, mode] of modes) {
+            if (typeof mode !== 'string' || mode.trim().toLowerCase() !== gone) continue;
+            modes.set(sessionId, DEFAULT_MODE);
+            writes = writes.catch(() => {}).then(() => unit.putRecord('sessions', sessionId, DEFAULT_MODE));
+            writes.catch(error => ctx.logger?.warn?.(`prompt mode migrate failed: ${error.message}`));
+          }
+          // 「上次选择」也指过去时就一起改，否则下一个新会话会从一个不存在的人设开局。
+          if (typeof lastMode === 'string' && lastMode.trim().toLowerCase() === gone) {
+            lastMode = DEFAULT_MODE;
+            writes = writes.catch(() => {}).then(() => unit.putRecord('sessions', LAST_MODE_KEY, DEFAULT_MODE));
+            writes.catch(error => ctx.logger?.warn?.(`prompt mode last-used migrate failed: ${error.message}`));
+          }
+        }
         return { ok: true };
       }
       return fail('persona/invalid', '未知的人设操作。');

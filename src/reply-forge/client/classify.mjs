@@ -1,0 +1,147 @@
+// 块分类器：判断一个候选容器是不是「可安全编辑的纯自然语言块」。
+//
+// 方案2（只允许编辑自然语言部分）的落地就靠这里。宿主不暴露块类型标记，
+// 所以按内容特征判定：一旦容器里出现工具调用、命令执行、结构化动作的痕迹，
+// 就整块拒绝接管——绝不提供编辑入口。
+//
+// 为什么整块拒绝而不是局部编辑：助手消息的一个「块」在会话记录里是一个
+// 原子单元，改动其中一段会让整条记录与渲染错位。宁可不接管，也不错改。
+//
+// 真实会话全量回归（数十个会话、五百余个 assistant text 块）修正的
+// 过拟合防线——旧规则把大量正常自然语言回复误挡在编辑入口外：
+//   - 'diff' 是 "different/difficult" 的子串，'patch' 命中普通技术叙述，
+//     'arguments' 命中英文常用词——裸子串匹配不可用，已删除这三项；
+//   - ACTION_TAGS 里的 code/pre/table 把「带内联代码的回复」整块拒掉
+//     （实测约占四成，开发向会话过半中招）。markdown 容器里出了代码
+//     也只是助手的正文文本，就地编辑只动本机渲染，无记录错位风险，
+//     真正需要防的 tool/result 块由 picker 的节点/容器策略 + 关键词兜底；
+//   - 文本与形态检查改为先剥离代码围栏/行内代码再匹配——命令示例写进
+//     回复正文不该连带整条回复被拒；
+//   - 命令行旗标正则要求行首（旧 /\s--?[a-z]/ 命中 " - yes" 这类散文），
+//     裸 JSON 要求整篇匹配（旧 /m 版命中多行文本里任意一行的 [..]。
+
+/** 结构性动作的文字痕迹（中英双语，覆盖宿主常见措辞）。 */
+const ACTION_TEXT = [
+  'tool-call', 'tool_call', 'toolResult', 'tool-result',
+  'function_call', 'functionCall',
+  '运行命令', '执行命令', '调用工具', '工具调用', '工具结果',
+  '写入文件', '修改文件', '创建文件', '删除文件', '读取文件',
+  '已应用补丁', '应用补丁',
+  'exit code', 'exitCode', 'stdout', 'stderr',
+  '等待授权', '需要确认',
+  // 宿主的用量/费用页脚（每轮回复后自动追加的 chat.node）：它不是模型消息，
+  //  forged 它毫无意义，还会把「最后一条」之类的启发式带偏。真机复现
+  //  （2026-10-17 无头诊断）：页脚文本更新后被渲染成 markdown 容器形状，
+  //  兜底被接管。这几个词对助手正文是安全方向——误伤只是少个入口。
+  '本轮费用', '未定价用量', '单价单位为每百万',
+]
+
+/** 长块阈值：超过这个长度按正文处理，跳过 ACTION_TEXT 关键词检查。 */
+const ACTION_TEXT_LONG_BLOCK = 200
+
+/** 结构性元素：交互控件（代码/表格不再拒绝，见文件头说明）。 */
+const ACTION_TAGS = new Set(['input', 'select', 'textarea', 'iframe'])
+
+/** 插件自身注入的 UI 容器——分类时必须忽略，否则按钮会被自己挡回去。 */
+const OWN_UI_SELECTOR = '.rf3-bar, .rf3-editor'
+
+/** 命令/路径形态：先剥离代码再匹配。 */
+const ACTION_SHAPE = [
+  /^[A-Za-z]:\\/m,                       // Windows 绝对路径（行首）
+  /^\/(?:Users|home|usr|etc|var|opt)\//m, // Unix 绝对路径（行首）
+  /^\s*--?[a-z][a-z0-9-]{2,}/m,          // 命令行旗标（行首）
+  /^\s*[{[][\s\S]*[\]}]\s*$/,            // 整篇就是裸 JSON
+  /\$\s+\S+/,                            // shell 提示符
+]
+
+/**
+ * 剥离代码围栏与行内代码：命令/路径示例写在回复正文里是常态，
+ * 不该连带整条回复被判「形态像命令」。
+ * @param {string} text
+ * @returns {string}
+ */
+function stripCode(text) {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`]*`/g, ' ')
+}
+
+/**
+ * 碎片：单个符号串（无空白、无标点、不含中文）。
+ *
+ * 宿主的行内代码与命令预览会各自渲染成独立的 markdown 容器，形状和一条回复
+ * 一模一样。真机 2026-10-21：诊断里 head 为 `openTurnNow`、`sameMatch`、
+ * `takeBlock`（9~11 字符）的块被接管挂了入口，用户看到的就是「边想边说途中
+ * 就冒出修改图标」。这类块没有可编辑的正文，接管只会污染指纹重数与匹配。
+ * @param {string} text 已压缩空白并 trim 的文本
+ */
+function looksLikeFragment(text) {
+  if (/[\u4e00-\u9fa5]/.test(text)) return false            // 含中文 → 是正文
+  if (/[\s。，、；：！？.,;:!?'"()（）【】]/.test(text)) return false // 有空白或标点 → 是句子
+  return text.length < 40                                   // 其余：一整串符号
+}
+
+/**
+ * 判定一个容器是否为可编辑的纯自然语言块。
+ * @param {Element} el 候选容器
+ * @returns {{ok: boolean, reason: string}}
+ */
+export function classifyNaturalLanguage(el) {
+  if (el === null || el === undefined) return { ok: false, reason: '空节点' }
+
+  const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+  if (text.length === 0) return { ok: false, reason: '空文本' }
+  if (looksLikeFragment(text)) return { ok: false, reason: '疑似代码/命令碎片' }
+
+  // 1. 文字痕迹命中：直接拒绝（对剥离代码后的文本匹配）
+  //
+  // 只对短块生效：ACTION_TEXT 指向的是工具调用行 / 结果行 / 用量页脚，
+  // 它们都是短行。长正文里出现「工具调用」「文件」这类词是正常叙述
+  // （本插件自己的说明每段都带），按原规则整块拒掉 → 真机上长回复一律
+  // 没有「伪造回复」按钮，而这恰恰是最想改的那些回复。
+  const lower = stripCode(text).toLowerCase()
+  if (text.length < ACTION_TEXT_LONG_BLOCK) {
+    for (const marker of ACTION_TEXT) {
+      if (lower.includes(marker.toLowerCase())) {
+        return { ok: false, reason: '含结构化动作痕迹：' + marker }
+      }
+    }
+  }
+
+  // 2. 结构性元素：交互控件一律拒绝（忽略插件自身注入的 UI）
+  let structural = null
+  try {
+    for (const tag of ACTION_TAGS) {
+      const hit = el.querySelector(tag)
+      if (hit !== null && hit.closest?.(OWN_UI_SELECTOR) === null) { structural = tag; break }
+    }
+  } catch {
+    // 选择器异常按可编辑处理（保守：交给用户判断）
+  }
+  if (structural !== null) {
+    return { ok: false, reason: '含结构性元素 <' + structural + '>' }
+  }
+
+  // 3. 形态命中：路径/命令/JSON（同样基于剥离代码后的文本）
+  for (const re of ACTION_SHAPE) {
+    if (re.test(stripCode(text))) return { ok: false, reason: '形态像命令或结构化数据' }
+  }
+
+  return { ok: true, reason: '纯自然语言' }
+}
+
+/**
+ * 批量分类，只返回可编辑的块。
+ * @param {Element[]} blocks 候选容器
+ * @returns {{ editable: Element[], rejected: Array<{el: Element, reason: string}> }}
+ */
+export function partitionEditable(blocks) {
+  const editable = []
+  const rejected = []
+  for (const el of blocks) {
+    const verdict = classifyNaturalLanguage(el)
+    if (verdict.ok) editable.push(el)
+    else rejected.push({ el, reason: verdict.reason })
+  }
+  return { editable, rejected }
+}

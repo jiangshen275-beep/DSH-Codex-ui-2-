@@ -150,7 +150,10 @@ export function registerSessionPurge(ctx) {
         return Response.json({ error: 'Invalid request' }, { status: 400 });
       }
       const payload = envelope?.type === 'client-request' && envelope.method === PURGE_EVENT ? envelope.payload : null;
-      const fail = (code, message) => Response.json({ type: 'server-response', rpcId: envelope?.rpcId, result: { ok: false, error: { code, message } } });
+      // `details` is not decoration: the connection client's `parseConnectionResponse` requires
+      // `isRecord(error.details)` and throws "connection: invalid server-response failure" when it is
+      // missing — which is exactly what a refusal looked like in 2.1.0, swallowing the real reason.
+      const fail = (code, message) => Response.json({ type: 'server-response', rpcId: envelope?.rpcId, result: { ok: false, error: { code, message, details: {} } } });
       if (!payload || typeof payload.sessionId !== 'string') return fail('purge/invalid', '会话参数无效。');
       try {
         const value = purgeArchivedSession({ root: homeRoot(), sessionId: payload.sessionId });

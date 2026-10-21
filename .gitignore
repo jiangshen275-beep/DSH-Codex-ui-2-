@@ -22,5 +22,7 @@ jiang-armor/
 # 迭代中留下的备份与封面包，文件本身保留在本地
 *.bak-*
 *.rar
+*.bundle
+_backups/
 dsh-codex-ui-cover-v2-16x9.png
 dsh-codex-ui-cover-v3-16x9.png

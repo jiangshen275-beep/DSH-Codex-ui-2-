@@ -24,6 +24,11 @@ const hostContract = (await readFile(new URL('src/host-contract.js', root), 'utf
 const injectionUI = (await readFile(new URL('src/injection-ui.js', root), 'utf8'))
   .replace(/^export (const|function|class) /gm, '$1 ')
   .replace(/^export \{[^}]*\};?\s*$/gm, '');
+// 回复锻造（原 dsh-codex-ui-HF）的客户端：先由 scripts/build-reply-forge.mjs 打成
+// 一个 `const ReplyForgeFactory = (require) => {...}` 表达式，这里原样内联，让它在
+// 同一个工厂作用域里执行——宿主只给一个 client 入口，两个包合一个就必须共用工厂。
+// 顺序放在 injection-ui 之后：它自成一个 IIFE 式的工厂函数，不读这里的任何绑定。
+const replyForge = await readFile(new URL('src/reply-forge/client-bundle.js', root), 'utf8');
 let css = await readFile(new URL('src/style.css', root), 'utf8');
 // Font inlining is OFF by default: the substitution only runs for a placeholder that `src/style.css`
 // actually contains, and the real sheet contains none (its three `@font-face` declarations were dead
@@ -58,6 +63,6 @@ const body = code.replace("import React from 'react';", "const React = require('
 // `DSH_CODEX_UI_BUNDLE_OUT` lets a caller build the artifact somewhere other than `lib/client.js`,
 // so a candidate build can be verified without replacing the artifact the running app is serving.
 const out = process.env.DSH_CODEX_UI_BUNDLE_OUT ?? new URL('lib/client.js', root);
-await writeFile(out, `window.__ModuleLoader__.load({id:'dsh-codex-ui',factory:(require)=>{const STYLE=${JSON.stringify(css)};\n${body}\n${providers}\n${helper}\n${modelUI}\n${hostContract}\n${injectionUI}\nconst safeApply=(ctx)=>{try{return apply(ctx);}catch(error){console.error("dsh-codex-ui activation:",error);throw error;}}; return {apply:safeApply,inject,registerModelUI,validateHeroMarkFile,resolveHeroMark,menuPlacement,runningTailOf};}});\n`);
+await writeFile(out, `window.__ModuleLoader__.load({id:'dsh-codex-ui',factory:(require)=>{const STYLE=${JSON.stringify(css)};\n${body}\n${providers}\n${helper}\n${modelUI}\n${hostContract}\n${injectionUI}\n${replyForge}\nconst ReplyForgeBundle=(typeof ReplyForgeFactory==='function')?ReplyForgeFactory(require):null;\nconst safeApply=(ctx)=>{try{return apply(ctx);}catch(error){console.error("dsh-codex-ui activation:",error);throw error;}}; return {apply:safeApply,inject,registerModelUI,validateHeroMarkFile,resolveHeroMark,menuPlacement,runningTailOf,ReplyForgeBundle};}});\n`);
 console.log('Built dsh-codex-ui client bundle.');
 
