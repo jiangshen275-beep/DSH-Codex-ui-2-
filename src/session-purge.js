@@ -18,6 +18,17 @@ import { join, resolve, sep } from 'node:path';
 
 export const PURGE_EVENT = 'dsh-codex-ui/purge-session';
 export const PURGE_PATH = '/api/dsh-codex-ui/purge-session';
+/**
+ * 删除记录要落盘。
+ *
+ * 删掉的会话在宿主那边还留着索引条目（DSH 没有删除接缝，我们只删了日志目录），所以它下一次
+ * 启动照样把这条会话送回来。界面侧靠一个「已删除」集合把它滤掉，可那个集合原来是内存里的
+ * React state——关掉重开就空了，删掉的子代理于是集体回魂，点进去只得到「数据已不存在」。
+ */
+export const PURGED_PATH = '/api/dsh-codex-ui/purged-ids';
+const PURGED_FILE = 'codex-ui-purged.json';
+/** 记到这么多个就丢最旧的：一个 id 四十来字节，这个上限够用好几年。 */
+const PURGED_LIMIT = 2000;
 /** Session ids are `session-<uuid>` or a bare `<uuid>`; this is what may reach a path join. No
  *  separator, no leading dot, and no `..` run — nothing that could name another directory. */
 const SESSION_ID = /^(?!.*\.\.)[0-9A-Za-z][0-9A-Za-z._-]{0,127}$/;
@@ -92,6 +103,33 @@ function archivedIds(root) {
 }
 
 /**
+ * 已删除的会话 id。读不到就返回空表：这个文件坏了不该让界面少显示任何东西。
+ * @param root - DSH home。
+ */
+export function purgedIds(root) {
+  if (typeof root !== 'string' || root.length === 0) return [];
+  try {
+    const parsed = JSON.parse(readFileSync(join(root, 'storages', PURGED_FILE), 'utf8'));
+    return Array.isArray(parsed) ? parsed.filter(id => typeof id === 'string' && SESSION_ID.test(id)) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 记一笔删除，供下次启动过滤。写不进去只丢这份记忆，不影响删除本身。 */
+function rememberPurged(root, sessionId) {
+  try {
+    const next = purgedIds(root).filter(id => id !== sessionId);
+    next.push(sessionId);
+    while (next.length > PURGED_LIMIT) next.shift();
+    writeFileSync(join(root, 'storages', PURGED_FILE), `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Remove one archived Session's log directory, or — when its log is already gone — just the
  * registry entry that still lists it.
  * @param options - the DSH home to search and the Session id to remove.
@@ -125,11 +163,13 @@ export function purgeArchivedSession({ root, sessionId }) {
     }
     if (!entries.includes(LOG_FILE)) continue;
     rmSync(dir, { recursive: true, force: true });
+    rememberPurged(root, sessionId);
     return { sessionId, removed: dir, cleaned: forgetSession(root, sessionId) };
   }
   // No log directory holds it: the Session is already gone, so the registry entry that keeps it on
   // the archive list is the only thing left to remove. Succeeding here is what lets such an id leave
   // the list, instead of failing with "找不到该会话的日志目录" on every attempt.
+  rememberPurged(root, sessionId);
   return { sessionId, removed: null, cleaned: forgetSession(root, sessionId) };
 }
 
@@ -161,6 +201,30 @@ export function registerSessionPurge(ctx) {
         return Response.json({ type: 'server-response', rpcId: envelope.rpcId, result: { ok: true, value } });
       } catch (error) {
         return fail('purge/refused', error?.message || String(error));
+      }
+    },
+  }));
+  // 只读接口：界面启动时用它取回「删过谁」，否则那些被删掉的会话会在重启后回到列表里。
+  ctx.inject?.(['connection'], scope => scope.connection.fetch.register({
+    path: PURGED_PATH,
+    methods: ['POST'],
+    requestBody: 'buffered',
+    async fetch(request) {
+      let envelope;
+      try {
+        envelope = await request.json();
+      } catch {
+        return Response.json({ error: 'Invalid request' }, { status: 400 });
+      }
+      try {
+        const value = purgedIds(homeRoot());
+        return Response.json({ type: 'server-response', rpcId: envelope?.rpcId, result: { ok: true, value } });
+      } catch (error) {
+        return Response.json({
+          type: 'server-response',
+          rpcId: envelope?.rpcId,
+          result: { ok: false, error: { code: 'purged/refused', message: error?.message || String(error), details: {} } },
+        });
       }
     },
   }));

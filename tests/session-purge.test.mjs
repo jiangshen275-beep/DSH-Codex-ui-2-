@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { purgeArchivedSession } from '../src/session-purge.js';
+import { purgeArchivedSession, purgedIds } from '../src/session-purge.js';
 
 const LOG = 'session.v4.jsonl.zstd';
 const ARCHIVED = 'session-aaaaaaaa-1111-2222-3333-444444444444';
@@ -142,4 +142,23 @@ test('cleanup failures never turn a successful removal into a reported failure',
     assert.deepEqual(value.cleaned, ['archivedSessionIds'], 'a missing cache row is simply not reported');
     assert.equal(existsSync(join(project, ARCHIVED)), false);
   });
+});
+
+test('删掉的会话 id 会落盘，重启后还能读回来', () => {
+  // 这是「删掉的子代理重启后回魂」的根因：删除只写进内存里的 Set，重启就空了，
+  // 而宿主那边索引条目还在，于是它们又回到列表里、点开只得到「数据已不存在」。
+  const sandbox = mkdtempSync(join(tmpdir(), 'purge-remember-'));
+  const root = join(sandbox, 'home');
+  mkdirSync(join(root, 'storages'), { recursive: true });
+  mkdirSync(join(root, 'sessions', 'proj', 'session-abc'), { recursive: true });
+  writeFileSync(join(root, 'sessions', 'proj', 'session-abc', 'session.v4.jsonl.zstd'), 'x');
+  writeFileSync(join(root, 'storages', 'workspace.json'), JSON.stringify({ global: { archivedSessionIds: ['session-abc'] } }));
+  assert.deepEqual(purgedIds(root), [], '一开始没有记录');
+  purgeArchivedSession({ root, sessionId: 'session-abc' });
+  assert.deepEqual(purgedIds(root), ['session-abc'], '删完要记下来');
+  // 重复删同一个 id 不该产生重复记录。
+  writeFileSync(join(root, 'storages', 'workspace.json'), JSON.stringify({ global: { archivedSessionIds: ['session-abc'] } }));
+  purgeArchivedSession({ root, sessionId: 'session-abc' });
+  assert.deepEqual(purgedIds(root), ['session-abc'], '不重复记账');
+  rmSync(sandbox, { recursive: true, force: true });
 });
