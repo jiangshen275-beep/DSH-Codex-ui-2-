@@ -3840,20 +3840,24 @@ body[data-ds-dark-theme] .cg-archived-check { accent-color: #d1d5db; }
 /* 宿主顶栏那个「N 个子智能体」记的是「历史上派过多少」：派出去那一刻就写进父会话的
    subagent/catalog 事件，只增不减，归档和删除都不会让它退回去。于是磁盘上只剩一个、
    界面还写着几十个，看着像坏了。这里把它换成现存数。
-   手法与「正在思考」那处一致：宿主文字缩到 0 藏起来，用 ::after 原位重绘，值从 data 属性取。
+   手法：原文字变透明、保留它自己的行盒（行高与基线照旧），重绘的文字绝对定位盖在上面。
+   早先用过「把原文字缩成 0 号字」，但那样行盒高度归零，重绘出来的字会比旁边浮高一点，
+   怎么调偏移都是碰运气。保留行盒之后，基线天然对齐，不需要任何像素微调。
    绝不写宿主的文本节点——它一重渲染就会抢回去，两边打架会闪。 */
-.cg-host-subagent-count { font-size: 0 !important; }
+.cg-host-subagent-count {
+  position: relative;
+  color: transparent !important;
+}
 .cg-host-subagent-count::after {
   content: attr(data-cg-subagent-live) ' 个子智能体';
-  font-size: var(--cg-subagent-fs, 13px);
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: var(--cg-subagent-fs, inherit);
   /* 颜色跟着同栏的同伴走（脚本从「标准模式 / 费用明细」那些元素上量来的），
      不跟着宿主原来的强调色，否则一眼就看得出这一块是外来的。 */
   color: var(--cg-subagent-color, inherit);
-  line-height: inherit;
-  /* 宿主那个 span 被压成 0 号字之后行盒高度归零，重绘出来的字会贴得比旁边高一点。
-     往下带 1px 回到同一基线——这是量出来的偏移量，不是随手加的。 */
-  position: relative;
-  top: 1px;
   white-space: nowrap;
 }
 
