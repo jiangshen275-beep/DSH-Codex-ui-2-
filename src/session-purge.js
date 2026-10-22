@@ -26,6 +26,15 @@ export const PURGE_PATH = '/api/dsh-codex-ui/purge-session';
  * React state——关掉重开就空了，删掉的子代理于是集体回魂，点进去只得到「数据已不存在」。
  */
 export const PURGED_PATH = '/api/dsh-codex-ui/purged-ids';
+/**
+ * 「这个会话已经没有数据了，记下来别再显示」。
+ *
+ * 和删除分开：删除要求会话处于归档状态，而这里记的是**已经探测出数据不存在**的会话——
+ * 它们的日志早被清掉了，宿主却还留着索引条目，于是每次启动都回来一次、每次点都弹
+ * 「数据已不存在」。这种情况不该再让用户一条条重新归档再删。
+ */
+export const FORGET_EVENT = 'dsh-codex-ui/forget-sessions';
+export const FORGET_PATH = '/api/dsh-codex-ui/forget-sessions';
 const PURGED_FILE = 'codex-ui-purged.json';
 /** 记到这么多个就丢最旧的：一个 id 四十来字节，这个上限够用好几年。 */
 const PURGED_LIMIT = 2000;
@@ -118,14 +127,33 @@ export function purgedIds(root) {
 
 /** 记一笔删除，供下次启动过滤。写不进去只丢这份记忆，不影响删除本身。 */
 function rememberPurged(root, sessionId) {
+  return rememberPurgedMany(root, [sessionId]) > 0;
+}
+
+/**
+ * 批量记一笔。界面探测出「数据已不存在」时会一次报一个，攒批写没必要——
+ * 这个文件很小，一次一行也够快。
+ * @returns 真正写进去的条数。
+ */
+export function rememberPurgedMany(root, sessionIds) {
+  if (typeof root !== 'string' || root.length === 0) return 0;
+  if (!Array.isArray(sessionIds)) return 0;
+  const next = purgedIds(root);
+  let added = 0;
+  for (const id of sessionIds) {
+    if (typeof id !== 'string' || !SESSION_ID.test(id)) continue;
+    const at = next.indexOf(id);
+    if (at >= 0) next.splice(at, 1);
+    next.push(id);
+    added += 1;
+  }
+  if (added === 0) return 0;
+  while (next.length > PURGED_LIMIT) next.shift();
   try {
-    const next = purgedIds(root).filter(id => id !== sessionId);
-    next.push(sessionId);
-    while (next.length > PURGED_LIMIT) next.shift();
     writeFileSync(join(root, 'storages', PURGED_FILE), `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-    return true;
+    return added;
   } catch {
-    return false;
+    return 0;
   }
 }
 
@@ -224,6 +252,32 @@ export function registerSessionPurge(ctx) {
           type: 'server-response',
           rpcId: envelope?.rpcId,
           result: { ok: false, error: { code: 'purged/refused', message: error?.message || String(error), details: {} } },
+        });
+      }
+    },
+  }));
+  // 写入接口：界面探测到「该会话的数据已不存在」时，把这批 id 记下来，以后不再显示。
+  ctx.inject?.(['connection'], scope => scope.connection.fetch.register({
+    path: FORGET_PATH,
+    methods: ['POST'],
+    requestBody: 'buffered',
+    async fetch(request) {
+      let envelope;
+      try {
+        envelope = await request.json();
+      } catch {
+        return Response.json({ error: 'Invalid request' }, { status: 400 });
+      }
+      const payload = envelope?.type === 'client-request' && envelope.method === FORGET_EVENT ? envelope.payload : null;
+      const ids = Array.isArray(payload?.sessionIds) ? payload.sessionIds : [];
+      try {
+        const added = rememberPurgedMany(homeRoot(), ids);
+        return Response.json({ type: 'server-response', rpcId: envelope?.rpcId, result: { ok: true, value: { added } } });
+      } catch (error) {
+        return Response.json({
+          type: 'server-response',
+          rpcId: envelope?.rpcId,
+          result: { ok: false, error: { code: 'forget/refused', message: error?.message || String(error), details: {} } },
         });
       }
     },

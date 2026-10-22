@@ -1646,7 +1646,14 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
     // hidden, so a phantom row cannot keep offering an action that can never succeed.
     const [ghostIds, setGhostIds] = React.useState(() => new Set());
     const ghostChecked = React.useRef(new Set());
-    const markGhost = id => setGhostIds(prev => { if (prev.has(id)) return prev; const next = new Set(prev); next.add(id); return next; });
+    const markGhost = id => {
+      setGhostIds(prev => { if (prev.has(id)) return prev; const next = new Set(prev); next.add(id); return next; });
+      // 已经确认它没有数据了，顺手交给宿主记一笔：否则每次启动它都以幽灵身份回来一次，
+      // 每次都要重新探测、重新弹那句「数据已不存在」。
+      try {
+        Promise.resolve(ctx.connection.rpc.call('/api', 'dsh-codex-ui/forget-sessions', { sessionIds: [id] })).catch(() => {});
+      } catch { /* 记不上就只在本次隐藏 */ }
+    };
     const isMissingSession = error => /not[- ]?found|no such session|hold no such session/i.test(String(error?.message ?? error));
     const missingNotice = '该会话的数据已不存在（日志已删除或被清理），已把它从列表里隐藏。';
     // A session the agent spawned as a subagent rides `parentId` in the client list store (the remote
