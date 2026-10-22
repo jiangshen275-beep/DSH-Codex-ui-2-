@@ -322,10 +322,27 @@ function startSubagentCountStyle(readLive) {
         const host = node.parentElement;
         if (host === null || host === undefined) continue;
         if (!host.classList.contains('cg-host-subagent-count')) {
-          // 先把宿主自己的字号记下来，`font-size:0` 之后就拿不到了。
+          // 字号和颜色不照抄它自己的：宿主这个计数用的是强调色、字也偏大，照原样重绘会跟旁边的
+          // 「标准模式 / 费用明细」对不上。所以从同栏的同伴元素上量一份，量不到才退回它自己的值。
+          let fontSize = '';
+          let color = '';
           try {
-            host.style.setProperty('--cg-subagent-fs', window.getComputedStyle(host).fontSize || '13px');
+            const outside = host.closest?.('button') ?? null;
+            const container = outside?.parentElement ?? null;
+            if (container !== null && container !== undefined) {
+              const peer = Array.from(container.children).find(el => el !== outside && (el.textContent ?? '').trim() !== '');
+              if (peer !== null && peer !== undefined) {
+                const style = window.getComputedStyle(peer);
+                fontSize = style.fontSize || '';
+                color = style.color || '';
+              }
+            }
+            const own = window.getComputedStyle(host);
+            if (fontSize === '') fontSize = own.fontSize || '13px';
+            if (color === '') color = own.color || '';
           } catch { /* 量不到就用 CSS 里的兜底值 */ }
+          if (fontSize !== '') host.style.setProperty('--cg-subagent-fs', fontSize);
+          if (color !== '') host.style.setProperty('--cg-subagent-color', color);
           host.classList.add('cg-host-subagent-count');
         }
         if (host.getAttribute('data-cg-subagent-live') !== live) {

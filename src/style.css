@@ -3846,10 +3846,20 @@ body[data-ds-dark-theme] .cg-archived-check { accent-color: #d1d5db; }
 .cg-host-subagent-count::after {
   content: attr(data-cg-subagent-live) ' 个子智能体';
   font-size: var(--cg-subagent-fs, 13px);
+  /* 颜色跟着同栏的同伴走（脚本从「标准模式 / 费用明细」那些元素上量来的），
+     不跟着宿主原来的强调色，否则一眼就看得出这一块是外来的。 */
+  color: var(--cg-subagent-color, inherit);
+  line-height: inherit;
   white-space: nowrap;
 }
 
 /* 那个数字只作信息展示，不给人点开：外层的按钮一起接管，箭头藏掉。
    属性是 React 管的，客户端脚本每次同步都会重新摘一遍。 */
-.cg-subagent-count-static { pointer-events: none !important; cursor: default !important; }
+/* 箭头藏掉之后那个间距还在，文字会显得比旁边缩进一截，所以把按钮的内边距和间距一起收掉。 */
+.cg-subagent-count-static {
+  pointer-events: none !important;
+  cursor: default !important;
+  padding-right: 0 !important;
+  gap: 0 !important;
+}
 .cg-subagent-count-static svg { display: none !important; }
