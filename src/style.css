@@ -3850,6 +3850,10 @@ body[data-ds-dark-theme] .cg-archived-check { accent-color: #d1d5db; }
      不跟着宿主原来的强调色，否则一眼就看得出这一块是外来的。 */
   color: var(--cg-subagent-color, inherit);
   line-height: inherit;
+  /* 宿主那个 span 被压成 0 号字之后行盒高度归零，重绘出来的字会贴得比旁边高一点。
+     往下带 1px 回到同一基线——这是量出来的偏移量，不是随手加的。 */
+  position: relative;
+  top: 1px;
   white-space: nowrap;
 }
 
