@@ -72,15 +72,19 @@ function samplingLines(raw) {
 
 /**
  * One row per acceptance boundary. `expected === null` means "must be discarded as not set".
- * Ranges come from `SAMPLING_RULES`: temperature and top_p are closed 0..max (decimals allowed),
- * max_tokens is a positive integer and has no upper bound at all.
+ * Ranges come from `SAMPLING_RULES`: temperature is the closed 0..2 interval (0 is a temperature
+ * like any other), while top_p is (0, 1] — the docs say it must be greater than 0, so 0 is not a
+ * value this plugin accepts (personas.js `minExclusive: true`); max_tokens is a positive integer
+ * and has no upper bound at all.
  */
 const UNIT_CASES = [
   { key: 'temperature', text: '0', expected: 0, why: '下界 0 合法：0 与“未设置”是两回事，不能被当成空值' },
   { key: 'temperature', text: '2', expected: 2, why: '上界 2 合法（闭区间包含上界）' },
   { key: 'temperature', text: '2.01', expected: null, why: '越过上界 0.01 应丢弃' },
   { key: 'temperature', text: '-0.01', expected: null, why: '低于下界应丢弃' },
-  { key: 'top_p', text: '0', expected: 0, why: '下界 0 合法' },
+  // 回归改钉：`SAMPLING_RULES` 曾把 0 当 top_p 的合法下界，后按官方文档（top_p 必须 >0）有意
+  // 改为左开区间（personas.js `minExclusive: true`）——0 现在被丢弃并 warn，与"未设置"同义。
+  { key: 'top_p', text: '0', expected: null, why: '下界开：文档要求 top_p > 0，0 应丢弃并 warn' },
   { key: 'top_p', text: '1', expected: 1, why: '上界 1 合法（概率的闭区间）' },
   { key: 'top_p', text: '1.01', expected: null, why: '越过上界应丢弃' },
   { key: 'top_p', text: '-0.01', expected: null, why: '低于下界应丢弃' },
@@ -112,7 +116,7 @@ function assertBoundary(dir, stem, row) {
   assert.equal(warned, false, `${label}：合法值不得产生 warn`);
 }
 
-test('范围：temperature 与 top_p 是闭区间 [0, max]，两端合法、越界一侧丢弃并 warn', async () => {
+test('范围：temperature 是闭区间 [0, 2]，top_p 是左开右闭 (0, 1]；越界一侧丢弃并 warn', async () => {
   await inTempHome(async home => {
     const dir = await ensurePersonasDir(CODEX_PROMPT);
     assert.equal(dir, join(home, 'personas'), '人设目录是 $DSH_HOME/personas');
@@ -167,11 +171,13 @@ test('formatPersona 字节级：有参数写三行且顺序固定；没有参数
 
     // `description: ` 那个尾随空格是四个基础字段一直以来的格式，与采样参数无关；这里整份比对，
     // 是为了让「多写一行空 key」这种污染在任何一次改动后立刻可见。
-    writePersona({ id: 'bytes', name: 'Bytes', text: 'body here', temperature: 1.5, top_p: 0, max_tokens: 256 });
+    // top_p 用 0.95 而不是 0：`SAMPLING_RULES` 有意把 top_p 定为 (0, 1]（官方文档要求 >0），
+    // 0 在 writePersona 阶段就被丢弃（见上方 UNIT_CASES 的回归改钉），不会出现在文件里。
+    writePersona({ id: 'bytes', name: 'Bytes', text: 'body here', temperature: 1.5, top_p: 0.95, max_tokens: 256 });
     assert.equal(readFileSync(join(dir, 'bytes.md'), 'utf8'),
       ['---', 'name: Bytes', 'description: ', 'order: 100', 'enabled: true',
-        'temperature: 1.5', 'top_p: 0', 'max_tokens: 256', '---', 'body here', ''].join('\n'),
-      '有参数的人设：逐字节比对（行序 temperature→top_p→max_tokens、冒号后单空格、结尾一个换行、top_p: 0 不被当成未设置）');
+        'temperature: 1.5', 'top_p: 0.95', 'max_tokens: 256', '---', 'body here', ''].join('\n'),
+      '有参数的人设：逐字节比对（行序 temperature→top_p→max_tokens、冒号后单空格、结尾一个换行）');
 
     writePersona({ id: 'bare', name: 'Bare', text: 'plain body' });
     const bare = readFileSync(join(dir, 'bare.md'), 'utf8');

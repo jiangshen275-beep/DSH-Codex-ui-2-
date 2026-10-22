@@ -1571,7 +1571,9 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
       for (const id of Object.keys(sessions)) {
         // An archived child belongs to the 已归档 list, not to its parent's panel: keeping it in both
         // places is how a Session ended up reachable from neither. A phantom child is not listed at all.
-        if (archivedSet.has(id) || ghostIds.has(id)) continue;
+        // 本插件刚删掉的子会话也要从分组里消失：删除只写 purgedIds，而分组只认 archived/ghost，
+      // 于是父会话旁边那个「子代理 15」在刷新页面之前一直挂着旧数字——磁盘已经空了，界面还在数。
+      if (archivedSet.has(id) || ghostIds.has(id) || purgedIds.has(id)) continue;
         const parent = parentOf(id);
         if (parent === undefined || sessions[parent] === undefined) continue;
         const groups = map.get(parent) ?? { subagents: [], branches: [] };
@@ -1581,7 +1583,7 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
       const byAge = (a, b) => (sessions[a].createdAt ?? stamp(sessions[a])) - (sessions[b].createdAt ?? stamp(sessions[b])) || String(a).localeCompare(String(b));
       for (const groups of map.values()) { groups.subagents.sort(byAge); groups.branches.sort(byAge); }
       return map;
-    }, [sessions, archivedIds, ghostIds]);
+    }, [sessions, archivedIds, ghostIds, purgedIds]);
     // One question per candidate, to the Host rather than to the list the Host sent earlier: the
     // store cannot tell "this Session exists" from "its log was deleted after the row was built".
     //
@@ -1616,7 +1618,7 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
         })();
         return () => { cancelled = true; };
       } catch { return undefined; }
-    }, [sessions, archivedIds, ghostIds]);
+    }, [sessions, archivedIds, ghostIds, purgedIds]);
     const isBranchChild = id => { const parent = parentOf(id); return parent !== undefined && sessions[parent] !== undefined; };
     const groupOpen = { subagents: subagentOpen, branches: branchOpen };
     // The row's panel is its own state: opening it reveals the two group headers and nothing else,
@@ -2946,6 +2948,9 @@ const DONE_EVENT = 'dsh-codex-ui:answer-done';
  * 规则也跟着变干净：**完成的是当前会话就不提醒**，最小化也算当前会话 —— 人回来就看得见的东西，
  * 不必叫；只有别的会话在后台跑完，才值得一声响加一条通知。
  * 顺带把"点停止"这类中止也解决了：中止发生在当前会话，天然被这条规则过滤掉。
+ *
+ * 有一条要单独排除：子代理会话。它同样"不是当前会话"，但它不是用户在等的那条回答，是本插件
+ * 自己派出去干的活 —— 每跑完一个就响一声，吵的是派活的人自己。判据用宿主透传的 `origin`。
  */
 function startDoneNotify(ctx) {
   if (typeof document === 'undefined') return;
@@ -3082,6 +3087,12 @@ function startDoneNotify(ctx) {
         const previous = known.has(id) ? known.get(id) : running;
         known.set(id, running);
         if (!previous || running) continue;
+        // 子代理会话在列表里也是一条独立会话，它跑完同样是一次 running 由真变假，于是每派一个
+        // 子代理就响一声 —— 但那是本插件自己派出去干的活，不是用户在等的那条回答，不该叫。
+        // 宿主把这个标记原样透传进列表行：`...entry.origin !== void 0 ? { origin: entry.origin } : {}`。
+        // 只认 `origin: 'subagent'`：用户 fork 出来的分支只有 `parentId`、没有这个标记，那是人自己的
+        // 会话，跑完仍然该提醒。
+        if (row?.origin === 'subagent') continue;
         // 正看着这条会话才不提醒；最小化、或看着别的会话都要叫。
         if (watching(id)) continue;
         announce({ sessionId: id, title: typeof row?.title === 'string' ? row.title : '' });

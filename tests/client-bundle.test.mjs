@@ -87,7 +87,33 @@ function loadBundle(react = createReactShim(), storage = null, windowExtras = nu
     // path exercised without owning the process.
     setInterval: () => 0,
     clearInterval: () => {},
+    // lib/client.js:4343 measures the slider shell inside a mount effect, and 2754 subscribes a
+    // ResizeObserver to the sidebar's own element — both are bare identifiers under the new-Function
+    // runtime, so they must be runtime keys, not window props.
+    ResizeObserver: class { observe() {} unobserve() {} disconnect() {} },
+  // `client.js` 里是裸调用 `getComputedStyle(...)`，不是 `window.getComputedStyle`——
+  // bundle 由 new Function(keys..., code) 执行，顶层标识符只能来自 runtime 的键。
+  getComputedStyle: () => ({ getPropertyValue: () => '', width: '232px', display: 'block' }),
   };
+  // client bundle 里会往 window 上挂事件（热重载、可见性、存储变更都在这里），真实浏览器里这是
+  // 浏览器给的，桩里只有 document 那套。少这一个函数，整个 bundle 在 eval 阶段就抛
+  // `window.addEventListener is not a function`，于是本文件里所有 UI 断言全部连坐变红——
+  // 四十多条一起红，看起来像产品坏了，其实只是这一行缺失。
+  // 同一个坑的第二层：bundle 里那些定时器/帧回调也挂在 window 上（reply-forge 的客户端就用
+  // `window.setInterval`）。桩只给了全局 setInterval，于是 reply-forge 整个工厂在 eval 阶段就抛
+  // `window.setInterval is not a function`，它下面所有断言连坐变红。凡是 bundle 会从 window 上取的
+  // 定时器，这里都补齐，并保持「不真的占用事件循环」这条：setInterval 返回 0，setTimeout 立即返回。
+  // `client.js:4334` 是裸调用 `getComputedStyle(...)`，不是 `window.getComputedStyle`——
+  // bundle 是用 new Function(keys..., code) 跑的，顶层标识符只能来自 runtime 的键。挂 window 上够不着。
+  runtime.window.setInterval = () => 0;
+  runtime.window.clearInterval = () => {};
+  runtime.window.setTimeout = () => 0;
+  runtime.window.clearTimeout = () => {};
+  runtime.window.requestAnimationFrame = callback => { callback(0); return 1; };
+  runtime.window.cancelAnimationFrame = () => {};
+  runtime.window.addEventListener = document.addEventListener.bind(document);
+  runtime.window.removeEventListener = document.removeEventListener.bind(document);
+  runtime.window.dispatchEvent = event => { document.dispatch(event?.type ?? '', event); return true; };
   if (storage) runtime.window.localStorage = storage;
   if (windowExtras) Object.assign(runtime.window, windowExtras);
   runtime.window.document = document;
@@ -103,11 +129,11 @@ function loadBundle(react = createReactShim(), storage = null, windowExtras = nu
 }
 
 /** useState order: open, pane, query, draftIndex, actionError, lightning, superfast, ultraFlag, turboReady, budget, ultraNotice, aliases, aliasEditor. Every mount must supply all thirteen. */
-const CLOSED_DISARMED = [false, 'effort', '', null, null, false, false, false, true, { value: 15, exact: true }, false, {}, null];
-const CLOSED_ARMED = [false, 'effort', '', null, null, true, false, false, true, { value: 15, exact: true }, false, {}, null];
-const OPEN_AT_MAX = [true, 'effort', '', null, null, false, false, true, true, { value: 15, exact: true }, false, {}, null];
-const OPEN_ULTRA_LIGHTNING = [true, 'effort', '', null, null, true, false, true, true, { value: 15, exact: true }, false, {}, null];
-const OPEN_REAL_TIER = [true, 'effort', '', null, null, false, false, false, true, { value: 15, exact: true }, false, {}, null];
+const CLOSED_DISARMED = [false, 'effort', '', null, null, false, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: true }, false, {}, null, 0];
+const CLOSED_ARMED = [false, 'effort', '', null, null, true, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: true }, false, {}, null, 0];
+const OPEN_AT_MAX = [true, 'effort', '', null, null, false, false, true, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: true }, false, {}, null, 0];
+const OPEN_ULTRA_LIGHTNING = [true, 'effort', '', null, null, true, false, true, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: true }, false, {}, null, 0];
+const OPEN_REAL_TIER = [true, 'effort', '', null, null, false, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: true }, false, {}, null, 0];
 
 function modelStore(effort = 'high') {
   return {
@@ -154,6 +180,12 @@ function mountControl(states, store = modelStore(), refs = {}, options = {}) {
     },
   };
   moduleExports.registerModelUI({
+  // `registerModelUI` 会调 `ctx.effect` 挂副作用清理（宿主 fiber 提供）。桩漏了它，注册在第一步就抛
+  // `ctx.effect is not a function`，这个文件里几十条断言于是全部连坐变红——不是界面坏了，是桩少了一个方法。
+  effect: fn => {
+    const dispose = typeof fn === "function" ? fn() : undefined;
+    return typeof dispose === "function" ? dispose : noop;
+  },
     slots,
     connection,
     inject: (_deps, callback) => {
@@ -181,9 +213,9 @@ function mountControl(states, store = modelStore(), refs = {}, options = {}) {
     useInput: () => ({ actions: {} }), inputActions: {}, useSession: hook(),
     useProjection: hook(), useTrajectory: hook(),
   });
-  // The shim records effects instead of running them and creates fresh ref handles per
-  // render, so the commit order is explicit: begin a render, render, attach the test's
-  // ref values to that render's handles, then run that render's effects.
+  // The shim records effects instead of running them and keeps ref handles across renders, so the
+  // commit order is explicit: begin a render, render, attach the test's ref values to the handles of
+  // that render, then run that render's effects.
   const rerender = run => {
     shim.beginRender();
     const tree = render();
@@ -276,10 +308,14 @@ test('open control renders the clickable switch, the Ultra track and the flags r
 });
 
 test('the cost line follows the multiplier the Host reports', () => {
-  const permissive = mountControl([true, 'effort', '', null, null, true, false, false, true, { value: 4, exact: true }, false, {}, null]).element;
+  const permissive = mountControl([true, 'effort', '', null, null, true, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 4, exact: true }, false, {}, null, 0]).element;
   assert.match(treeText(permissive), /4\s*[x\u00d7]\s*token/i, 'a different multiplier must be shown as-is');
 
-  const inexact = mountControl([true, 'effort', '', null, null, true, false, false, true, { value: 15, exact: false }, false, {}, null]).element;
+  // `undefined` in the alias slot on purpose: the component seeds `aliases` with a function
+  // (`useState(readModelAliases)`, src/model-ui.js:246), so a scripted `{}` in that slot replaces the
+  // map with an empty one and the shim never calls the initialiser. This test is about the multiplier,
+  // not about names, so the slot is left unscripted and the real initial value runs.
+  const inexact = mountControl([true, 'effort', '', null, null, true, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: false }, false, undefined, null, 0]).element;
   assert.match(treeText(inexact), /15\s*[x\u00d7]\s*token/i, 'the fallback figure still shows');
 
   const disarmed = mountControl(OPEN_REAL_TIER).element;
@@ -336,7 +372,7 @@ test('a blank conversation adopts the switches the user last used', async () => 
   // The mount state is before the first Host read: nothing is armed and the switches are
   // not ready yet, so only the read can turn them on. Lightning / Ultra / readiness are
   // the only slots the read is allowed to write, which is what a real re-render does.
-  const beforeRead = [false, 'effort', '', null, null, false, false, false, false, { value: 15, exact: true }, false, {}, null];
+  const beforeRead = [false, 'effort', '', null, null, false, false, false, { sessionId: null, phase: 'idle', retrySeq: 0 }, { value: 15, exact: true }, false, {}, null, 0];
   const writableSlots = [5, 6, 7, 8];
   const { rerender } = mountControl(beforeRead, modelStore('medium'), {}, { blank: true, calls, memory, writableSlots });
   // The read resolves on a later microtask, so settle it, then let the sync effects run.
@@ -353,12 +389,12 @@ test('a blank conversation adopts the switches the user last used', async () => 
 test('a running conversation never adopts the remembered switches', async () => {
   const calls = [];
   const memory = { 'dsh-codex-ui/composer-switches': { lightning: true, ultra: true } };
-  const beforeRead = [false, 'effort', '', null, null, false, false, false, false, { value: 15, exact: true }, false, {}, null];
+  const beforeRead = [false, 'effort', '', null, null, false, false, false, false, { value: 15, exact: true }, false, undefined, null];
   const { rerender } = mountControl(beforeRead, modelStore('medium'), {}, { blank: false, calls, memory, writableSlots: [5, 6, 7, 8] });
   await new Promise(resolve => setTimeout(resolve, 0));
   rerender();
-  // The shim recreates refs per render, so the sync effect re-runs where React would have
-  // skipped it; what must never happen is a running conversation arming a switch.
+  // The shim now keeps ref handles across renders, so this run is only a second render; what must
+  // never happen is a running conversation arming a switch.
   const updates = calls.filter(call => call.action === 'update');
   assert.ok(!updates.some(call => call.lightning === true || call.ultra === true), 'only a blank session inherits them');
 });
@@ -435,7 +471,7 @@ test('landing on Ultra swaps the tier name for the cost notice, then restores it
   // The read answers "pinned", which is what the app would have settled on before a drag and
   // what keeps the probe's repeated reads from fighting the pin.
   const read = { lightning: false, ultra: true, tokenMultiple: 15, tokenExact: true };
-  const { rerender } = mountControl(OPEN_REAL_TIER, modelStore('medium'), {}, { writableSlots: [3, 7, 10], read });
+  const { rerender } = mountControl(OPEN_REAL_TIER, modelStore('medium'), {}, { writableSlots: [3, 7, 8, 10], read });
   const summary = tree => byClass(tree, 'cg-model-summary')[0].props.children[0];
   assert.equal(summary(rerender()).props.children, 'Medium', 'the tier name stands while the tier is not Ultra');
   // Let the first read settle first: in the app it lands long before anyone drags, and it
@@ -474,7 +510,7 @@ test('landing on Ultra swaps the tier name for the cost notice, then restores it
 test('releasing without previewing Ultra announces nothing', async () => {
   // The release paths run chooseLevel; a notice there announced twice (pointerup, then the
   // blur that follows), which is the bug this pins down.
-  const { rerender } = mountControl(OPEN_REAL_TIER, modelStore('medium'), {}, { writableSlots: [3, 7, 10] });
+  const { rerender } = mountControl(OPEN_REAL_TIER, modelStore('medium'), {}, { writableSlots: [3, 7, 8, 10] });
   await new Promise(resolve => setTimeout(resolve, 0));
   rerender();
   await byClass(rerender(), 'cg-model-slider')[0].props.onPointerUp({ currentTarget: { value: '3' } });
@@ -515,7 +551,7 @@ test('reset leaves Ultra as well as restoring the default effort', async () => {
   // The Host answers "pinned" once, then agrees with the reset the component pushes.
   let reads = 0;
   const read = () => { reads += 1; return { lightning: false, ultra: reads === 1, tokenMultiple: 15, tokenExact: true }; };
-  const { rerender, selections } = mountControl(OPEN_AT_MAX, modelStore('high'), {}, { writableSlots: [3, 7, 10], calls, read });
+  const { rerender, selections } = mountControl(OPEN_AT_MAX, modelStore('high'), {}, { writableSlots: [3, 7, 8, 10], calls, read });
   await new Promise(resolve => setTimeout(resolve, 0));
   rerender();
   const before = byClass(rerender(), 'cg-model-slider')[0];
@@ -661,11 +697,13 @@ function byLabel(tree, pattern) {
 // State-slot indices, in declaration order. They shift whenever a `useState` is added or removed in
 // the sidebar — deleting the rail's "更多" menu moved them down, adding `heroMarkOpen` moved them
 // back — which is why every override goes through this table instead of a raw index.
+// 索引 = 该 hook 在 `src/client.js` Sidebar 组件里 `React.useState` 的声明序号（0 起）。
+// 侧栏现在有 53 个 useState，这份表是照着源码数出来的；加/删 hook 时要同步重排。
 const SIDEBAR_SLOT = {
-  heroMarkOpen: 8, pinsOpen: 11,
-  taskMenu: 13, renameTarget: 14, renameDraft: 15, renameError: 16, renamePending: 17,
-  recentOpen: 19, archivedOpen: 20, childPanel: 21, subagentOpen: 22, branchOpen: 23, groupShowAll: 24, ghostIds: 27,
-  navigationError: 25, purgedIds: 26, sessionQuery: 28, searchOpen: 29,
+  heroMarkOpen: 14, pinsOpen: 17,
+  taskMenu: 19, renameTarget: 20, renameDraft: 21, renameError: 22, renamePending: 23,
+  recentOpen: 25, archivedOpen: 26, childPanel: 29, subagentOpen: 30, branchOpen: 31, groupShowAll: 32, ghostIds: 35,
+  navigationError: 33, purgedIds: 34, sessionQuery: 36, searchOpen: 37,
 };
 
 function sidebarStates(overrides = {}) {
@@ -673,14 +711,9 @@ function sidebarStates(overrides = {}) {
   // only when a hook runs past the end, so a queue that is one too long leaves the cursor short of the
   // end and every later render reads shifted values — that is what "purgedIds.has is not a function"
   // was: after a hook was deleted the array kept its old length and never wrapped.
-  const states = [
-    null, false, '', 'home', false, false, null, false, false, false, false, false,
-    null, null, null, '', '', false, null, false, false, new Set(), new Set(), new Set(), new Set(), '',
-    new Set(), new Set(), '', false,
-    // 30: personaState — the persona list / dialog / draft / error / pending bundle. One hook, declared
-    // last in the sidebar so every index above keeps its meaning.
-    null,
-  ];
+  // 队列只负责「脚本化覆盖」：留空的位置由 shim 退回源码里的真实初始值（函数式初始化也会被调用）。
+  // 长度给足 200，让一次渲染里所有 hook（含内嵌组件的）都不会绕回队列开头。
+  const states = new Array(200);
   for (const [index, value] of Object.entries(overrides)) states[Number(index)] = value;
   return states;
 }
@@ -694,6 +727,9 @@ function mountSidebar(sessions, options = {}) {
   const noop = () => {};
   const writes = [];
   const rpcCalls = [];
+  // Archive / unarchive ride `uiWorkspace`, not the RPC seam, so they need their own recorder for
+  // the "a cancelled confirmation sends nothing" claim to have anything to count.
+  const archives = [];
   const workspaces = options.workspaces ?? { items: [], pinnedSessionIds: [], archivedSessionIds: [] };
   let sidebar = null;
   const react = loadBundle(createReactShim(sidebarStates(options.overrides), { writableSlots: options.writableSlots }), options.storage ?? null, { confirm: options.confirm ?? (() => true) });
@@ -708,7 +744,8 @@ function mountSidebar(sessions, options = {}) {
     layout: { selectPanel: noop, toggleSidebar: noop },
     uiWorkspace: {
       openSession: noop, startSession: noop, openWorkspace: () => Promise.resolve(),
-      archiveSession: () => Promise.resolve(), unarchiveSession: () => Promise.resolve(),
+      archiveSession: (id, archiveOptions) => { archives.push({ action: 'archive', id, options: archiveOptions }); return Promise.resolve(); },
+      unarchiveSession: id => { archives.push({ action: 'unarchive', id }); return Promise.resolve(); },
       // Recorded rather than stubbed away: the pin action's whole job is to reach this call.
       pinSession: id => { pins.push({ action: 'pin', id }); return Promise.resolve(); },
       unpinSession: id => { pins.push({ action: 'unpin', id }); return Promise.resolve(); },
@@ -756,7 +793,7 @@ function mountSidebar(sessions, options = {}) {
     useConversationViews: selector([{ id: 'chat', label: '聊天' }]),
   };
   const rerender = () => { react.beginRender(); const tree = sidebar(props); runEffects(react); return tree; };
-  return { tree: rerender(), rerender, writes, rpcCalls, pins, document: loadBundleDocument };
+  return { tree: rerender(), rerender, writes, rpcCalls, pins, archives, document: loadBundleDocument };
 }
 
 test('an unpinned row offers pinning, and the pin reaches the workspace API', async () => {
@@ -999,18 +1036,22 @@ test('an archived row offers deletion, and the Host confirmation removes it here
 });
 
 test('cancelling the confirmation leaves the Session alone', async () => {
-  const sessions = { archived: { id: 'archived', title: '已归档会话', createdAt: 1, retainedBy: {} } };
-  const { rerender, rpcCalls } = mountSidebar(sessions, {
-    writableSlots: [SIDEBAR_SLOT.archivedOpen, SIDEBAR_SLOT.navigationError, SIDEBAR_SLOT.purgedIds],
-    overrides: { [SIDEBAR_SLOT.archivedOpen]: true },
-    workspaces: { items: [], pinnedSessionIds: [], archivedSessionIds: ['archived'] },
+  // This used to be pinned on the delete confirmation, and 2.1.0 removed that dialog outright:
+  // src/client.js:2072-2073 records the owner asking for the extra NativeDialog step gone, and
+  // `purgeSession` (2074-2089) now calls the route on the click itself. The `confirm: () => false`
+  // below only ever became `window.confirm`, which the delete path never reads — so "cancel" never
+  // happened and the request went out. The switch that still asks first is archiving a Session that
+  // is still running (src/client.js:2018, `if (archive && sessions[id]?.running && !window.confirm(...)) return;`),
+  // so the claim moves there instead of being weakened: a cancelled confirmation must still send
+  // nothing at all, and the row must stay where it was.
+  const sessions = { abc: { id: 'abc', title: '还在跑的会话', createdAt: 1, running: true, retainedBy: {} } };
+  const { rerender, archives } = mountSidebar(sessions, {
+    overrides: { [SIDEBAR_SLOT.recentOpen]: true },
     confirm: () => false,
   });
-  await byLabel(rerender(), /^删除会话日志/)[0].props.onClick();
-  // Filtered to the delete route on purpose: activation now also pushes the model display names, and an
-  // assertion about "exactly one delete hop" must count delete hops, not every RPC in the session.
-  assert.equal(rpcCalls.filter(call => call.method === 'dsh-codex-ui/purge-session').length, 0, 'nothing is sent when the user cancels');
-  assert.equal(byLabel(rerender(), /^删除会话日志/).length, 1, 'the row stays');
+  await byLabel(rerender(), /^归档会话 /)[0].props.onClick();
+  assert.deepEqual(archives, [], 'nothing is sent when the user cancels the archive confirmation');
+  assert.equal(byClassPart(rerender(), 'cg-task-row').length, 1, 'the row stays where it was');
 });
 
 test('the model display names are pushed to the Host when the client activates', () => {
@@ -1073,7 +1114,7 @@ test('a model alias repaints the name and leaves the request alone', () => {
   const alias = { 'deepseek/deepseek-chat': '小闪' };
   // The alias map is state seeded from storage, so the mount carries both: the queued slot is what
   // this render reads, and the storage entry is what the next page load would read.
-  const seeded = [true, 'model', '', null, null, false, false, false, true, { value: 15, exact: true }, false, alias, null];
+  const seeded = [true, 'model', '', null, null, false, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: true }, false, alias, null, 0];
   const { element, selections } = mountControl(seeded, store, {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
   assert.equal(byClass(element, 'cg-model-trigger-name')[0].props.children, '小闪', 'the composer label uses the alias');
   const option = byClass(element, 'cg-model-option')[0];
@@ -1086,18 +1127,18 @@ test('a model alias repaints the name and leaves the request alone', () => {
 
 test('a model can be found by either of its names', () => {
   const alias = { 'deepseek/deepseek-chat': '小闪' };
-  const byAlias = mountControl([true, 'model', '小闪', null, null, false, false, false, true, { value: 15, exact: true }, false, alias, null], modelStore(), {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
+  const byAlias = mountControl([true, 'model', '小闪', null, null, false, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: false }, false, alias, null, 0], modelStore(), {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
   assert.equal(byClass(byAlias.element, 'cg-model-option').length, 1, 'searching the alias finds the model');
-  const byReal = mountControl([true, 'model', 'deepseek-chat', null, null, false, false, false, true, { value: 15, exact: true }, false, alias, null], modelStore(), {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
+  const byReal = mountControl([true, 'model', 'deepseek-chat', null, null, false, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: false }, false, alias, null, 0], modelStore(), {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
   assert.equal(byClass(byReal.element, 'cg-model-option').length, 1, 'and so does the real name');
-  const byNothing = mountControl([true, 'model', 'zzz', null, null, false, false, false, true, { value: 15, exact: true }, false, alias, null], modelStore(), {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
+  const byNothing = mountControl([true, 'model', 'zzz', null, null, false, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: false }, false, alias, null, 0], modelStore(), {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
   assert.equal(byClass(byNothing.element, 'cg-model-option').length, 0, 'an unrelated query still filters it out');
 });
 
 test('renaming from the picker stores the alias, trims it, and clears on reset', () => {
   // The row keeps a rename control of its own: a click on the row already means "use this model",
   // so the gesture cannot be a double click. The editor it opens carries no buttons at all.
-  const seeded = [true, 'model', '', null, null, false, false, false, true, { value: 15, exact: true }, false, {}, null];
+  const seeded = [true, 'model', '', null, null, false, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: true }, false, {}, null, 0];
   const { rerender, memory } = mountControl(seeded, modelStore(), {}, { writableSlots: [11, 12] });
   // Found by class, the same way the sidebar tests find their row actions. The label is checked for
   // content rather than for an exact sentence: the wording is not the contract.
@@ -1144,7 +1185,10 @@ test('a name belongs to one account, not to the model id at large', () => {
     pending: null, status: 'ready', failures: [], retainedEffort: null,
   };
   const alias = { 'deepseek/deepseek-chat': '小闪' };
-  const seeded = [true, 'model', '', null, null, false, false, false, true, { value: 15, exact: true }, false, alias, null];
+  // The alias slot stays unscripted: `aliases` is seeded by `useState(readModelAliases)`
+  // (src/model-ui.js:246), and a scripted `{}` there wins over the initialiser, so the map read out
+  // of storage never reached the rows and this test could only ever see the catalog name.
+  const seeded = [true, 'model', '', null, null, false, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: true }, false, undefined, null, 0];
   const { element } = mountControl(seeded, store, {}, { memory: { 'dsh-codex-ui/model-aliases': alias } });
   const rows = byClassPart(element, 'cg-model-option');
   assert.equal(rows.length, 2, 'the same model id is offered by both accounts');
@@ -1155,7 +1199,7 @@ test('a name belongs to one account, not to the model id at large', () => {
 test('renaming happens inside the row, and the picker stays on screen', () => {
   // The editor used to be a floating panel: it was clipped by its own popover, and clicking the
   // pencil could leave the reader with nothing. So the assertions here are about what survives.
-  const seeded = [true, 'model', '', null, null, false, false, false, true, { value: 15, exact: true }, false, {}, null];
+  const seeded = [true, 'model', '', null, null, false, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: true }, false, {}, null, 0];
   const { rerender } = mountControl(seeded, modelStore(), {}, { writableSlots: [11, 12] });
   const rows = () => byClassPart(rerender(), 'cg-model-row');
   assert.equal(rows().length, 1, 'the picker lists the model');
@@ -1201,7 +1245,7 @@ test('editing one account does not put the other account row into editing', () =
     current: { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'high' },
     pending: null, status: 'ready', failures: [], retainedEffort: null,
   };
-  const seeded = [true, 'model', '', null, null, false, false, false, true, { value: 15, exact: true }, false, {}, null];
+  const seeded = [true, 'model', '', null, null, false, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: true }, false, {}, null, 0];
   const { rerender } = mountControl(seeded, store, {}, { writableSlots: [11, 12] });
   const rows = () => byClassPart(rerender(), 'cg-model-row');
   assert.equal(rows().length, 2, 'two accounts list the same model');

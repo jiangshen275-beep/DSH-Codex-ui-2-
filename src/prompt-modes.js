@@ -1,5 +1,4 @@
 import { presetSilences, SECTION_MANDATE } from './turbo-policy.js';
-import { isBlockOn } from './injection-state.js';
 import { BUILTIN_ID, deletePersona, ensurePersonasDir, listPersonas, loadPersonas, readPersonaFile, resolvePersonaId, textFor, writePersona } from './personas.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -224,27 +223,14 @@ export async function apply(ctx) {
     writes = writes.catch(() => {}).then(() => unit.putRecord('sessions', session.id, mode));
     writes.catch(error => ctx.logger.warn(`prompt mode fork save failed: ${error.message}`));
   });
-  ctx.systemPrompt.section({
-    name: 'chatgpt-ui:codex-style',
-    order: ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_SUFFIX') + 1,
-    interpolate: false,
-    // An empty section renders no bytes. The body comes from the persona the session resolved to:
-    // the built-in `DeepSeek` row carries the empty string, which is exactly "use the native prompt".
-    // The `codexPrompt` switch can hold the section back as well. That switch is published by
-    // `turbo.js` and reads off only when it is explicitly off, so a host that never loaded the
-    // switches keeps this text.
-    text: ({ agent }) => {
-      if (!agent || presetSilences(agent) || !isBlockOn('codexPrompt')) return '';
-      // A persona file is somebody's prose, so on its own it reads as advice. The enforcement line is
-      // prefixed rather than appended: it has to be read before the style it demands. An empty body
-      // still renders no bytes — the built-in `DeepSeek` row is exactly "use the native prompt".
-      // A persona file that cannot be read must leave the native prompt alone, never fail assembly.
-      try {
-        const body = textFor(modeFor(agent.session));
-        return body === '' ? '' : `${SECTION_MANDATE}\n\n${body}`;
-      } catch { return ''; }
-    },
-  });
+  // 人设正文不再从这里注入。宿主 `@deepseek-ai/dsh-system-prompt@0.2.1-rc.2` 的
+  // `AssembleContext` 只有 `{ scope, signal }`——**没有 agent**，而 section 的 text 回调只能拿到这个
+  // context。原先这里写的是 `text: ({ agent }) => { if (!agent) return ''; … }`，于是 `agent` 恒为
+  // undefined，这段每次组装都返回空串：正文一次都没进过系统提示，界面上却只有「人设仍在生效」
+  // 在说好话。模型的思考记录里写着「我实际收到的系统提示里没有明显的人设正文段落」，就是它。
+  // 正文改由 `persona-reminder.js` 在 `agent/pre-step` 每轮送出——那条路 `payload.agent` 是齐的，
+  // 而且作为最新一条消息，位置比系统提示更靠后，"时刻遵守"反而是它更强。
+  // 这里不再注册一个永远产出空串的 section：留着它只会让人以为它在工作。
 
   // 用户在会话里说「帮我在侧栏加个 XX」时，Agent 得知道去哪读说明书——它没有别的途径知道
   // 这个插件带了文档。路径从本文件的位置推，装到哪个 profile、目录叫什么名字都对；写死一个

@@ -628,6 +628,17 @@ body[data-ds-dark-theme] .cg-brand-separator { background: #3a3a3a; }
 
 .cg-model-trigger-effort[data-ultra="true"] { color: #9b50ff; }
 
+/* 触发条上的档位名要和弹层里那个大字同色：两者都是「当前档位」的读数，一个有色一个发灰
+   没有道理。原先只有 Max（紫）和超快（金）单独写了规则，low / medium / high 落到 627 行的
+   默认灰上，于是蓝色进度条旁边挂着一行灰字。Off 保持灰——关掉就是没有档位，灰是对的。 */
+.cg-model-root[data-effort="minimal"] .cg-model-trigger-effort,
+.cg-model-root[data-effort="low"] .cg-model-trigger-effort,
+.cg-model-root[data-effort="high"] .cg-model-trigger-effort { color: #3982fa; }
+
+body[data-ds-dark-theme] .cg-model-root[data-effort="minimal"] .cg-model-trigger-effort,
+body[data-ds-dark-theme] .cg-model-root[data-effort="low"] .cg-model-trigger-effort,
+body[data-ds-dark-theme] .cg-model-root[data-effort="high"] .cg-model-trigger-effort { color: #5b9cff; }
+
 /* Max's label takes the light purple end of the ramp — in the composer label and in the
 
    popover's headline. Only the text: the other accents keep their own colour roles. */

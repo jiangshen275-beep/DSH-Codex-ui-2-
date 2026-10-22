@@ -26,3 +26,8 @@ jiang-armor/
 _backups/
 dsh-codex-ui-cover-v2-16x9.png
 dsh-codex-ui-cover-v3-16x9.png
+
+# 旧版本的项目副本与内部交接文档，不进仓库
+备份/
+HANDOVER-*.md
+*.before-queue-remap

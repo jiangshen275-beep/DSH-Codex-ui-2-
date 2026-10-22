@@ -10,8 +10,13 @@ const providers = (await readFile(new URL('src/providers.js', root), 'utf8')).re
 const helper = (await readFile(new URL('src/alias-sync.js', root), 'utf8'))
   .replace(/^export (const|function|class) /gm, '$1 ')
   .replace(/^export \{[^}]*\};?\s*$/gm, '');
+// 没有档位的模型要不要把推理强度条画出来。`model-ui` 读它决定渲染，`injection-ui` 读它画那行开关，
+// 所以独立成一小块拼在两者之前 —— 工厂体里是 `const`，不会像函数那样提升。
+const effortBar = (await readFile(new URL('src/effort-bar.js', root), 'utf8'))
+  .replace(/^export (const|function) /gm, '$1 ');
 const modelUI = (await readFile(new URL('src/model-ui.js', root), 'utf8'))
   .replace(/^import \{[^}]*\} from '\.\/alias-sync\.js';\s*$/m, '')
+  .replace(/^import \{[^}]*\} from '\.\/effort-bar\.js';\s*$/m, '')
   .replace(/^export \{ registerModelUI \};?\s*$/m, '');
 // The contract check reads the inlined `STYLE` straight out of the factory scope, so it is
 // concatenated like the other helpers rather than imported.
@@ -23,7 +28,8 @@ const hostContract = (await readFile(new URL('src/host-contract.js', root), 'utf
 // top-level `const`s only have to exist before `apply` runs, which happens after this body.
 const injectionUI = (await readFile(new URL('src/injection-ui.js', root), 'utf8'))
   .replace(/^export (const|function|class) /gm, '$1 ')
-  .replace(/^export \{[^}]*\};?\s*$/gm, '');
+  .replace(/^export \{[^}]*\};?\s*$/gm, '')
+  .replace(/^import \{[^}]*\} from '\.\/effort-bar\.js';\s*$/m, '');
 // 回复锻造（原 dsh-codex-ui-HF）的客户端：先由 scripts/build-reply-forge.mjs 打成
 // 一个 `const ReplyForgeFactory = (require) => {...}` 表达式，这里原样内联，让它在
 // 同一个工厂作用域里执行——宿主只给一个 client 入口，两个包合一个就必须共用工厂。
@@ -63,6 +69,6 @@ const body = code.replace("import React from 'react';", "const React = require('
 // `DSH_CODEX_UI_BUNDLE_OUT` lets a caller build the artifact somewhere other than `lib/client.js`,
 // so a candidate build can be verified without replacing the artifact the running app is serving.
 const out = process.env.DSH_CODEX_UI_BUNDLE_OUT ?? new URL('lib/client.js', root);
-await writeFile(out, `window.__ModuleLoader__.load({id:'dsh-codex-ui',factory:(require)=>{const STYLE=${JSON.stringify(css)};\n${body}\n${providers}\n${helper}\n${modelUI}\n${hostContract}\n${injectionUI}\n${replyForge}\nconst ReplyForgeBundle=(typeof ReplyForgeFactory==='function')?ReplyForgeFactory(require):null;\nconst safeApply=(ctx)=>{try{return apply(ctx);}catch(error){console.error("dsh-codex-ui activation:",error);throw error;}}; return {apply:safeApply,inject,registerModelUI,validateHeroMarkFile,resolveHeroMark,menuPlacement,runningTailOf,ReplyForgeBundle};}});\n`);
+await writeFile(out, `window.__ModuleLoader__.load({id:'dsh-codex-ui',factory:(require)=>{const STYLE=${JSON.stringify(css)};\n${body}\n${providers}\n${helper}\n${effortBar}\n${modelUI}\n${hostContract}\n${injectionUI}\n${replyForge}\nconst ReplyForgeBundle=(typeof ReplyForgeFactory==='function')?ReplyForgeFactory(require):null;\nconst safeApply=(ctx)=>{try{return apply(ctx);}catch(error){console.error("dsh-codex-ui activation:",error);throw error;}}; return {apply:safeApply,inject,registerModelUI,validateHeroMarkFile,resolveHeroMark,menuPlacement,runningTailOf,ReplyForgeBundle};}});\n`);
 console.log('Built dsh-codex-ui client bundle.');
 

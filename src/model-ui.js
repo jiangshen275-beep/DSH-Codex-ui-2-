@@ -1,4 +1,5 @@
 import { ALIASES_KEY, readAliases, publishAliases, publishCatalogNames } from './alias-sync.js';
+import { PLACEHOLDER_EFFORTS, effortBarEnabled, effortGrade, setEffortGrade } from './effort-bar.js';
 
 // --- 峰谷（DeepSeek 官方规则，2026-08-17 生效）--------------------------------------------------------
 // 峰：北京时间周一至周五 09:00-12:00、14:00-18:00，不含中国法定节假日；其余全部为谷（半价）。
@@ -370,12 +371,19 @@ function registerModelUI(ctx) {
     // shows one more position than the directory holds and never sends `ultra` as
     // an effort id. A model that advertises a real `ultra` level keeps it as-is.
     const levels = reasoning?.efforts || [];
-    const realLevels = levels.filter(level => level.id !== 'ultra');
-    const hasRealUltra = levels.some(level => level.id === 'ultra');
+    // 目录里一个档位都没有（中转站转发的那类模型）：开关开着就把占位档位当成真实档位往下走，
+    // 位置取自本机记住的那一格。挂成「真实档位」而不是替换整个 steps，虚拟 Ultra 才会照常追加到
+    // 队尾 —— 它在本包眼里就是第五格，紫色和流星都挂在那一格上。
+    // `chosen` 这一半不能省：目录还没回来时 `levels` 同样是空的，那不是「这个模型没有档位」，
+    // 只是「还不知道」。少了它，占位模式会在加载窗口里冒充事实，下面那个 writer 就会把
+    // `ultra: false` 覆盖到宿主刚报上来的 pin 上 —— 正是旧守卫原本要挡的那个缺陷。
+    const placeholderMode = levels.length === 0 && Boolean(chosen) && effortBarEnabled();
+    const realLevels = placeholderMode ? PLACEHOLDER_EFFORTS : levels.filter(level => level.id !== 'ultra');
+    const hasRealUltra = !placeholderMode && levels.some(level => level.id === 'ultra');
     const virtualUltra = realLevels.length > 0 && !hasRealUltra;
     const steps = virtualUltra ? [...realLevels, { id: '__ultra__', name: 'Ultra' }] : levels;
     const maxIndex = Math.max(0, steps.length - 1);
-    const effectiveValue = hasRealUltra ? 'ultra' : state.current?.reasoningEffort ?? reasoning?.defaultEffort;
+    const effectiveValue = placeholderMode ? effortGrade() : hasRealUltra ? 'ultra' : state.current?.reasoningEffort ?? reasoning?.defaultEffort;
     const effectiveIndex = steps.findIndex(step => step.id === effectiveValue);
     // `-1` is a state of its own, not tier 0. `findIndex` answers it whenever the directory's effort
     // is not one of the steps at all — an `off` the model omits, a level the catalog has not listed —
@@ -396,7 +404,9 @@ function registerModelUI(ctx) {
     // the Host for this session, or no step that matches its effort, `shownIndex` is a number by
     // construction — the range input needs one — but it is not a fact. A drag is the user's own
     // input, so it always counts, which is also why the knob comes back the moment the pointer moves.
-    const trackUnknown = draftIndex === null && (!turboSynced || indexUnknown);
+    // 占位模式停在哪儿是本机存的，不依赖宿主回话，所以它不算「未同步」——否则填充和旋钮都不画，
+    // 画出来的还是一条空轨道。
+    const trackUnknown = draftIndex === null && !placeholderMode && (!turboSynced || indexUnknown);
     // The tier text follows the same rule as the track, in one place: while the position is unknown
     // the only honest name is the one the directory retained, never the step the clamp landed on.
     // A drag has already chosen a real step, so it passes straight through.
@@ -628,7 +638,14 @@ function registerModelUI(ctx) {
     // Every path that leaves the unknown state (a drag, a model switch, a reset) makes the position
     // a fact again and this writer catches up on the next pass.
     React.useEffect(() => {
-      if (!turboSynced || indexUnknown || ultraSyncedRef.current !== sessionId || reasoning === undefined) return;
+      if (!turboSynced || indexUnknown || ultraSyncedRef.current !== sessionId) return;
+      // 占位模式是这里唯一放行 `reasoning === undefined` 的情形。这个判据本来防的是「目录还没回话，
+      // 别把 ultra: false 覆盖到宿主刚报上来的 pin 上」；而占位模式的档位本来就是本机造的，位置来自
+      // 用户明确拖过去的那一下（或本机记住的那一格），是事实而不是缺席时的默认值。
+      //
+      // 放行之后 Ultra 是真的生效，不只是画面：宿主侧不看模型有没有声明 efforts
+      // （`turbo-policy.js` 只判布尔与注入开关），收到 `ultra` 就把 ULTRA_POLICY 整段拼进提示词。
+      if (reasoning === undefined && !placeholderMode) return;
       if (typeof sessionId !== 'string' || !sessionId) return;
       if (ultraSentRef.current === ultraOn) return;
       ultraSentRef.current = ultraOn;
@@ -637,7 +654,7 @@ function registerModelUI(ctx) {
         ultraSentRef.current = null;
         setActionError(error.message || String(error));
       });
-    }, [turboSynced, indexUnknown, ultraOn, sessionId, reasoning]);
+    }, [turboSynced, indexUnknown, ultraOn, sessionId, reasoning, placeholderMode]);
     // Landing on Ultra briefly replaces the tier name with what that tier costs. The notice
     // is fired by the move itself (see chooseLevel) rather than by watching the pinned flag,
     // so a session that merely opens already pinned does not flash it.
@@ -697,6 +714,15 @@ function registerModelUI(ctx) {
     const chooseLevel = async value => {
       const index = Number(value), step = steps[index];
       if (!state.current || !step || locked || !available) return;
+      if (placeholderMode) {
+        // 目录里没有档位，`reasoningEffort` 没有可设的值，发过去只会被拒，所以档位只记在本机：
+        // 滑条停在新位置、档位名跟着换。Ultra 那一格是例外 —— 它不是档位，是宿主的一个开关，
+        // 由上面那个 writer 照常发出去，这里只负责把位置和名字落到本机。
+        setEffortGrade(step.id);
+        setDraftIndex(index);
+        setActionError(null);
+        return;
+      }
       // The virtual Ultra step writes the highest real tier, never the literal id.
       const effortId = step.id === '__ultra__' ? realLevels[realLevels.length - 1].id : step.id;
       // A deliberate move to or away from the Ultra step is what the next conversation

@@ -120,7 +120,10 @@ test('a child session is never told about a switch', async () => {
   });
 });
 
-test('with the persona block switched off, nothing is announced', async () => {
+test('旧的 codexPrompt 开关不再能让人设静默', async () => {
+  // codexPrompt 已从开关表撤掉，人设正文改由 persona-reminder 每轮直接送出，不再经过 systemPrompt
+  // section，所以「被注入块挡住就没有段落可宣布」这个前提整条不存在了。旧配置里残留的 false 也不该
+  // 让切换通知消失：真的消失了，用户会以为切换没发生，而这正是这条通知唯一的用处。
   await inTempHome(async () => {
     writePersona({ id: 'cat', name: '猫娘', description: '回答带喵', text: '你是一只猫。' });
     setInjection({ codexPrompt: false });
@@ -128,7 +131,7 @@ test('with the persona block switched off, nothing is announced', async () => {
       const notice = mount();
       await notice.step();
       notice.mode.value = 'cat';
-      assert.deepEqual(await notice.step(), [], '人设段没被注入时，关于它的提示只是噪声');
+      assert.equal((await notice.step()).length, 1, '旧配置不该把切换通知吞掉');
     } finally {
       setInjection({});
     }

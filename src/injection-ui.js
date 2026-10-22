@@ -19,6 +19,8 @@
  * 拿不到；轨道和滑块的颜色全部交给 `--dsw-alias-*` 主题变量，深色/浅色两套共用一条规则。
  */
 
+import { effortBarEnabled, setEffortBarEnabled } from './effort-bar.js';
+
 /** `envelope.method`：本插件一直在用的那条路由，注入块是它的一个 action。 */
 export const INJECTION_METHOD = 'dsh-codex-ui/turbo';
 /** `payload.action`：读取与写入共用这一个动作名，靠 `id` 在不在一起区分。 */
@@ -85,6 +87,9 @@ function injectionWrite(ctx, id, enabled) {
 function InjectionSection({ ctx }) {
   const [view, setView] = React.useState({ status: 'loading', blocks: [], switches: {}, error: '' });
   const [pending, setPending] = React.useState('');
+  // 最后那一行跟这些不是一回事：它不注入任何文字，只决定没有档位的模型要不要把推理强度条画出来。
+  // 它存 localStorage 而不是宿主状态，所以读一次就够，不用走 `toggle` 那条要等回包的路径。
+  const [barOn, setBarOn] = React.useState(() => effortBarEnabled());
 
   const load = () => {
     setView(previous => ({ ...previous, status: 'loading', error: '' }));
@@ -130,12 +135,30 @@ function InjectionSection({ ctx }) {
         }, h('span', { className: 'cg-toggle-knob' })));
     });
 
+  // 单独一行排在注入块下面。它不能混进上面那份列表：那份列表由宿主报出，每一项都对应一段真正被写进
+  // 会话的文字，掺一个纯画面的开关进去，就等于让「宿主报了什么」和「这一页画了什么」对不上。
+  const barRow = h('div', { className: 'cg-injection-row', key: '__effort-bar__' },
+    h('div', { className: 'cg-injection-text' },
+      h('div', { className: 'cg-injection-label' }, '中转站显示推理强度条'),
+      h('div', { className: 'cg-injection-note' }, '模型目录里没有档位的（中转站转发的那类）也把强度条画出来；选中的那一格只记在本机，不会发给宿主。')),
+    h('button', {
+      type: 'button',
+      role: 'switch',
+      className: barOn ? 'cg-toggle cg-toggle-on' : 'cg-toggle',
+      'aria-checked': barOn ? 'true' : 'false',
+      'aria-label': '中转站显示推理强度条',
+      'data-cg-effort-bar': 'true',
+      'data-on': barOn ? 'true' : 'false',
+      onClick: () => { const next = !barOn; setBarOn(next); setEffortBarEnabled(next); }
+    }, h('span', { className: 'cg-toggle-knob' })));
+
   return h('div', { className: 'cg-injection', 'data-cg-injection-status': view.status },
-    h('p', { className: 'cg-injection-intro' }, '这些开关只决定哪些段落会被注入到会话里；关掉任何一块都不会改变界面上的任何效果。'),
+    h('p', { className: 'cg-injection-intro' }, '这些开关只决定哪些段落会被注入到会话里；关掉任何一块都不会改变界面上的任何效果。最后一行是例外，它只管画面。'),
     view.error === '' ? null : h('p', { className: 'cg-injection-error', role: 'alert' }, view.error),
     view.status === 'loading' ? h('p', { className: 'cg-injection-hint' }, '正在读取注入块…') : null,
     view.status === 'ready' && rows.length === 0 ? h('p', { className: 'cg-injection-hint' }, '宿主没有报出任何注入块。') : null,
     ...rows,
+    barRow,
     view.status === 'error' ? h('button', { type: 'button', className: 'cg-button cg-injection-retry', onClick: load }, '重试') : null);
 }
 

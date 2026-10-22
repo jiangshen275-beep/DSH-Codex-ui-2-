@@ -1,6 +1,6 @@
 {
   "name": "dsh-codex-ui",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Codex-style interface and prompt modes for DeepSeek Harness",
   "type": "module",
   "main": "./lib/index.js",

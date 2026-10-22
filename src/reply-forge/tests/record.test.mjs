@@ -11,7 +11,7 @@
 //
 // 运行：node tests/record.test.mjs
 import assert from 'node:assert/strict'
-import { domSignatureOf, recordNeedsRefresh, normalizeText } from '../client/record.mjs'
+import { domSignatureOf, recordNeedsRefresh, normalizeText, matchBlocks } from '../client/record.mjs'
 
 const tests = []
 function test(name, fn) { tests.push({ name, fn }) }
@@ -86,15 +86,30 @@ test('落盘 · 页面块数多于记录 → 重读（宿主落盘滞后约 200m
   assert.equal(recordNeedsRefresh(disk([block('甲')]), 2, domSignatureOf(['甲', '乙'])), true)
 })
 
-test('落盘 · 块数相同 → **不**重读，哪怕正文变了', () => {
-  // 这是刻意的：落盘读要解压整个会话文件，流式输出期间每帧都变会把
-  // 读记录打成高频请求。正文变化交给「在线」那条路去发现。
+test('落盘 · 正文变了（签名不同）→ 重读', () => {
+  // 2026-10-22 真机推翻的旧口径。旧规则只比块数（「页面块数 > 记录块数」），
+  // 而页面只渲染最近十条、记录有一千多条，这条判据在真实会话里几乎从不成立，
+  // 缓存于是永不更新：新回复只能落到「末尾对齐」的推断上，被错配到上一轮的
+  // 块——一条正常 completed 的回复因此被判成上一轮（用户按了停止）的碎句，
+  // final=false，入口整个消失。
+  //
+  // 早先不用签名的理由是「流式期间每帧都变，会把读记录打成高频请求」。这个
+  // 担心现在由调用方兜住：RECORD_REFRESH_MIN_GAP_MS 最小间隔 + 连续无果退避 +
+  // 页面不再变化就停手。陈旧记录造成的错配比多读几次严重得多。
   const rec = disk([block('甲')], { domSignature: domSignatureOf(['甲']) })
-  assert.equal(recordNeedsRefresh(rec, 1, domSignatureOf(['甲 乙'])), false)
+  assert.equal(recordNeedsRefresh(rec, 1, domSignatureOf(['甲 乙'])), true)
 })
 
-test('落盘 · 页面块数少于记录（历史被虚拟化折叠）→ 不重读', () => {
-  assert.equal(recordNeedsRefresh(disk([block('甲'), block('乙')]), 1, domSignatureOf(['甲'])), false)
+test('落盘 · 签名一致且块数没涨 → 不重读（必须收敛）', () => {
+  const rec = disk([block('甲')], { domSignature: domSignatureOf(['甲']) })
+  assert.equal(recordNeedsRefresh(rec, 1, domSignatureOf(['甲'])), false)
+})
+
+test('落盘 · 页面块数少于记录但签名变了 → 重读', () => {
+  // 页面 1 块、记录 2 块，块数判据永远为假；只有签名能发现页面换成了别的内容，
+  // 那时记录可能已经涨过一轮（历史被虚拟化折叠的会话里就是这样）。
+  const rec = disk([block('甲'), block('乙')], { domSignature: domSignatureOf(['甲']) })
+  assert.equal(recordNeedsRefresh(rec, 1, domSignatureOf(['乙'])), true)
 })
 
 // ── recordNeedsRefresh：公共分支 ───────────────────────────────────────────
@@ -115,6 +130,38 @@ test('读失败 → 重读（新会话「还没落盘」时就是这条，要能
 
 test('normalizeText：空白归一（签名与指纹共用）', () => {
   assert.equal(normalizeText(' 甲\n乙 '), '甲 乙')
+})
+
+// ── matchBlocks：前缀认领（2026-10-22 真机）────────────────────────────────
+//
+// 页面上的块会被附件卡片、图片、折叠区切断，textContent 只剩开头一段，而磁盘
+// 里是完整正文。全等和去空白全等都落空时，以前只能落到「末尾对齐」去猜，
+// 一猜就可能配到上一轮——一条 completed 的回复因此被判成上一轮（用户按了停止）
+// 的碎句，入口整个消失。
+
+test('页面块只剩磁盘正文的开头 → 认领到那一条，而不是猜尾巴', () => {
+  const diskBlocks = [
+    { seq: 7051, blockIndex: 0, kind: 'text', text: '找到了——那行 `alpha_composite` 之后没有重建 draw，所以底部那行字一直没出来。' },
+    { seq: 7123, blockIndex: 0, kind: 'text', text: '嗯，封面好啦。1920×1080，标准 16:9，PNG。右边那五根柱子就是插件的推理强度刻度，最后一根紫色带星的顶上飘着星芒。' },
+  ]
+  const m = matchBlocks(diskBlocks, ['嗯，封面好啦。1920×1080，标准 16:9，PNG。'])
+  assert.equal(m[0]?.seq, 7123, '必须认领到真正对应的那一条')
+  assert.equal(m[0]?.exact, false, '前缀不是全等，要如实标成推断')
+})
+
+test('页面块比磁盘正文长（磁盘那条被截断）也认', () => {
+  const diskBlocks = [{ seq: 9001, blockIndex: 0, kind: 'text', text: '这一条回复在记录里只存了开头这一段' }]
+  const m = matchBlocks(diskBlocks, ['这一条回复在记录里只存了开头这一段，后面还有好几句页面上的文字'])
+  assert.equal(m[0]?.seq, 9001)
+})
+
+test('短块之间不靠前缀互相认领（精确匹配优先，避免把整页配乱）', () => {
+  const diskBlocks = [
+    { seq: 1, blockIndex: 0, kind: 'text', text: '好的' },
+    { seq: 2, blockIndex: 0, kind: 'text', text: '嗯' },
+  ]
+  const m = matchBlocks(diskBlocks, ['好的'])
+  assert.equal(m[0]?.seq, 1, '短文本仍走精确匹配')
 })
 
 // ── 跑 ─────────────────────────────────────────────────────────────────────

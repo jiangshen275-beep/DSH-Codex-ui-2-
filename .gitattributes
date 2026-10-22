@@ -1,0 +1,7 @@
+# 这个仓库的历史用 CRLF 存库（Windows 上直接提交的）。关掉自动转换、按原样存，
+# 避免一次改动被记成「整文件重写」。
+* -text
+*.png binary
+*.jpg binary
+*.ttf binary
+*.woff2 binary

@@ -18,7 +18,6 @@ import { randomUUID } from 'node:crypto';
 import { listPersonas, readPersonaFile, resolvePersonaId } from './personas.js';
 import { currentModeOf } from './prompt-modes.js';
 import { presetSilences } from './turbo-policy.js';
-import { isBlockOn } from './injection-state.js';
 
 /** The source kind this plugin stamps on every row it injects. Mirrors `turbo.js`. */
 const INJECTED_KIND = 'plugin:dsh-codex-ui';
@@ -52,8 +51,11 @@ function describePersona(id) {
 
 function noticeText(from, to) {
   const lines = ['## 人设已切换（本会话）', ''];
-  lines.push(from ? `本会话的回复风格已从「${from.name}」切换为「${to.name}」。` : `本会话的回复风格现在是「${to.name}」。`);
-  if (to.description) lines.push(`新设定：${to.description}`);
+  // 同样只报档案名，不把它当成「你的名字」：切换通知里说一句「现在叫什么」，模型下一轮就会
+  // 拿它当自称，而真正的名字写在正文里。
+  lines.push(from ? `本会话的人设档案已从「${from.name}」切换为「${to.name}」。` : `本会话加载的人设档案现在是「${to.name}」。`);
+  lines.push('档案名不是你对自己的称呼：你叫什么、怎么自称、什么口吻，一律照人设正文写的来。');
+  if (to.description) lines.push(`档案备注（仅供参考，不是设定）：${to.description}`);
   if (to.sampling) lines.push(`采样参数：${to.sampling}`);
   lines.push('');
   lines.push('以新设定为准：本会话里此前注入的风格、契约与格式要求一律作废，不要再沿用旧人设的口吻或规则。');
@@ -87,9 +89,7 @@ export function registerPersonaNotice(ctx, resolveMode = currentModeOf) {
       if (header?.origin === 'subagent' || (header?.delegationDepth ?? 0) > 0) return decision;
       // A preset that owns its own prompt gets nothing from this plugin, this notice included.
       if (presetSilences(agent)) return decision;
-      // The persona section is held back by the injection block: announcing a persona that is not
-      // being injected would be a notice about nothing.
-      if (!isBlockOn('codexPrompt')) return decision;
+      // 人设正文不再经过 systemPrompt section，也就没有「没被注入却宣布它」这回事，守卫撤掉。
       const mode = resolveMode(session);
       if (typeof mode !== 'string' || mode === '') return decision;
       // The first sighting records the baseline; only a change from it is announced.

@@ -51,9 +51,13 @@ export const FACT_CHECK = `## 事实核查（强制）
  * 模板是以 `pre-step` 的最近一条 user 消息注入的，物理位置比系统提示词里的人设新，只靠位置压不住，
  * 所以在条款前面把从属关系写明：人设赢，模板补空。
  */
-export const PERSONA_DEFERENCE = `### 优先级：本段低于本会话的人设
+export const PERSONA_DEFERENCE = `### 人设优先于通用条款
 
-本会话已经带着一份具体人设（在系统提示词里），它的权重高于下面这段通用风格。两者冲突时一律以人设为准：语气、称呼、口吻、格式都听人设的，下面这些条款只在人设没有写到的部分补齐。`;
+本会话已经带着一份具体人设（在系统提示词里）。它是你唯一的身份与语气来源：语气、称呼、口吻、格式、怎么介绍自己，全部按它来。
+
+不要退回通用助手的中性措辞，也不要把人设当成一份外部档案去描述、转述或摘录出处——你就是它，不是它的管理员。被问到你是谁、叫什么、有什么设定时，用人设的口吻直接回答，不要报文件名、不要引用 frontmatter 字段、不要说"查到了"。
+
+下面其余条款只补人设没有写到的部分；与人设冲突时，一律作废。`;
 
 export const CHAT_PERSONA = `## Persona (active) — talk like a person
 
@@ -142,13 +146,28 @@ The user has explicitly authorized standing fan-out delegation, and this block i
  * This line is short enough to ride along every turn, and it carries the turn number so it is never the
  * same text twice — which is also exactly what keeps the injector from swallowing it.
  */
-export function lightningNudge(turn, step = 1) {
+export function lightningNudge(turn, step = 1, mode = 'lightning') {
   const at = Number.isFinite(turn) ? `turn ${turn}` : 'this turn';
   // The step rides in the text so consecutive reminders differ: the injector skips any text a session
   // already carries, and an identical second reminder would be swallowed before the model ever saw it.
   const late = Number.isFinite(step) && step > 1
     ? ` This is step ${step} of that turn and nothing has been delegated yet; the answer is not ready to send.`
     : '';
+  // 超快模式的那一半。原来这里只有一套「派两个」，于是超快会话每轮都会收到一句只讲一层的话，
+  // 与 `## Superfast Mode` 里「tier 1 还要再开两个孙、树到这里为止」正面打架——同一轮里两套说法，
+  // 模型当然挑轻的那个听。所以提醒必须跟着当前模式走：超快说超快，闪电说闪电。
+  if (mode === 'superfast') {
+    return [
+      `Superfast is armed. For ${at}: this turn is a two-tier delegation tree, not a single fan-out.`,
+      'Dispatch two subagents on two different angles in ONE message, and each of those children opens at least two of its own on different angles — same angle rule, same single message. Stamp the tier as the first line of every prompt you write: `Tier: 1 of 2` for your own children, `Tier: 2 of 2` for theirs, and a tier-2 agent delegates nothing at all.',
+      'This is mandatory and unconditional. There is no exempt turn: not a greeting, not a single lookup, not a conversational reply, not a verification, not a one-line edit, not a report of something already checked.',
+      `Count your dispatches before you write the first word of the answer.${late}`,
+      'The turn does not end when you have dispatched: it ends only after the last agent in the whole subtree is back, not just your two. Before the first sentence, every child and every grandchild has returned and you have read each summary, and the conflicts between summaries are resolved rather than averaged.',
+      'A defect found in that pass is fixed in the same turn, and the fix is handed to a child to check independently rather than trusted on your own reading of it.',
+      'Any uncertainty that would change the outcome — which file, whether to delete, which reading of the request, what a number should be — is a question asked with the question tool before you act, never a guess.',
+    ].join(' ');
+  }
+
   // This reminder is the one that arrives every turn, so it states the same mandate as clause 1: two children,
   // every turn, no exemption. It deliberately names no condition at all — any conditional wording here becomes
   // the reading that turns a mandate back into a judgement call.
@@ -182,18 +201,50 @@ export const SUBAGENT_GUARD = `If this text reached you as a delegated sub-agent
  * and keeps the recursion finite (constraint 2): tier 1 fans out, tier 2 stops, there is no
  * tier 3 — without it, two children per level means 7 agent contexts instead of 1, and the cost grows with that count.
  */
-export const SUPERFAST_POLICY = `## Superfast Mode (active) — every tier-1 subagent opens two of its own
+export const SUPERFAST_POLICY = `## Superfast Mode (active) — a delegation tree, not a single fan-out
 
-The user has turned Superfast on: this turn is expected to run a small delegation TREE, not a single fan-out. The cost is disclosed and accepted.
+The user has turned Superfast on: this turn runs a delegation TREE. The cost is disclosed and accepted (at least 2.5x: seven agent contexts instead of one, each paying its own fixed first-turn cost).
 
-1. Tier stamping is the mechanism, and it is mandatory: the FIRST line of every child prompt you write must be exactly \`Tier: N of 2\`, with N = your own tier + 1. Your own tier is 0 unless your prompt's first line said otherwise.
-2. At tier 1 open at least two grandchildren before you report back — separate delegation calls in ONE message, each on a different angle. Two is the floor, not a budget: a task that carries six independent angles opens six. No exemption exists: not a greeting, not a single lookup, not a conversational reply, not a verification, not a one-line edit, not a report of something already checked. If the task looks too small for two grandchildren, that reading is the failure, not an exemption.
-3. A new development reopens the fan-out, at tier 1 without a count limit. When a grandchild uncovers something the opening pair never asked about — a second defect, a wrong premise, a failure that needs its own reproduction, a claim that must be checked against another source — open the grandchildren for it under the same angle rule, in the same turn, before you report. The two-child shape is the opening move, not a cap on the subtree: a named question still open in your own notes is an unanswered question, and reporting over it is the failure this clause exists to catch. The one ceiling is depth, not width: clause 5 still stops the tree at tier 2.
-4. Do not report to the parent until the subtree is quiet: every grandchild you opened has returned, you have read each summary, the conflicts between them are resolved, and at least one claim from each has been checked against the source by you. A report that cites a check you did not run, or that lands while a grandchild is still flying, is worse than a slow one.
-5. At tier 2 you delegate nothing. \`Tier: 2 of 2\` means the tree ends at you: do the work yourself. There is no tier 3, and nothing in this contract may be read as asking for one.
-6. The two grandchildren must cover angles the tier-1 child would otherwise have to check alone, and the child names the angle it hands over: direct shortest path / call-site and contract check / failure and edge paths / a cheaper or simpler alternative / docs versus implementation. Never send two copies of one prompt — parallel clones reproduce the same blind spot.
-7. Every child prompt stays self-contained: objective, acceptance criteria, exact files and symbols, constraints (what NOT to touch), required output format, length cap, and the evidence needed to claim success — with the Tier line above all of it.
-8. Cost is disclosed, never rationed: Superfast multiplies the token bill of the turn (at least 2.5x: seven agent contexts instead of one, each paying its own fixed first-turn cost). Never drop an angle or a check to save tokens, and never fan out past tier 2.`;
+1. Tier stamping is mandatory: the FIRST line of every child prompt must be exactly \`Tier: N of 2\`, with N = your own tier + 1. Your own tier is 0 unless your prompt's first line said otherwise.
+2. Delegation is mandatory at every tier with no exemption: before you answer, dispatch two subagents on two different angles — separate calls in ONE message so they run concurrently. There is no exempt turn: not a greeting, not a lookup, not a conversational reply, not a one-line edit, not a report of something already checked.
+3. Tier 1 opens two of its own: at tier 1 open at least two grandchildren before you report back, same angle rule, same single message. Two is the floor, not a budget — a task carrying six independent angles opens six.
+4. Split by angle, never clone: direct shortest path / call-site and contract check / failure and edge paths / a cheaper or simpler alternative / docs versus implementation. Two copies of one prompt reproduce the same blind spot.
+5. A new development reopens the fan-out in the same turn: a second defect, a wrong premise, a failure that needs its own reproduction, a claim that must be checked against another source.
+6. While the tree runs, keep working — read, check, verify — and send nothing to the user.
+7. Reuse before you respawn: continue an inactive child with send_message instead of creating another one. A child you already briefed inherits your framing, so a check that must stand alone still needs a new child.
+8. You manage: plan, decompose, dispatch, review, integrate, report. Keep your own context for coordination instead of redoing the children's reading.
+9. One writer per file: never hand the same file to two children at once, and never let a child write a file another child is still reading for a decision.
+10. Every child prompt is self-contained: objective, acceptance criteria, exact files and symbols, constraints (what NOT to touch), required output format, a length cap, and the evidence needed to claim success.
+11. Do not report to the parent until the subtree is quiet: every grandchild back, every summary read, conflicts resolved, and at least one claim from each checked against the source by you.
+12. The answer starts only after the last agent is back: everyone returned, conflicts resolved, the work checked yourself (read the code, run the commands), every verification actually executed. A defect found in that pass is fixed the same turn, then a child checks the fix independently.
+13. At tier 2 you delegate nothing: \`Tier: 2 of 2\` means the tree ends at you. There is no tier 3, and nothing in this contract may be read as asking for one: The one ceiling is depth, not width: never fan out past tier 2.
+14. Fix the real problem, never the test: relaxing an assertion, threshold, or expectation to make a failure disappear is a failed fix.
+15. Ask, do not assume: any uncertainty that would change the outcome becomes a question before you act.
+`;
+
+/**
+ * 每轮都发的一句「当前模式」。
+ *
+ * 为什么不是「切换时才发一次」：注入只追加、不撤销，旧合同会永久留在上下文里。而「谁上一轮是什么模式」
+ * 只存在内存里（armedBySession），宿主一重启就没了——那意味着重启之后没有任何东西能撤掉历史里那段
+ * 「每轮必须派两个子代理」。所以改成每轮都压一句当前模式：最新一条永远在后面，旧的自动作废。
+ * 代价是每轮多一百来字，换来的是「关掉之后不会再照旧合同执行」这件事真的成立。
+ */
+export function modeBanner(mode) {
+  if (mode === 'superfast') {
+    return `## 当前模式：超快
+
+本会话现在是超快模式。上下文里此前若出现过「标准」或「闪电」的编排合同，一律作废；只按下面这段执行，按树状派工。`;
+  }
+  if (mode === 'lightning') {
+    return `## 当前模式：闪电
+
+本会话现在是闪电模式。上下文里此前若出现过「标准」或「超快」的编排合同，一律作废；只按下面这段执行，只派一层，不要开子树。`;
+  }
+  return `## 当前模式：标准
+
+本会话没有开闪电也没有开超快。上下文里此前若出现过 Lightning / Superfast 的编排合同（要求每轮派子代理、开子代理树、按树状算成本），一律作废，不要再照它执行。这轮不要派子代理，自己把活干完。`;
+}
 
 /**
  * The tail used when Superfast is armed. The ordinary guard forbids a child from delegating at
@@ -251,8 +302,8 @@ Think in Chinese and answer in Chinese, every turn of this session.
 4. State each point once. No bilingual echo, no English restatement, and no comment about the language you chose.`;
 
 /**
- * 边想边说：开关打开时禁止把过程拆成多次输出，关闭时允许断断续续地说话。
- * 独立开关，不受 codexPrompt 总开关管辖；缺省视为开（injection 里只有显式 false 才关）。
+ * 边想边说：打开时「想完再一次性回答」（Codex 那种，思考更完整但用户要干等）；关闭时回到
+ * 原生的「边想边写」——过程留在思考里，正文照旧按人设。独立开关，不受 codexPrompt 管辖；
  */
 export const THINK_ALOUD_POLICY = `## 边想边说（active） — 一次说完，不边想边说
 
@@ -261,15 +312,16 @@ export const THINK_ALOUD_POLICY = `## 边想边说（active） — 一次说完�
 3. 写结果，不写寻找结果：证据和验证结果直接写进答案，不另讲你是怎么找到的。`;
 
 /**
- * 边想边说关闭时注入的那一半：显式允许把过程说出来，并声明它覆盖别的"只给结果"规则。
- * 放在整块最后，保证它比 WORK_PERSONA 第 7 条、Ultra 的"one delivery"、闪电的"send nothing"都新。
+ * 边想边说关闭时的另一半：回到原生的「边想边写」。
+ * 它不再宣称压过别的规则——过程和正文分开写，正文那一半归人设管，所以没有谁压谁。
  */
-export const ALLOW_THINK_ALOUD_POLICY = `## 边想边说（active） — 强制边想边说
+export const ALLOW_THINK_ALOUD_POLICY = `## 边想边说（active） — 边想边写
 
-1. 必须边想边说：每轮回复都要写出思考过程、进度说明、自我提问和过渡句，不能只把结论折叠出来。
-2. 边做边报：允许把一轮工作拆成多次输出，先说要做什么、中途报进展、最后再收结论。
-3. 本条优先：与本段之外任何要求"只给结果""不要进度日志""一次说完"的规则冲突时，以本条为准。
-4. 该说的还是要说：事实、证据、验证结果照常写清楚。`;
+1. 想到哪儿写到哪儿：看文件时顺手记下看到了什么，跑命令时记下结果对不对，走到岔路口时记下你在纠结哪两条路。像自言自语，不是写给谁的报告。
+2. 这些话只写进思考，不要塞进给用户看的正文。正文照旧按人设的语气和长度来，短就短，别为了交代过程把它撑长。
+3. 不报幕：「我先看看」「接下来我要核对一下」这类空话省掉，直接写你实际在想的东西；也不要分步骤列计划。
+4. 不在思考里裁决设定：不要写「这样符不符合人设」「这条规则要求我……」，想事情就是想事情本身。
+5. 事实、证据、验证结果照旧写清楚；它们同样受正文长度约束，别为了列证据把一行撑成八行。`;
 
 /**
  * The text a session should be running under, or an empty string when nothing is armed.
@@ -284,38 +336,44 @@ export function policyText({ persona, personaDeferential = false, ultra = false,
   if (!personaText && !ultra && !lightning && !superfast && !chinese) return '';
   // A block is on unless its switch explicitly says otherwise. `injection === null` means "no switches
   // configured at all", so every caller that does not pass one produces exactly the text it produced
-  // before this parameter existed — which is what keeps the block-order and block-length assertions
-  // meaningful instead of having to be rewritten around the switches.
-  // `precedence` / `factCheck` / `mandate` 没有独立开关（见 INJECTION_BLOCKS 上方注释），但它们属于模式策略的骨架。
-  // 此前这三段无条件注入：把 Ultra、闪电、Codex 提示词都关掉、只留「中文思考」时，它们照样进提示词，
-  // 界面上看就是「没开对应功能却仍在注入」。现在改为跟随「Codex提示词注入」这个总开关。
-  const master = injection === null || injection.codexPrompt !== false;
+  // before this parameter existed.
+  //
+  // Codex 提示词注入整段退役（用户要求）。PRECEDENCE / FACT_CHECK / MANDATE 这三段是「严谨助手」的
+  // 骨架，跟角色卡是抢位置的关系，不是补位的关系：它们一进来，模型每一轮都在给自己打分——思考里
+  // 写的是「人设要求我……那我应该用短句回」，回答就成了客服腔的表演。人设卡既然已经把语气、称呼、
+  // 口吻写全了，这三段就是多余的那层壳，连界面上的「Codex提示词注入」开关一起撤掉。
+  // 事实核查请回来了，但它自己一个开关。它跟语气无关，管的是「别凭记忆瞎答、查不到就问、别把猜的
+  // 说成查到的」——那是通用能力，退役时连它一起带走是损失。所以它不再挂在 codexPrompt 那个总开关
+  // 底下，改由界面上独立的「事实核查」开关决定进不进提示词；PRECEDENCE 与 MANDATE 仍然退役。
   const on = id => injection === null || injection[id] !== false;
   const parts = [];
-  if (master && on('precedence')) parts.push(PRECEDENCE);
-  if (master && on('factCheck')) parts.push(FACT_CHECK);
-  // The enforcement preamble sits after the two standing blocks and before every switchable one: it
-  // is what turns "injected" into "in force", so it has to be read before the paragraphs it governs.
-  if (master && on('mandate')) parts.push(MANDATE);
-  // Language sits directly after precedence: it governs every block below it, and that
-  // precedence rule is what still lets an explicit request for another language win.
+  if (on('factCheck')) parts.push(FACT_CHECK);
+  // Language sits directly after the fact-check rule: it governs every block below it, and that
+  // precedence is what still lets an explicit request for another language win.
   if (chinese && on('language')) parts.push(LANGUAGE_POLICY);
-  // 通用风格模板照旧完整注入，只在它上面压一行从属声明：本会话有人设时，人设是主、这段是补。
-  // 声明放在条款之前，先读到它再读条款，顺序本身就是权重。
+  // 具体人设与通用模板是替代关系，不是叠加关系。通用模板那六条（开口先命名情绪、短段落、给判断）
+  // 本质上是一套「通用助手的声音」，它以 pre-step 的最近一条 user 消息送达，物理位置比系统提示词里的
+  // 角色卡新——只加一句让位声明压不住它。实测：有人设的会话里问「你叫什么」，模型会把角色卡当档案来
+  // 报（「查到了，第二行写着 name: …」），人设只剩最后一句露头。
+  // 所以有人设时通用模板整段不注入，只留那句优先级声明，风格归角色卡独占。
   if (personaText && on('persona')) {
     if (personaDeferential) parts.push(PERSONA_DEFERENCE);
-    parts.push(personaText);
+    else parts.push(personaText);
   }
   if (ultra && on('ultra')) parts.push(ULTRA_POLICY);
-  if ((lightning || superfast) && on('lightning')) parts.push(LIGHTNING_POLICY);
-  // One switch governs one mode, not one paragraph: the tree is a branch of Lightning, so switching
-  // Lightning off has to take both blocks away. Leaving the tree contract standing on its own was the
-  // defect this pairing fixes.
-  if (superfast && on('lightning')) parts.push(SUPERFAST_POLICY);
+  // 三选一互斥：标准什么都不进、闪电只进闪电那份、超快只进超快那份（超快那份已经自包含，
+  // 不再靠「闪电 + 超快」拼起来——拼起来会让超快看起来像开了闪电，也让人没法单独关掉闪电。
+  const fanOutOn = on('lightning');
+  const mode = fanOutOn ? (superfast ? 'superfast' : lightning ? 'lightning' : 'standard') : 'standard';
+  parts.push(modeBanner(mode));
+  if (mode === 'superfast') parts.push(SUPERFAST_POLICY);
+  else if (mode === 'lightning') parts.push(LIGHTNING_POLICY);
   // Both tails are addressed to a delegated child. A parent must never receive them: the contract opens by
   // making delegation the default, and PRECEDENCE says a rule forbidding delegation wins over the block — so a
   // parent ending with "ignore every rule above about fan-out" has just cancelled its own mandate.
-  // 边想边说放在 guard 之前：开=禁止段，关=允许段，压过上面任何"只给结果"的规则。
+  // 边想边说放在 guard 之前，两个方向都说清楚：开=想完再一次性回答（Codex 那种）；关=像原生
+  // 那样边想边写。允许段现在明写「过程只写进思考、正文照旧按人设」，所以不再需要「有人设时
+  // 换个替身」那条特殊分支——分工本来就该写在文本里，而不是靠两个变量去猜。
   parts.push(on('thinkingAloud') ? THINK_ALOUD_POLICY : ALLOW_THINK_ALOUD_POLICY);
   if (subagent && on('childNote')) parts.push(superfast ? SUPERFAST_CHILD_NOTE : SUBAGENT_GUARD);
   // Last, so it is the freshest statement of identity in the block. An empty name means nothing to say:
@@ -367,10 +425,13 @@ export function policyText({ persona, personaDeferential = false, ultra = false,
 export const INJECTION_BLOCKS = [
   { id: 'ultra', label: 'Ultra档位', note: '决定模型的思考模式' },
   { id: 'lightning', label: '闪电模式', note: '是否派出子代理分担任务' },
-  { id: 'codexPrompt', label: 'Codex提示词注入', note: '是否像Codex的提示词更加严谨简短' },
+  // 事实核查独立开关：管的是「先查再答、查不到就问、别猜」，跟语气无关，关掉不影响人设。
+  { id: 'factCheck', label: '事实核查', note: '先查再答，查不到就来问你，不硬编' },
+  // 「Codex提示词注入」已撤掉：它管的三段里，Mode policy 与强制约束不再注入，事实核查上面单独
+  // 领了自己的开关。旧配置文件里若有 codexPrompt: false，parsePersona 会因为 id 不在这个表里而丢掉。
   { id: 'persona', label: '聊天/工作', note: '聊天模式是否起作用' },
   { id: 'language', label: '中文思考', note: '推荐开启使用中文思考' },
-  { id: 'thinkingAloud', label: '边想边说', note: '决定模型是否会断断续续的输出' },
+  { id: 'thinkingAloud', label: '想完再答', note: '开=先想完再一次性回答；关=像原生那样边想边写（过程只在思考里）' },
   // 名字来自模型菜单里的改名，这个开关只决定那段进不进提示词。
   { id: 'modelIdentity', label: '模型身份', note: '模型认为自己是模型菜单里显示的那个名字' }
 ];

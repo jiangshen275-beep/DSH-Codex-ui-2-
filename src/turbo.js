@@ -636,7 +636,7 @@ export function registerTurbo(ctx) {
         messages: [...decision.messages, {
           id: randomUUID(),
           role: 'user',
-          content: [{ type: 'text', text: lightningNudge(turn, 1) }],
+          content: [{ type: 'text', text: lightningNudge(turn, 1, row?.superfast === true ? 'superfast' : 'lightning') }],
           source: { kind: INJECTED_KIND, form: 'instructions' },
         }],
       };

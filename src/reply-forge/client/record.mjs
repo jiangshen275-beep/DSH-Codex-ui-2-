@@ -129,10 +129,17 @@ export function resetCache(sessionId) {
  *
  * 两条路径的过期判据**不一样**，混用会出两种错：
  *
- * - **落盘（disk）**：判据是「页面块数 > 记录块数」。宿主落盘滞后约 200ms，
- *   且页面永远 ≤ 记录（历史可能被虚拟化折叠，记录反而更多），所以这个信号
- *   单调、不误报。注意**不能**用签名——正文在流式输出期间每帧都变，会把
- *   读记录打成高频请求，而每次读都要解压整个会话文件。
+ * - **落盘（disk）**：块数判据之外**还要看页面签名**。只靠块数会漏得很干净：
+ *   页面只渲染最近若干条（历史被虚拟化折叠），记录却有一千多条，所以
+ *   「页面块数 > 记录块数」在真实会话里几乎从不成立——缓存于是永不更新，
+ *   新回复只能落到下面第 2 步「末尾对齐」的推断上，被错配到上一轮的块。
+ *   真机 2026-10-22：一条正常 completed 的回复被配成上一轮（用户按了停止、
+ *   reason=aborted）的碎句，`final=false`，入口整个消失。
+ *
+ *   早先不敢用签名的理由是「流式期间正文每帧都变，会把读记录打成高频请求，
+ *   而每次读都要解压整个会话文件」。那个担心由调用方兜住了：自动重读有
+ *   RECORD_REFRESH_MIN_GAP_MS 的最小间隔、连续无果就退避、页面不再变化就停手。
+ *   记录陈旧带来的错配比多读几次严重得多。
  *
  * - **在线（live）**：判据是「页面签名 ≠ 拉取时的页面签名」。在线读的是内存
  *   里的投影结果，没有落盘滞后，但**新会话必然踩一次空快照**：宿主先渲染、
@@ -164,7 +171,12 @@ export function recordNeedsRefresh(entry, domBlockCount, signature) {
     if (typeof entry.domSignature !== 'string') return true
     return entry.domSignature !== signature
   }
-  return domBlockCount > entry.blocks.length
+  // 落盘：块数判据（宿主刚落盘、页面比记录多）**或**页面签名变了（记录陈旧）。
+  // 只留前者会让缓存永不更新，见上面那段说明。
+  if (domBlockCount > entry.blocks.length) return true
+  if (typeof signature !== 'string') return false
+  if (typeof entry.domSignature !== 'string') return true
+  return entry.domSignature !== signature
 }
 
 /**
@@ -228,6 +240,31 @@ export function matchBlocks(diskBlocks, domTexts) {
     const bi = list.shift()
     used.add(bi)
     out[di] = { ...diskBlocks[bi], exact: true }
+  })
+
+  // ── 1c) 前缀认领：页面块是磁盘块的开头（或反过来）────────────────────────
+  //
+  // 页面上的块会被附件卡片、图片、折叠区切断，textContent 只剩开头一段；磁盘里
+  // 是完整正文。全等和去空白全等都落空，最后只能落到下面第 2 步「末尾对齐」
+  // 去猜，一猜就可能配到上一轮——2026-10-22 真机：一条正常 completed 的回复
+  // 被配成上一轮（用户按了停止）的碎句，final=false，入口整个消失。
+  //
+  // 两边都要够长才认：短文本互相当前缀会把整页配乱。标 exact:false——它不是
+  // 全等，只是"开头一致"，UI 该如实说这是推断。
+  const PREFIX_MIN = 24
+  const longEnough = s => s.length >= PREFIX_MIN
+  domStripped.forEach((key, di) => {
+    if (out[di] !== null || longEnough(key) !== true) return
+    for (let bi = 0; bi < diskBlocks.length; bi += 1) {
+      if (used.has(bi)) continue
+      const diskKey = stripped(diskBlocks[bi].text)
+      if (longEnough(diskKey) !== true) continue
+      if (diskKey.startsWith(key) === true || key.startsWith(diskKey) === true) {
+        used.add(bi)
+        out[di] = { ...diskBlocks[bi], exact: false }
+        break
+      }
+    }
   })
 
   // ── 2) 末尾对齐兜底 ────────────────────────────────────────────────────

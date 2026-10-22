@@ -12,6 +12,16 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 
 > **关于本项目**：这是 [Loliyer520/dsh-codex-ui](https://github.com/Loliyer520/dsh-codex-ui) 的衍生版本（MIT），在其基础上继续开发：新增 Ultra 档与闪电编排两套提示词契约、强制中文、会话重命名、已归档会话删除、子代理/分支分组，并修掉了一批缺陷。**与 OpenAI 无隶属或背书关系**；随包分发的 Codex 图标与 OpenAI Sans 字体属于 OpenAI，授权与风险见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
+## 3.1.0 更新了什么
+
+- **模式三选一互斥**：标准/闪电/超快只注入对应的一份编排合同，每轮开头声明当前模式，旧合同作废，不再串味。
+- **超快合同自包含**：不再依赖闪电段拼装，树状派工的规则一条不少。
+- **人设真正生效**：修掉了「人设正文从来没进过系统提示」的底层缺陷，现在正文每轮随上下文送达，档案名不再被当成自称。
+- **事实核查**：新增独立开关，先查再答、查不到就问、不猜。
+- **委派深度装上自动补 2**：子代理可以再派一层孙代理（超快的两层树能落地），已有配置不会被覆盖。
+- **想完再答**：开关语义修正——开是想完一次说清，关是像原生那样边想边写。
+- **提示音/配色/档位**：子代理完成不再误响；触发条档位名跟弹层同色；推理强度档位改为 Off/Low/High/Max。
+- **子代理会话自动清收**：默认关闭，需要的人在配置里显式开启（会附带「后代计数不回退」的已知代价说明）。
 ## 3.0.0 的三个大件
 
 **一、会话说改就改。** 每条回复、每条思维链旁边多一个入口，点开就能改写，改完写回会话记录。写回的是宿主认得的原始事件，不是盖在页面上的一层显示——重开、刷新、模型再读上下文，看到的都是改过的那句。原来独立的 `dsh-codex-ui-HF`（回复锻造）已并入本包。
@@ -30,7 +40,7 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 - **电脑控制**：截屏、窗口树检查、指针移动、点击、键入、滚动、拖拽；控制期间屏幕顶部常驻提示并实时显示当前目标（如「正在点击 (320, 480) · 记事本」）。原 `dsh-computer-use` 并入本包，配置 `computerUse.enabled: false` 可关（不写即开）。
 - **界面与其它**：浅色 / 深色 / 窄窗口适配；超快模式滑条四段暖色递深（minimal·low / high / xhigh·max / ultra 渐变）；努力滑条旋钮 24×24 正圆（常态带投影，超快 + Ultra 态加描边与发光）；字体与图标随包分发（字体以 base64 内联进 `lib/client.js`）；设置菜单显示官方 DeepSeek API 余额（服务端缓存 30 秒，只有校验过的余额字段回到前端），并带刷新 / 控制台 / 设置 / 插件 / 帮助入口。
 
-**当前版本（3.0.0）**：产物 `dsh-codex-ui-3.0.0.tgz`（`npm pack` 生成，不入库）。3.0.0 把三个原本独立的项目并回主干——回复锻造（会话改写）、可自定义侧边栏、电脑操控——安装方式没变，装一个包就有全部能力。2.x 的历史要点见 [CHANGELOG.md](CHANGELOG.md)。界面类改动刷新页面即可，提示词契约类与宿主侧改动（侧边栏的链接/程序启动、电脑控制）需要重启 DSH。
+**当前版本（3.1.0）**：产物 `dsh-codex-ui-3.1.0.tgz`（`npm pack` 生成，不入库）。3.1.0 在 3.0.0 电脑操控并入的基础上，修好人设落地、统一模式注入、补齐委派深度——上一版的三大件（回复锻造（会话改写）、可自定义侧边栏、电脑操控——安装方式没变，装一个包就有全部能力。2.x 的历史要点见 [CHANGELOG.md](CHANGELOG.md)。界面类改动刷新页面即可，提示词契约类与宿主侧改动（侧边栏的链接/程序启动、电脑控制）需要重启 DSH。
 
 ## 新对话页：回复风格、标题与图标
 
@@ -55,16 +65,16 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 
 **A. 本地 tarball（不依赖 registry，最快）**
 
-拿到 `dsh-codex-ui-3.0.0.tgz` 后，在 DSH **插件 → 添加插件**里填该文件的绝对路径，或：
+拿到 `dsh-codex-ui-3.1.0.tgz` 后，在 DSH **插件 → 添加插件**里填该文件的绝对路径，或：
 
 ```powershell
-dsh plugin --profile <profile名称> add 'C:/路径/dsh-codex-ui-3.0.0.tgz'
+dsh plugin --profile <profile名称> add 'C:/路径/dsh-codex-ui-3.1.0.tgz'
 ```
 
 **B. npm**
 
 ```powershell
-dsh plugin --profile <profile名称> add dsh-codex-ui@3.0.0
+dsh plugin --profile <profile名称> add dsh-codex-ui@3.1.0
 ```
 
 > ⚠️ **这个包目前还没有发布到 npm**（公共 registry 上会返回 404）——现在执行上面这条会失败，首次安装请用 A 或 C 方式。若你打算发布到 npm，这条命令在发布满 24 小时后即可用。
@@ -105,6 +115,7 @@ dsh plugin --profile <profile名称> remove dsh-chatgpt-ui
 - 本插件通过 `cordis.patch.yml` **禁用内置 `ui-sidebar`** 并插入自己的侧栏（右侧栏仍由宿主提供，本插件不接管）；这会改变界面结构。想先试用，请装到一个独立 profile。
 - **已知限制**：插件管理页里的启用/停用开关**对本插件无效**——它是以自定义 id 插入的，页面按包名写开关。要停用请从 profile 的 `cordis.patch.yml` 里移除对应的插入条目，或直接卸载。
 - 本包**不声明 DSH 版本范围**：DSH 的插件兼容门只读 `peerDependencies`（`dsh-app-boot` 按 `includePrerelease` 判 semver，且不读 `peerDependenciesMeta`，所以标 `optional` 也不免除拦截），写死 `0.2.0-rc.2` 会让别的 DSH 版本装不上、必须逐个 `allow-version` 精确豁免（1.1.0 那版就如此）；兼容性因此由实测对照保证——CHANGELOG 记录对照过 0.2.0-rc.2 / 0.2.1-rc.2。CSS 依赖参考版本的类名，升级 DSH 后需要重新校验。
+- **装上会自动把子代理委派深度补到 2**：首次启动时插件检查 profile 的 `cordis.yml` / `cordis.patch.yml`，若两处都没有 subagent 段的 `maxDepth`，会先备份 patch 再把 `maxDepth: 2` 追加进去（已有配置则一个字不动）。子代理因此可以再派一层孙代理——超快模式的两层树要靠它才落得了地。这一步改的是宿主配置，**需要再重启一次 DSH 才生效**；诊断接口 `GET /api/dsh-codex-ui/subagent-depth` 可查看当前读到多少。
 - 包内包含 `src/`：`lib/index.js` 运行时导入 `../src/*.js`，因此不要只发布 `lib/`。
 - 变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -128,7 +139,7 @@ npm test
 dsh plugin --profile codex-ui remove dsh-codex-ui
 ```
 
-重启后恢复原生侧栏。仅验证过 Web；CSS 部分依赖参考版本的类名，升级 DSH 时需要重新校验。定时任务页面目前只保存本地草稿。Codex 模式仅改变提示词风格，不会将 DeepSeek 模型变为 OpenAI 模型。
+重启后恢复原生侧栏。**注意**：卸载不会回滚上面那条自动补的 `maxDepth: 2`——它写在 profile 配置里，要恢复就把 `cordis.patch.yml` 里那段 `- id: subagent` 删掉再重启。仅验证过 Web；CSS 部分依赖参考版本的类名，升级 DSH 时需要重新校验。定时任务页面目前只保存本地草稿。Codex 模式仅改变提示词风格，不会将 DeepSeek 模型变为 OpenAI 模型。
 
 侧边栏快捷项：用户怎么用见 [SIDEBAR-RAIL-USER.zh.md](SIDEBAR-RAIL-USER.zh.md)，交给 Agent 装见 [SIDEBAR-RAIL.zh.md](SIDEBAR-RAIL.zh.md)。
 

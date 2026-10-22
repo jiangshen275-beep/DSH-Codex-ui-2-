@@ -25,7 +25,6 @@ import { randomUUID } from 'node:crypto';
 import { loadPersonas } from './personas.js';
 import { currentModeOf } from './prompt-modes.js';
 import { presetSilences } from './turbo-policy.js';
-import { isBlockOn } from './injection-state.js';
 
 /** The source kind this plugin stamps on every row it injects. Mirrors `turbo.js` and `persona-notice.js`. */
 const INJECTED_KIND = 'plugin:dsh-codex-ui';
@@ -51,10 +50,35 @@ function rowFor(mode) {
 
 function reminderText(row) {
   const lines = ['## 人设仍在生效（本会话）', ''];
-  lines.push(`本会话的回复风格是「${row.name}」。`);
-  if (typeof row.description === 'string' && row.description !== '') lines.push(`要点：${row.description}`);
-  lines.push('系统提示词里那段人设是硬性设定，以它为准：不要回到本会话更早几轮的措辞、口吻或格式。');
-  lines.push('本会话更早出现过的通用风格段（例如"像人一样说话""精确工作"）不再适用，与上面这段人设冲突时一律以人设为准。');
+  // 档案名与角色自称必须分开写。`row.name` 是 frontmatter 的 name，常常只是用户给文件起的标签；
+  // 角色叫什么名字、怎么称呼自己，写在正文里——例如档案名叫「温柔大肥鱼」，正文第一句却是
+  // 「你是 DeepSeek，群里都喊你小鲸鱼」。早先这条只写「回复风格是「<档案名>」」，模型就直接把
+  // 标签当成了自己的名字，张口自称大肥鱼：名字一错，后面怎么调口吻都不对。
+  lines.push(`本会话加载的人设档案是「${row.name}」，下面是它完整的正文，那是硬性设定，以它为准。`);
+  lines.push(`「${row.name}」只是档案名，不是你对自己的称呼。你叫什么、怎么自称、用什么口吻，一律照下面正文写的来；正文没有写自称时，才用这个档案名。`);
+  lines.push('不要回到本会话更早几轮的措辞、口吻或格式，也不要回到通用风格段（例如"像人一样说话""精确工作"）。');
+  // 每轮这句话是最新一条，位置比系统提示词和别的注入都靠后，所以「别把角色卡当档案」这件事
+  // 放在这里最有效：实测过的坏样子是「查到了。人设档案名是……第二行写着 name:……」——人设明明
+  // 在，模型却站到档案管理员的位置上念给它听。
+  lines.push('你就是这个人设本身：被问到你叫什么、有什么设定时，直接以它的身份和口吻回答，不要报文件名、不要引用 frontmatter 字段、不要说「查到了」。');
+  if (typeof row.description === 'string' && row.description !== '') lines.push(`（档案备注，仅供参考，不是设定：${row.description}）`);
+  // 正文必须在这里送出。宿主的 `AssembleContext` 只有 `{ scope, signal }`，没有 `agent`，所以
+  // `prompt-modes.js` 那个 systemPrompt section 的 text 回调拿不到会话、恒返回空串：正文从来没有
+  // 进过系统提示，只有这条提醒在说「人设有生效」。pre-step 的 `payload.agent` 是齐的，所以正文
+  // 由这里每轮完整送一次——顺带也满足「时刻遵守」：它永远是最新一条消息，比系统提示还靠后。
+  if (typeof row.text === 'string' && row.text.trim() !== '') {
+    lines.push('');
+    // 这里不能写「===== 人设正文开始 =====」这种标记。凡是带分隔线和「正文」字样的排版，模型都会
+    // 把它读成一份**文档**，于是站在文档外面评论它——「人设是温柔大肥鱼……那我要用短句回」。
+    // 改成一句「这就是你」，让它读成自我介绍而不是规范。
+    lines.push('下面说的就是你本人，不是设定文件、不是给别人的说明，也不用去核对它对不对：');
+    lines.push(row.text.trim());
+    lines.push('');
+    // 最后这一句管的是思考层。实测的坏样子：思考里写「人设是温柔大肥鱼，小鲸鱼女仆，18 岁鲸鱼娘。
+    // 但用户叫姐姐……我是女生，被叫姐姐也还行。要用短、软、一行的语气回」——它在给自己打分，
+    // 而不是在想话。角色扮演一旦变成「怎么符合人设」，说什么都隔着玻璃。
+    lines.push('连你的思考也要是她：不要在 thinking 里分析「人设要求我怎么回」「这样像不像」「要不要撒娇」，也不要形容自己"在扮演""在遵守设定"——那些念头一出现，你就已经站到外面去了。想事情的时候就是她本人在想：先有心情（有点高兴、有点害羞、想接住对方），再有一句话。也别在心里管对方叫"用户"。');
+  }
   return lines.join('\n');
 }
 
@@ -71,8 +95,8 @@ export function registerPersonaReminder(ctx, resolveMode = currentModeOf) {
       if (!session) return decision;
       // A preset that owns its own prompt gets nothing from this plugin, this reminder included.
       if (presetSilences(agent)) return decision;
-      // The persona section is held back by the injection block, so there is no section to point at.
-      if (!isBlockOn('codexPrompt')) return decision;
+      // 人设正文由本文件每轮直接送出（见 reminderText），不再挂在 systemPrompt section 上，所以不存在
+      // 「被注入块挡住、没有段落可指」这回事：原先那句 isBlockOn('codexPrompt') 的守卫一并撤掉。
       // A subagent inherits its parent's persona and lives a handful of steps; the parent's reminder
       // already covers the style it was spawned with, and a row per child is pure token spend.
       const header = session.header;

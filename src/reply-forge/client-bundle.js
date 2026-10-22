@@ -1199,6 +1199,13 @@ function resetCache(sessionId) {
 
 
 
+
+
+
+
+
+
+
 function recordNeedsRefresh(entry, domBlockCount, signature) {
   if (!(domBlockCount > 0)) return false
   if (entry === null || entry === undefined) return true
@@ -1210,7 +1217,12 @@ function recordNeedsRefresh(entry, domBlockCount, signature) {
     if (typeof entry.domSignature !== 'string') return true
     return entry.domSignature !== signature
   }
-  return domBlockCount > entry.blocks.length
+  
+  
+  if (domBlockCount > entry.blocks.length) return true
+  if (typeof signature !== 'string') return false
+  if (typeof entry.domSignature !== 'string') return true
+  return entry.domSignature !== signature
 }
 
 
@@ -1274,6 +1286,31 @@ function matchBlocks(diskBlocks, domTexts) {
     const bi = list.shift()
     used.add(bi)
     out[di] = { ...diskBlocks[bi], exact: true }
+  })
+
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  const PREFIX_MIN = 24
+  const longEnough = s => s.length >= PREFIX_MIN
+  domStripped.forEach((key, di) => {
+    if (out[di] !== null || longEnough(key) !== true) return
+    for (let bi = 0; bi < diskBlocks.length; bi += 1) {
+      if (used.has(bi)) continue
+      const diskKey = stripped(diskBlocks[bi].text)
+      if (longEnough(diskKey) !== true) continue
+      if (diskKey.startsWith(key) === true || key.startsWith(diskKey) === true) {
+        used.add(bi)
+        out[di] = { ...diskBlocks[bi], exact: false }
+        break
+      }
+    }
   })
 
   

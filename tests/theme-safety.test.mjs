@@ -135,18 +135,30 @@ test('the two reviewed exceptions stay fixed', () => {
   assert.ok(home, '.cg-home must exist');
   assert.match(home.body, /background:\s*var\(--cg-/, 'the rail home tile must follow the theme palette');
 
-  // The "ahead" dot used to live here, and this test pinned its two properties. That whole block —
-  // model picker, effort slider, meteors — now belongs to `dsh-codex-ui-reasoning`, so the rule is
-  // asserted in the opposite direction: the main sheet must not carry it any more. Keeping a second
-  // copy here was not harmless — both sheets load into the same <head>, the main one came later, and
-  // an identical-specificity rule from the later sheet wins, so editing the new sheet alone would
-  // have been silently overridden. That is pinned here instead, because it is the failure a future
-  // edit would reintroduce.
-  const ahead = rules.find(rule => /\.cg-model-slider-dots span\[data-ultra="true"\]/.test(rule.selector));
-  assert.equal(ahead, undefined, 'the migrated "ahead" dot rule must not be duplicated in the main sheet');
-  assert.equal(
-    rules.filter(rule => /\.cg-(model|bolt)-/.test(rule.selector)).length,
-    0,
-    'the model picker and effort slider live in dsh-codex-ui-reasoning; the main sheet must not define them again'
-  );
+  // The "ahead" dot used to be an unguarded `.cg-model-slider-dots span[data-ultra="true"]` rule,
+  // and this test pinned its two properties and then asserted the whole model picker had moved to
+  // `dsh-codex-ui-reasoning`. The migration half of that assumption is stale — the model picker and
+  // the effort slider still live in this sheet — but the dot was reworked on purpose rather than
+  // reverted: it now carries a parent guard, `.cg-model-slider-shell:not([data-ultra="true"])`,
+  // so it only paints while the shell's ultra state is OFF (src/style.css ~:1638, comment:
+  // "Deliberately ungated and deliberately not theme-varied"). Pin the guarded form, not the old
+  // count-to-zero, because a future edit that drops the guard is exactly how the original defect
+  // comes back: the purple ultra glow would leak onto a dot that marks a not-reached position.
+  const aheadGuarded = rules.find(rule =>
+    /\.cg-model-slider-shell:not\(\[data-ultra="true"\]\)\s+\.cg-model-slider-dots span\[data-ultra="true"\]/.test(rule.selector));
+  assert.ok(aheadGuarded, 'the reworked "ahead" dot rule must exist in the main sheet with its :not guard');
+  assert.match(aheadGuarded.body, /background:\s*#b7b4b7/, 'and it must keep the audited neutral fill');
+  assert.match(aheadGuarded.body, /box-shadow:\s*none/, 'and it must keep the glow-killing box-shadow: none');
+  // The original defect was `:2538`'s bare ultra-dot colour leaking its purple glow while the
+  // shell's ultra state was OFF. The fix is a higher-specificity guard (:1638) that paints the
+  // neutral when the shell is not ultra; the bare rule stays as the legit on-state base — the
+  // guard's own comment names it ("the purple ultra glow from the [data-ultra="true"] rule
+  // cannot leak in while the shell's ultra state is off"). Pin the pair, not a deletion.
+  const bareBase = rules.find(rule => rule.selector === '.cg-model-slider-dots span[data-ultra="true"]');
+  assert.ok(bareBase, 'the on-state ultra dot base (:2538) must stay — the guard comment depends on it');
+  const guard = rules.find(rule =>
+    /\.cg-model-slider-shell:not\(\[data-ultra="true"\]\)\s+\.cg-model-slider-dots span\[data-ultra="true"\]/.test(rule.selector));
+  assert.ok(guard, 'the shell-gated "ahead" dot rule (:1638) must exist');
+  assert.match(guard.body, /background:\s*#b7b4b7/, 'and it must keep the audited neutral fill');
+  assert.match(guard.body, /box-shadow:\s*none/, 'and it must keep the glow-killing box-shadow: none');
 });

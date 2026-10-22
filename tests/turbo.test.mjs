@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { policyText, OFF_NOTICE, LIGHTNING_POLICY, lightningNudge, tokenMultiplier, ULTRA_POLICY, SUBAGENT_GUARD, FACT_CHECK, SUPERFAST_POLICY, PRECEDENCE, WORK_PERSONA, CHAT_PERSONA, LANGUAGE_POLICY } from '../src/turbo-policy.js';
+import { policyText, OFF_NOTICE, LIGHTNING_POLICY, lightningNudge, tokenMultiplier, ULTRA_POLICY, SUBAGENT_GUARD, FACT_CHECK, SUPERFAST_POLICY, PRECEDENCE, MANDATE, WORK_PERSONA, CHAT_PERSONA, LANGUAGE_POLICY } from '../src/turbo-policy.js';
 import { createPolicyInjector, registerTurbo, TURBO_EVENT, TURBO_PATH } from '../src/turbo.js';
 
 function fakeCtx() {
@@ -235,23 +235,20 @@ test('Chinese is the default for every armed session, and yields when another pl
   assert.equal(policyText(), '');
 });
 
-test('the fact-check block rides along with any arming, and only then', () => {
-  // It must reach every armed session — the user asked for it on every question — without
-  // arming a session by itself, which would contradict the empty-block contract above.
+test('事实核查回到注入里，但只有它回来：策略前言与强制约束仍然退役', () => {
+  // 「Codex提示词注入」那层壳撤掉了，原因是它把语气和语气无关的东西捆在一起。事实核查单独领开关后
+  // 请回来——它管的是「别凭记忆瞎答、查不到就问」，跟扮演无关，关掉它不影响人设。所以这里两个方向
+  // 都要钉住：默认随每个模式出现，开关关掉就真的不出现；另外两段永远不回来。
   assert.equal(policyText(), '', 'an unarmed session still gets nothing');
   for (const flags of [{ chinese: true }, { ultra: true }, { lightning: true }, { superfast: true }, { persona: 'work' }, { persona: 'chat' }]) {
-    assert.ok(policyText(flags).includes(FACT_CHECK), `missing with ${JSON.stringify(flags)}`);
+    const text = policyText(flags);
+    assert.ok(text.includes(FACT_CHECK), `事实核查该随每个模式注入：${JSON.stringify(flags)}`);
+    assert.ok(!text.includes(PRECEDENCE), `策略前言不该再出现：${JSON.stringify(flags)}`);
+    assert.ok(!text.includes(MANDATE), `强制约束不该再出现：${JSON.stringify(flags)}`);
   }
-  const block = FACT_CHECK;
-  assert.ok(block.includes('上网搜'), 'names the web search step');
-  assert.ok(block.includes('直接问用户'), 'names the ask-the-user step');
-  assert.ok(block.includes('不要猜'), 'forbids guessing');
-  // Duplication alarm: no >40-char sentence of this block may appear verbatim in a sibling block.
-  const sentences = s => s.split(/(?<=\.)\s+/).map(x => x.trim()).filter(x => x.length > 40);
-  for (const other of [ULTRA_POLICY, LIGHTNING_POLICY, SUPERFAST_POLICY, PRECEDENCE, LANGUAGE_POLICY, WORK_PERSONA, CHAT_PERSONA]) {
-    const shared = sentences(block).filter(x => sentences(other).includes(x));
-    assert.equal(shared.length, 0, `shared with another block: ${shared[0]}`);
-  }
+  // 缺键视为开，只有显式 false 才关——和别的注入块同一个约定。
+  assert.ok(!policyText({ chinese: true, injection: { factCheck: false } }).includes(FACT_CHECK), '开关关掉时必须真的消失');
+  assert.ok(policyText({ chinese: true, injection: {} }).includes(FACT_CHECK), '缺键视为开');
 });
 
 test('the injected contract stays free of accidental duplication', () => {
@@ -576,8 +573,14 @@ test('Superfast builds a two-tier tree, stamps the tier in every child prompt, a
   assert.match(tree, /never fan out past tier 2/);
   // The subtree reports only after it is quiet: same completion rule as the parent.
   assert.match(tree, /Do not report to the parent until the subtree is quiet/);
-  // The tree needs Lightning's rules too — they are what tells a parent how to brief a child.
-  assert.match(tree, /## Lightning Mode/);
+  // 超快那份现在自带全部骨架：闪电合同不再跟着它一起注入，所以「怎么简报子代理」这些父级规则
+  // 必须在这份里自查得到。这条断言就是它的看门人。
+  assert.doesNotMatch(tree, /## Lightning Mode/, '超快不该再连带注入闪电那份');
+  assert.match(tree, /Delegation is mandatory at every tier/);
+  assert.match(tree, /Split by angle, never clone/);
+  assert.match(tree, /You manage: plan, decompose/);
+  assert.match(tree, /One writer per file/);
+  assert.match(tree, /Ask, do not assume/);
   // The ordinary guard would forbid the very delegation the tree is built from, so it must be gone.
   assert.doesNotMatch(tree, /Ignore every rule above about fan-out/);
   assert.doesNotMatch(tree, /the tier-aware note belongs to the child/);
@@ -730,8 +733,12 @@ test('a delegated child inherits the switches of the session that spawned it', a
     // The parent's switches are what the child is nudged by: the one-shot injection alone was measured to
     // stop steering after a few turns, which is the whole reason the per-turn reminder exists.
     const childNudges = texts(await ctx.fire('agent/pre-step', { ...childStep, turn: 2, step: 1 }))
-      .filter(text => text.includes('Lightning is armed'));
+      .filter(text => text.includes('is armed'));
     assert.equal(childNudges.length, 1, 'a child inherits the per-turn reminder from its parent switches');
+    // 提醒必须跟着模式走：父会话开的是超快，子代理收到的就不能是那句只讲一层的「Lightning is armed」，
+    // 否则同一轮里两套合同打架，模型会挑轻的那条听。
+    assert.match(childNudges[0], /Superfast is armed/, '超快模式下每轮提醒也必须说超快');
+    assert.doesNotMatch(childNudges[0], /^\s*Lightning is armed/, '超快模式不该再收到闪电那版提醒');
     // A child of an unarmed parent still gets nothing but its own tail: no switches, no tree.
     writeEffortRecord(home, {});
     const orphanStep = {
