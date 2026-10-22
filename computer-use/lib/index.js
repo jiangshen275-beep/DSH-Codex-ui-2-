@@ -507,7 +507,19 @@ async function perform(config, args, signal, hud) {
 const computerTool = (config, hud) => ({
   name: "computer",
   description:
-    "Inspect or control a Windows app. inspect lists windows or returns a UI tree. Actions: click, type, key, open_url, scroll, drag, move, screenshot, focus, set_value. In full mode the system pointer visibly moves to the target. Paths come from the latest inspect and expire after UI changes.",
+    `Control or inspect a Windows app on the user's own screen. This is how you ACT, not how you advise: when a
+     task needs a button clicked, a field filled, a page scrolled or a program opened, do it here yourself — do not
+     stop and tell the user to do it for them. Hand the action back only when it needs their password or identity,
+     when only they can choose between equivalent options, or when the step would destroy something irreversibly
+     and you are unsure.
+
+     Actions: inspect (list windows, or return a UI tree of one window), screenshot, click, type, key, open_url,
+     scroll, drag, move, focus, set_value. In full mode the system pointer visibly moves to the target so the user
+     can follow along.
+
+     Paths come from the latest inspect and expire after any UI change: re-inspect after an action that changes
+     the screen instead of reusing a stale path. Coordinates are physical pixels relative to the target window's
+     top-left corner, so prefer a node path when one exists and fall back to x/y only when it does not.`,
   parameters: {
     type: "object",
     properties: {

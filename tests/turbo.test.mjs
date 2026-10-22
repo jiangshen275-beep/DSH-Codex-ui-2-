@@ -235,6 +235,16 @@ test('Chinese is the default for every armed session, and yields when another pl
   assert.equal(policyText(), '');
 });
 
+test('有屏幕就直接动手：默认就注入，关掉才不注入', () => {
+  // 这一块是「什么时候该你亲自操作」的说明书。工具本身一直挂着，缺的从来是这句指令——
+  // 实测里模型会回头让用户去点，就是因为它只看到工具能做什么，没看到自己该做什么。
+  const on = policyText({ chinese: true });
+  assert.ok(on.includes('有屏幕就直接动手'), '默认开启时要注入');
+  assert.ok(on.includes('别写「请你点击」'), '要明确禁止把操作推回给用户');
+  const off = policyText({ chinese: true, injection: { computerFirst: false } });
+  assert.ok(!off.includes('有屏幕就直接动手'), '关掉后一个字都不该留');
+});
+
 test('事实核查回到注入里，但只有它回来：策略前言与强制约束仍然退役', () => {
   // 「Codex提示词注入」那层壳撤掉了，原因是它把语气和语气无关的东西捆在一起。事实核查单独领开关后
   // 请回来——它管的是「别凭记忆瞎答、查不到就问」，跟扮演无关，关掉它不影响人设。所以这里两个方向

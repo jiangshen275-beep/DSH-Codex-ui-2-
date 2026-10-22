@@ -360,6 +360,7 @@ export function policyText({ persona, personaDeferential = false, ultra = false,
     if (personaDeferential) parts.push(PERSONA_DEFERENCE);
     else parts.push(personaText);
   }
+  if (on('computerFirst')) parts.push(COMPUTER_FIRST);
   if (ultra && on('ultra')) parts.push(ULTRA_POLICY);
   // 三选一互斥：标准什么都不进、闪电只进闪电那份、超快只进超快那份（超快那份已经自包含，
   // 不再靠「闪电 + 超快」拼起来——拼起来会让超快看起来像开了闪电，也让人没法单独关掉闪电。
@@ -380,6 +381,30 @@ export function policyText({ persona, personaDeferential = false, ultra = false,
   // the switch can be on while no name is configured, and an empty backtick pair is worse than silence.
   return parts.join('\n\n');
 }
+
+/**
+ * 「有屏幕就直接动手」。
+ *
+ * 为什么需要它：`computer` 工具一直挂着，能力也够（列窗口、读界面树、点击、输入、
+ * 滚动、开程序都在），但模型看着那句「Inspect or control a Windows app」并不知道
+ * 这是让它亲自上手——于是出现「我有工具却回头叫用户去点」这种最没道理的情形。
+ * 工具说明书写的是「能做什么」，这一段写的是「什么时候该你动手、什么时候才该交回去」。
+ */
+export const COMPUTER_FIRST = `## 有屏幕就直接动手
+
+这个会话里如果挂了 \`computer\` 工具（能列窗口、读界面树、点按钮、敲键盘、滚页面、开程序），它是给你用的，不是给你介绍的。
+
+能用它做完的，自己做完。只有三种情况把动作交还给用户：需要他本人的密码或身份确认；几个选项只有他能定；这一步会不可逆地毁掉他的东西而你拿不准。
+
+具体到常见的几件事：
+- 让用户去点某个按钮、填某个框、翻到某页、打开某个程序——这些你都能做。别写「请你点击」然后停住，直接 inspect 找到它、点掉它。
+- 浏览器里的填表、登录、授权：能填的先填完，剩下必须是本人输入的（密码、二次验证码）再让用户接，并且说清楚卡在哪一步、他要做什么。
+- 桌面端「你刷新一下」「你重启一下」这类用户做不了的事：你自己重走一遍打开流程，或者改完配置自己重启。
+- 只回一句「你可以这样操作」就交付，是失败。用户要的是事情办完，不是一份操作指南。
+
+工具试错不要紧，做错了再改；憋着不动、把操作推回给用户，才是这里最该避免的那种。
+`;
+
 
 /**
  * The switches the interface shows, in the order it shows them.
@@ -433,6 +458,8 @@ export const INJECTION_BLOCKS = [
   { id: 'language', label: '中文思考', note: '推荐开启使用中文思考' },
   { id: 'thinkingAloud', label: '想完再答', note: '开=先想完再一次性回答；关=像原生那样边想边写（过程只在思考里）' },
   // 名字来自模型菜单里的改名，这个开关只决定那段进不进提示词。
+  // 有屏幕就直接动手：工具一直挂着，但模型不知道那是让它亲自操作，于是回头叫用户去点。
+  { id: 'computerFirst', label: '能动手就动手', note: '有屏幕就直接操作，别让用户代劳；只有密码/选择/危险动作才交回去' },
   { id: 'modelIdentity', label: '模型身份', note: '模型认为自己是模型菜单里显示的那个名字' }
 ];
 export const SILENT_PRESETS = ['clean'];
