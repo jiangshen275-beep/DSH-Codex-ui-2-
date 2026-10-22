@@ -3836,3 +3836,15 @@ body[data-ds-dark-theme] .cg-archived-check { accent-color: #d1d5db; }
    放回流内；它的垂直居中本来就交给 flex 的 align-items，translate 那条不再需要。 */
 .cg-task-row.cg-task-archived > .cg-task-status { position: static; left: auto; top: auto; translate: none; flex: 0 0 auto; }
 
+
+/* 宿主顶栏那个「N 个子智能体」记的是「历史上派过多少」：派出去那一刻就写进父会话的
+   subagent/catalog 事件，只增不减，归档和删除都不会让它退回去。于是磁盘上只剩一个、
+   界面还写着几十个，看着像坏了。这里把它换成现存数。
+   手法与「正在思考」那处一致：宿主文字缩到 0 藏起来，用 ::after 原位重绘，值从 data 属性取。
+   绝不写宿主的文本节点——它一重渲染就会抢回去，两边打架会闪。 */
+.cg-host-subagent-count { font-size: 0 !important; }
+.cg-host-subagent-count::after {
+  content: '现存 ' attr(data-cg-subagent-live) ' 个子智能体';
+  font-size: var(--cg-subagent-fs, 13px);
+  white-space: nowrap;
+}

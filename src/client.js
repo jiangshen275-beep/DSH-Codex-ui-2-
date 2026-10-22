@@ -284,6 +284,71 @@ function startRunningStatusStyle() {
   sync();
 }
 
+/**
+ * 把宿主顶部那个「N 个子智能体」显示成**现存数**。
+ *
+ * 宿主那个数字来自父会话里的 `subagent/catalog` 事件，只增不减：派出去的那一刻就记账了，
+ * 归档、删除子会话都不会让它退回去。于是磁盘上只剩 1 个、界面还写着 43，看着像坏了。
+ * 我们改不了宿主的投影，但能改它画出来的那个字。
+ *
+ * 手法照 `startRunningStatusStyle` 的老路：**不写宿主的文本节点**（宿主重渲染会抢回去，
+ * 两边打架会闪），只给承载它的元素打个标记、把现存的数字放进 `data-` 属性，
+ * 由 CSS 把原文字缩小到 0 再用 `::after` 原位重绘。
+ *
+ * 为什么用正则认文字而不是认类名：宿主的类名是构建哈希，写死会被自检判成隐患；
+ * 而「数字 + 个子智能体」这个形态在它的 i18n 里就是 `count.total.*`，稳定得多。
+ */
+function startSubagentCountStyle(readLive) {
+  if (typeof document === 'undefined' || typeof document.createTreeWalker !== 'function') return () => {};
+  // 标记元素而不是模块级 flag：热重载会先销毁旧实例，但旧实例起的定时器还在跑。
+  if (document.querySelector('.cg-subagent-hook') !== null) return () => {};
+  const marker = document.createElement('span');
+  marker.className = 'cg-subagent-hook';
+  marker.setAttribute('aria-hidden', 'true');
+  document.body?.append?.(marker);
+  const pattern = /^\s*\d+\s*个子智能体\s*$/;
+  const sync = () => {
+    let live;
+    try {
+      live = String(readLive() ?? 0);
+    } catch {
+      return;
+    }
+    let node;
+    try {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      while ((node = walker.nextNode()) !== null) {
+        if (!pattern.test(node.nodeValue ?? '')) continue;
+        const host = node.parentElement;
+        if (host === null || host === undefined) continue;
+        if (!host.classList.contains('cg-host-subagent-count')) {
+          // 先把宿主自己的字号记下来，`font-size:0` 之后就拿不到了。
+          try {
+            host.style.setProperty('--cg-subagent-fs', window.getComputedStyle(host).fontSize || '13px');
+          } catch { /* 量不到就用 CSS 里的兜底值 */ }
+          host.classList.add('cg-host-subagent-count');
+        }
+        if (host.getAttribute('data-cg-subagent-live') !== live) {
+          host.setAttribute('data-cg-subagent-live', live);
+        }
+      }
+    } catch { /* 面板正在拆的时候，这一帧跳过就好 */ }
+  };
+  // 观察器负责「宿主刚重渲染完」的那一刻；定时器兜底面板切换与首屏。
+  let observer = null;
+  try {
+    observer = new MutationObserver(() => sync());
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  } catch { /* 没有 MutationObserver 就只靠定时器 */ }
+  const timer = setInterval(sync, 1000);
+  sync();
+  return () => {
+    try { observer?.disconnect(); } catch { /* ignore */ }
+    clearInterval(timer);
+    marker.remove?.();
+  };
+}
+
 const paths = {
   home: 'M2.7 10.3 11 3.4a1.6 1.6 0 0 1 2 0l8.3 6.9a1 1 0 0 1-.6 1.8H19v7.1a1.8 1.8 0 0 1-1.8 1.8H14v-6H10v6H6.8A1.8 1.8 0 0 1 5 19.2v-7.1H3.3a1 1 0 0 1-.6-1.8Z',
   files: 'm10 4 6-1a3 3 0 0 1 3.4 2.4l1 6a3 3 0 0 1-2.4 3.4l-1.2.2M5.7 6.4l6.8-.8a2.8 2.8 0 0 1 3.1 2.4l.9 9a2.8 2.8 0 0 1-2.4 3.1l-6.8.8a2.8 2.8 0 0 1-3.1-2.4l-.9-9a2.8 2.8 0 0 1 2.4-3.1ZM10 6l.4 3a1.8 1.8 0 0 0 2 1.6l3-.4',
@@ -1584,6 +1649,10 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'theme', 'connection', 
       for (const groups of map.values()) { groups.subagents.sort(byAge); groups.branches.sort(byAge); }
       return map;
     }, [sessions, archivedIds, ghostIds, purgedIds]);
+  // 顶部那个「N 个子智能体」改成现存数：只算还挂在当前会话下、没归档没删掉的那些。
+  const liveSubagentCountRef = React.useRef(0);
+  liveSubagentCountRef.current = childGroupsOf.get(currentSession?.id)?.subagents?.length ?? 0;
+  React.useEffect(() => startSubagentCountStyle(() => liveSubagentCountRef.current), []);
     // One question per candidate, to the Host rather than to the list the Host sent earlier: the
     // store cannot tell "this Session exists" from "its log was deleted after the row was built".
     //
