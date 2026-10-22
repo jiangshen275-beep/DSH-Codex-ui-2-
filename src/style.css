@@ -3848,3 +3848,8 @@ body[data-ds-dark-theme] .cg-archived-check { accent-color: #d1d5db; }
   font-size: var(--cg-subagent-fs, 13px);
   white-space: nowrap;
 }
+
+/* 那个数字只作信息展示，不给人点开：外层的按钮一起接管，箭头藏掉。
+   属性是 React 管的，客户端脚本每次同步都会重新摘一遍。 */
+.cg-subagent-count-static { pointer-events: none !important; cursor: default !important; }
+.cg-subagent-count-static svg { display: none !important; }

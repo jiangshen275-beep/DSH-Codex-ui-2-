@@ -331,6 +331,18 @@ function startSubagentCountStyle(readLive) {
         if (host.getAttribute('data-cg-subagent-live') !== live) {
           host.setAttribute('data-cg-subagent-live', live);
         }
+        // 这个数字只作信息展示：连外层的按钮一起接管，让它展开不了。
+        // 属性是 React 管的，所以每次同步都要重新摘一遍——宿主重渲染会把它们加回去。
+        const button = host.closest?.('button[aria-haspopup="tree"]') ?? null;
+        if (button !== null) {
+          if (!button.classList.contains('cg-subagent-count-static')) {
+            button.classList.add('cg-subagent-count-static');
+          }
+          if (button.hasAttribute('aria-haspopup')) button.removeAttribute('aria-haspopup');
+          if (button.hasAttribute('aria-expanded')) button.removeAttribute('aria-expanded');
+          if (button.getAttribute('tabindex') !== '-1') button.setAttribute('tabindex', '-1');
+          if (button.getAttribute('aria-disabled') !== 'true') button.setAttribute('aria-disabled', 'true');
+        }
       }
     } catch { /* 面板正在拆的时候，这一帧跳过就好 */ }
   };
