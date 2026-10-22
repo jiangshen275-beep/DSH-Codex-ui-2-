@@ -3844,7 +3844,7 @@ body[data-ds-dark-theme] .cg-archived-check { accent-color: #d1d5db; }
    绝不写宿主的文本节点——它一重渲染就会抢回去，两边打架会闪。 */
 .cg-host-subagent-count { font-size: 0 !important; }
 .cg-host-subagent-count::after {
-  content: '现存 ' attr(data-cg-subagent-live) ' 个子智能体';
+  content: attr(data-cg-subagent-live) ' 个子智能体';
   font-size: var(--cg-subagent-fs, 13px);
   white-space: nowrap;
 }
