@@ -14,16 +14,23 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 
 > **About this project**: a derivative of [Loliyer520/dsh-codex-ui](https://github.com/Loliyer520/dsh-codex-ui) (MIT), developed further here — three orchestration tiers, Ultra tier, enforced Chinese, session rename, archived-session deletion, subagent/branch grouping, plus a batch of fixes. **Not affiliated with or endorsed by OpenAI**; the bundled Codex icon and OpenAI Sans font belong to OpenAI — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-## What is new in 3.1.0
+## 4.1.0 预览版
 
-- **Mutually exclusive modes**: standard / lightning / superfast now inject exactly one orchestration contract, with a per-turn mode banner that voids stale ones.
-- **Self-contained superfast contract**: no longer assembled from the lightning text.
-- **Personas that actually work**: fixed a host-side gap where the persona body never reached the system prompt; the body is now delivered every turn and the archive name is no longer used as a self-name.
-- **Fact-check switch**: new toggle — verify before answering, ask instead of guessing.
-- **Delegation depth auto-set to 2**: grandchildren become possible on first install (idempotent, never overrides existing config).
-- **Think-then-speak semantics fixed**: on = answer once after thinking; off = think while writing, natively.
-- **Sounds, colors, tiers**: completion sound no longer fires for subagents; effort labels on the trigger bar match the popup palette; effort tiers are now Off/Low/High/Max.
-- **Subagent session reaper**: opt-in (off by default) with documented trade-offs.
+当前版本：`4.1.0-preview.1`。安装包：`dsh-codex-ui-4.1.0-preview.1.tgz`。完整源码与包内容同版公开，仓库标签为 `v4.1.0-preview.1`；安装无需重新构建。
+
+本版包含权限面板样式与排序、工具/整轮/侧栏展开收起动画、人设输出上限设置、内嵌审批模块和“审查者后台”。详细验证与宿主兼容边界见 [PREVIEW.zh.md](PREVIEW.zh.md)。历史截图不代表本版全部布局。
+
+本次只发布 GitHub Release，未发布 npm registry；建议下载 Release 附件，在 DSH 插件页添加 tarball 的绝对路径，安装后正常重启 DSH。运行中不要覆盖宿主 `app.asar`。
+
+## What is new in 4.0.0
+
+- **Restart, not reload**: the sidebar button now stops every running turn, writes a resume list, waits until the sessions really stop, asks the host to relaunch the whole process, and — once the app is back — sends "继续" to the sessions it interrupted.
+- **Resume survives a hard kill**: the list of running sessions used to live in browser localStorage, which `taskkill /f` may never flush — exactly the case that mattered most. A heartbeat now reports it to the host every two seconds and it is kept on disk in `$DSH_HOME/codex-ui-running.json`; on startup the file is read once, deleted, merged with the localStorage list and replayed. A heartbeat union of the session store's `running` flag and the DOM's `data-chat-running` keeps it accurate right after a cold start.
+- **Chinese text no longer depends on the machine**: a subset of Noto Sans SC (GB2312's 7540 common characters, two weights, 1.1 MB each) is inlined, paired with OpenAI Sans for Latin.
+- **Scrollbars follow Codex**: 7px, transparent track, `#353535` thumb (`#494949` on hover), near-square 2px corners, no end buttons — the host default was a 5px `#3c3c3d` pill.
+- **The diary tool asks to be written often**: one note per finished step, and one before touching anything when a session was interrupted or handed over.
+
+3.1.0 brought mutually exclusive orchestration modes, a self-contained superfast contract, personas that actually reach the system prompt, a fact-check switch, delegation depth 2, and the opt-in subagent reaper.
 ## The three big things in 3.0.0
 
 **1. Replies become editable.** Every finished reply and every reasoning block gains an entry point; open it, rewrite the text, and it is written back into the session record. What gets written is the original event the host understands, not a display-layer patch — reopen, refresh, or let the model re-read the context and it sees the edited sentence. The previously separate `dsh-codex-ui-HF` (Reply Forge) now ships inside this package.
@@ -45,7 +52,7 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 - **电脑控制**：截屏、窗口树检查、指针移动、点击、键入、滚动、拖拽；控制期间屏幕顶部常驻提示并实时显示当前目标（如「正在点击 (320, 480) · 记事本」）。原 `dsh-computer-use` 并入本包，配置 `computerUse.enabled: false` 可关（不写即开）。
 - **界面与其它**：浅色 / 深色 / 窄窗口适配；超快模式滑条四段暖色递深（minimal·low / high / xhigh·max / ultra 渐变）；努力滑条旋钮 24×24 正圆（常态带投影，超快 + Ultra 态加描边与发光）；字体与图标随包分发（字体以 base64 内联进 `lib/client.js`）；设置菜单显示官方 DeepSeek API 余额（服务端缓存 30 秒，只有校验过的余额字段回到前端），并带刷新 / 控制台 / 设置 / 插件 / 帮助入口。
 
-**当前版本（3.1.0）**：产物 `dsh-codex-ui-3.1.0.tgz`（`npm pack` 生成，不入库）。3.1.0 在 3.0.0 电脑操控并入的基础上，修好人设落地、统一模式注入、补齐委派深度——上一版的三大件（回复锻造（会话改写）、可自定义侧边栏、电脑操控——安装方式没变，装一个包就有全部能力。2.x 的历史要点见 [CHANGELOG.md](CHANGELOG.md)。界面类改动刷新页面即可，提示词契约类与宿主侧改动（侧边栏的链接/程序启动、电脑控制）需要重启 DSH。
+**历史版本（4.0.0）**：产物 `dsh-codex-ui-4.1.0-preview.1.tgz`（`npm pack` 生成，不入库）。4.0.0 把「重启」做成了真重启：停轮次、写续跑清单、等会话真停下、请宿主重启进程，起来后自动续跑；续跑名单落在磁盘上，强杀进程也不会丢。此外中文改用内联字体、滚动条按 Codex 规格重做。3.0.0 的三大件（回复锻造（会话改写）、可自定义侧边栏、电脑操控）与 3.1.0 的模式统一都还在，安装方式没变，装一个包就有全部能力。2.x 的历史要点见 [CHANGELOG.md](CHANGELOG.md)。界面类改动刷新页面即可，提示词契约类与宿主侧改动（侧边栏的链接/程序启动、电脑控制、重启）需要重启 DSH。
 
 ## 安装
 
@@ -53,16 +60,16 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 
 **A. 本地 tarball（不依赖 registry）**
 
-拿到 `dsh-codex-ui-3.1.0.tgz` 后，在 DSH **插件 → 添加插件**里填该文件的绝对路径，或：
+拿到 `dsh-codex-ui-4.1.0-preview.1.tgz` 后，在 DSH **插件 → 添加插件**里填该文件的绝对路径，或：
 
 ```powershell
-dsh plugin --profile <profile> add 'C:/path/dsh-codex-ui-3.1.0.tgz'
+dsh plugin --profile <profile> add 'C:/path/dsh-codex-ui-4.1.0-preview.1.tgz'
 ```
 
 **B. npm**
 
 ```powershell
-dsh plugin --profile <profile> add dsh-codex-ui@3.1.0
+dsh plugin --profile <profile> add dsh-codex-ui@4.1.0-preview.1
 ```
 
 > ⚠️ **这个包目前还没有发布到 npm**（公共 registry 上会返回 404）——现在执行上面这条会失败，首次安装请用上面的 A 或 C 方式。若你打算发布到 npm，这条命令在发布满 24 小时后即可用。

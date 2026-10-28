@@ -1,5 +1,27 @@
 - id: ui-sidebar
   disabled: true
+# 迁移已安装的独立审核实例：同一 profile 仅启用本包中的一个实例。
+- id: permission-review
+  name: '@local/dsh-permission-review'
+  disabled: true
+- id: permission
+  name: '@deepseek-ai/dsh-permission-presets'
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+      review:
+        sandbox: danger-full-access
+        approval: ask
+        name: 帮我批准
+        description: 由另一个 Agent 先判断这次操作会不会伤到电脑，有风险才问你。
 - insert:
     - id: codex-style-ui
       name: dsh-codex-ui
@@ -9,3 +31,6 @@
           mode: full
           autoScreenshot: true
           visualPointer: true
+    - id: codex-permission-review
+      name: dsh-codex-ui/permission-review
+      config: {}

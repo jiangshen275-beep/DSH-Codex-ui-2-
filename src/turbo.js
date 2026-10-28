@@ -31,6 +31,24 @@ import { personaTextOf } from './prompt-modes.js';
 export const TURBO_EVENT = 'dsh-codex-ui/turbo';
 export const TURBO_PATH = '/api/dsh-codex-ui/turbo';
 
+/**
+ * 默认关的注入块。
+ *
+ * 原先这一块是唯一的反向例外（缺键算关），原因写在 `thinkingAloud` 的设计意图里。实测把它翻了过来：
+ * 这台机器上的模型不往 reasoning 通道写东西，过程全落在正文 content 里，「边想边写」那段提示词
+ * 于是变成「把碎片打进回答」。现在缺键即开「想完再答」，规则仍必须和 `turbo-policy.js` 的 `on()`
+ * 一致，否则界面会显示「开」而实际没注入。
+ */
+const INJECTION_DEFAULT_OFF = new Set();
+
+/** 一个注入块当前是不是开着。显式布尔优先，缺键按上面那张表。 */
+const injectionOn = (map, id) => {
+  const value = map?.[id];
+  if (value === false) return false;
+  if (value === true) return true;
+  return !INJECTION_DEFAULT_OFF.has(id);
+};
+
 /** Sessions kept in a record file; the oldest row is dropped first. */
 const MAX_SESSIONS = 40;
 /**
@@ -46,6 +64,17 @@ const EFFORT_LABELS = { lightning: '闪电', ultra: 'Ultra', superfast: '超快'
 // plugin of their own. They share nothing but the route they are patched through.
 const PERSONA_FILE = 'codex-ui-persona.json';
 const EFFORT_FILE = 'codex-ui-effort.json';
+/**
+ * The three reply styles the settings row offers, in the order it shows them.
+ *
+ * `none` means "inject no style template at all": the model keeps the host's own system prompt, and
+ * a user-written persona (if one is in force) is the only voice layer left. It replaces the old
+ * two-state toggle, whose absence of a third value is what made "turn the style off" impossible —
+ * the settings row could only flip between chat and work, and an unset value silently became work.
+ */
+const PERSONA_VALUES = ['work', 'chat', 'none'];
+/** The style a session follows until someone picks one: inject nothing, i.e. the host's own prompt. */
+const DEFAULT_PERSONA = 'none';
 /** The single file both records used to share. Read once, split, then retired — never deleted. */
 const LEGACY_FILE = 'codex-ui-turbo.json';
 
@@ -92,9 +121,10 @@ function parsePersona(parsed) {
   const clean = {};
   for (const [id, value] of Object.entries(sessions)) {
     if (typeof id !== 'string' || !id || !value || typeof value !== 'object') continue;
-    // `persona` is stamped once, on the first turn of the session that started after the hero last
-    // picked a tab; absent means "this session never chose one", not "it chose the default".
-    const persona = value.persona === 'chat' || value.persona === 'work' ? value.persona : '';
+    // `persona` is stamped on the session the settings row wrote it to; absent means "this session
+    // never chose one", not "it chose the default". Three values are accepted: `none` is a real
+    // choice ("inject no template"), so it must survive a reload exactly like chat and work.
+    const persona = PERSONA_VALUES.includes(value.persona) ? value.persona : '';
     // A row without a persona carries nothing this record owns any more: the switches that used to
     // make such a row worth writing moved to the effort record.
     if (persona) clean[id] = { persona, at: Number.isFinite(value.at) ? value.at : 0 };
@@ -108,13 +138,14 @@ function parsePersona(parsed) {
     for (const [id, value] of Object.entries(rawInjection)) {
       // Only ids the interface still offers: a block that has no switch any more must not stay muted by a
       // leftover key, and the blocks that carry no switch on purpose can never be switched off this way.
-      if (typeof id === 'string' && value === false && INJECTION_BLOCKS.some(block => block.id === id)) injection[id] = false;
+      // 显式的 true 也要收下：默认关的块（「想完再答」）只有靠它才能被打开。
+      if (typeof id === 'string' && typeof value === 'boolean' && INJECTION_BLOCKS.some(block => block.id === id)) injection[id] = value;
     }
   }
   const pending = parsed?.pendingPersona;
   return {
     sessions: clean,
-    pendingPersona: pending === 'chat' || pending === 'work' ? pending : '',
+    pendingPersona: PERSONA_VALUES.includes(pending) ? pending : '',
     pendingAt: Number.isFinite(parsed?.pendingAt) ? parsed.pendingAt : 0,
     injection,
     // The name is a string, not a switch: injection only records the blocks that are OFF, so it cannot
@@ -282,9 +313,8 @@ function writePersonaState(file, state) {
     sessions: Object.fromEntries(rows.map(([id, value]) => [id, { persona: value.persona, at: value.at }])),
     pendingPersona: state.pendingPersona || '',
     pendingAt: state.pendingAt || 0,
-    // Written last and only as `false` entries, so the file stays readable and a hand-edit that
-    // deletes a key restores that block rather than disabling it.
-    injection: Object.fromEntries(Object.entries(state.injection ?? {}).filter(([, value]) => value === false)),
+    // 存显式布尔：默认关的块（「想完再答」）必须能把 true 落盘，否则永远开不起来。
+    injection: Object.fromEntries(Object.entries(state.injection ?? {}).filter(([, value]) => typeof value === 'boolean')),
   }, 'persona');
 }
 
@@ -446,12 +476,11 @@ export function registerTurbo(ctx) {
   let personaWrites = Promise.resolve();
   let effortWrites = Promise.resolve();
 
-  // The hero's tab pick travels with the conversation that starts next: it is stamped onto
-  // a session at that session's own first step, and the session keeps it from then on. A
-  // conversation whose first step has already happened is never touched, so picking a tab
-  // cannot reach back into a session that is already running — and a session that started
-  // before the pick still gets the style in force when it opens, never nothing at all.
-  const pendingPersona = () => (personaState.pendingPersona === 'chat' ? 'chat' : 'work');
+  // The reply style is now a per-session value that can change mid-conversation (the settings row
+  // writes the session's own row), with `pendingPersona` as the value every session that never chose
+  // its own follows. An unset record answers `none` — inject nothing — instead of the old silent
+  // fallback to `work`, which is what made the row look pinned to 工作 no matter what was picked.
+  const pendingPersona = () => (PERSONA_VALUES.includes(personaState.pendingPersona) ? personaState.pendingPersona : DEFAULT_PERSONA);
 
   /**
    * Queue one whole-file write of the persona record. `sessions` freezes the row map at queue time for
@@ -469,19 +498,20 @@ export function registerTurbo(ctx) {
     });
   };
 
-  /** Stamp the pick onto a session at its first step; return the persona that session owns. */
-  const personaFor = (sessionId, position) => {
+  /**
+   * The reply style one session runs under: its own row when it has one, otherwise the last value
+   * picked in the settings row.
+   *
+   * It no longer stamps anything and no longer cares which turn it is. The old rule ("stamp at the
+   * session's first turn, then never change") is exactly what made a mid-conversation switch
+   * impossible: a running session had no row and no writer, so the interface could pick a new style
+   * and the very next step would still be served the old one. Following `pending` instead means a
+   * session with no row of its own tracks the global pick on every step, and a session the user
+   * switches explicitly keeps its own value.
+   */
+  const personaFor = sessionId => {
     const stored = personaState.sessions[sessionId]?.persona;
-    if (stored === 'chat' || stored === 'work') return stored;
-    // "First step" is the session's first turn, whatever step number it reports: a resumed
-    // or retried opening turn must still get the style rather than none.
-    const firstTurn = position?.turn === 1;
-    if (!firstTurn) return '';
-    const persona = pendingPersona();
-    const row = personaState.sessions[sessionId] ?? { at: 0 };
-    personaState.sessions[sessionId] = { ...row, persona, at: Date.now() };
-    queuePersonaWrite({ ...personaState.sessions });
-    return persona;
+    return PERSONA_VALUES.includes(stored) ? stored : pendingPersona();
   };
 
   /** The three switches, read from the record that owns them — current value on every call. */
@@ -496,12 +526,10 @@ export function registerTurbo(ctx) {
 
   // Field order is part of the response contract: the client reads all four off one object.
   // Two scopes on purpose. The three switches are a property of the conversation, so a delegated child
-  // reads its parent's row (`flagScope`). The persona is not read-only here — `personaFor` stamps the
-  // pending pick onto whatever id it is given on a first turn — so it always takes the session's own id.
-  // Passing the parent's id there made a child write its parent's persona row: a child spawned from a
-  // session that had never been resolved would claim that row and permanently pin the backend pick to it.
-  const flagsFor = (flagScope, personaScope, position) => ({
-    persona: personaFor(personaScope, position),
+  // reads its parent's row (`flagScope`). The reply style belongs to the session itself, so it always
+  // reads the session's own id — a child asking with its parent's id would report the parent's style.
+  const flagsFor = (flagScope, personaScope) => ({
+    persona: personaFor(personaScope),
     ...effortFlags(flagScope),
   });
   // The cost of the contract travels with the state so the interface never hard-codes it.
@@ -570,10 +598,10 @@ export function registerTurbo(ctx) {
     // bare; that made every lookup miss and reproduced the original bug exactly.
     const parentId = typeof header?.parentSession === 'string' ? header.parentSession : '';
     const scope = subagent && parentId ? parentId : sessionId;
-    const flags = { ...flagsFor(scope, sessionId, position), chinese: FORCE_CHINESE };
-    // 人设与「聊天/工作」不是二选一：两段都进，但通用那段的权重必须低于用户自己写的人设。
-    // 位置这件事是硬约束——这一块是以最近的 `role: user` 消息注入的，比系统提示词里的人设新，
-    // 所以只靠位置比不过；给它加一句从属声明，冲突时明确让位（正文照旧完整注入，不删条款）。
+    const flags = { ...flagsFor(scope, sessionId), chinese: FORCE_CHINESE };
+    // 人设与回复风格是叠加的两层：用户写的人设管身份，回复风格管表达方式。
+    // 有人设时模板照常注入，只是前面多加一段两层分工的声明（`PERSONA_LAYERED`），
+    // 让模型知道身份按人设、说话方式按这一段。
     const personaDeferential = personaTextOf(agent?.session) !== '';
     // Keyed by the session's own id, never by `scope`: what a session was told is a fact about that
     // session, and a child must not overwrite its parent's record of the same switches.
@@ -585,7 +613,13 @@ export function registerTurbo(ctx) {
     // `chinese` is a skeleton block, not an arming switch: it is forced true for every session, so
     // counting it here made `active` non-empty forever and `emptied` could never fire. A session whose
     // every real switch was turned off kept its `armed` record and was never told the contract was gone.
-    const active = new Set(Object.keys(flags).filter(key => key !== 'chinese' && flags[key] && flags[key] !== false));
+    // `persona` is a three-value style, not a boolean: `none` is a real choice that injects nothing, so
+    // it must not count as armed — otherwise choosing 无 would look like a live switch forever.
+    const active = new Set(Object.keys(flags).filter(key => {
+      if (key === 'chinese') return false;
+      if (key === 'persona') return flags.persona === 'chat' || flags.persona === 'work';
+      return Boolean(flags[key]) && flags[key] !== false;
+    }));
     // 边想边说双向注入（开=禁止段、关=允许段），任何会话都有一段，别的块全关也不能误发 OFF_NOTICE。
     active.add('thinkingAloud');
     // A session with no persona and no switches carries nothing; if it previously carried a
@@ -694,18 +728,28 @@ export function registerTurbo(ctx) {
   const settled = () => Promise.all([personaWrites.catch(() => {}), effortWrites.catch(() => {})]);
 
   /**
-   * The persona record's only writer: the hero's next-conversation pick. It never touches the effort
-   * record, so a reply-style change cannot rewrite a switch it does not own.
+   * The reply style writer, for both scopes. It never touches the effort record, so a reply-style
+   * change cannot rewrite a switch it does not own.
+   *
+   * `sessionId === ''` is the "next session" scope: only `pendingPersona` moves. A real session id
+   * writes that session's own row **and** the pending value, because the owner asked for one pick to
+   * do both — switching inside a conversation must take effect immediately and also become the style
+   * the next conversation opens with.
    */
-  const patchPersona = change => {
-    // `pendingPersona` + `pendingAt` are the hero's pick for the next conversation.
+  const patchPersona = (change, sessionId) => {
     if (change.persona !== undefined) {
-      personaState.pendingPersona = change.persona;
-      // The stamp is what limits the pick to the conversation that starts next.
-      personaState.pendingAt = Date.now();
+      if (sessionId === '') {
+        personaState.pendingPersona = change.persona;
+        personaState.pendingAt = Date.now();
+      } else {
+        personaState.sessions[sessionId] = { persona: change.persona, at: Date.now() };
+        // The global pick follows a per-session switch: one switch, both places.
+        personaState.pendingPersona = change.persona;
+        personaState.pendingAt = Date.now();
+      }
     }
     queuePersonaWrite({ ...personaState.sessions });
-    return { pending: true, ...pendingFlags() };
+    return sessionId === '' ? { pending: true, ...pendingFlags() } : { pending: true, ...flagsFor(sessionId, sessionId) };
   };
 
   /**
@@ -747,7 +791,7 @@ export function registerTurbo(ctx) {
         // missing key means "on" — the file stores only the blocks that were switched off.
         const view = () => ({
           blocks: INJECTION_BLOCKS,
-          switches: Object.fromEntries(INJECTION_BLOCKS.map(({ id }) => [id, personaState.injection[id] !== false])),
+          switches: Object.fromEntries(INJECTION_BLOCKS.map(({ id }) => [id, injectionOn(personaState.injection, id)])),
         });
         // The bare action is a read; naming a block makes it a write.
         if (payload.id === undefined && payload.enabled === undefined) {
@@ -755,10 +799,9 @@ export function registerTurbo(ctx) {
         }
         if (typeof payload.id !== 'string' || !INJECTION_BLOCKS.some(({ id }) => id === payload.id)) return fail('turbo/invalid', '注入块参数无效。');
         if (typeof payload.enabled !== 'boolean') return fail('turbo/invalid', '注入块开关参数无效。');
-        // Off is a stored `false`, on is an absent key: the in-memory map then holds exactly what
-        // `readPersonaState` would read back, and `writePersonaState` writes nothing else.
-        if (payload.enabled) delete personaState.injection[payload.id];
-        else personaState.injection[payload.id] = false;
+        // 写显式布尔。原来是「开=删键、关=写 false」，那套只在「缺键即开」的时候成立：
+        // 默认关的块被点开时删了键，`on()` 仍判它关，开关就成了点不亮的假开关。
+        personaState.injection[payload.id] = payload.enabled === true;
         // The system-prompt section reads the published map, not this file, so it must see the change in
         // this same turn; `resolve` reads `personaState.injection` itself and needs no second call here.
         setInjection(personaState.injection);
@@ -789,24 +832,26 @@ export function registerTurbo(ctx) {
         effortChange[key] = payload[key];
       }
       if (payload.persona !== undefined) {
-        if (payload.persona !== 'chat' && payload.persona !== 'work') return fail('turbo/invalid', '回复风格参数无效。');
-        // Persona is global, so it is only accepted for the hero's "next session" scope.
-        if (!pending) return fail('turbo/invalid', '回复风格是全局设置，不接受按会话写入。');
+        // Three values, `none` included: the settings row offers 工作 / 聊天 / 无, and 无 means
+        // "inject no style template" rather than "unset", so it must survive the write.
+        if (!PERSONA_VALUES.includes(payload.persona)) return fail('turbo/invalid', '回复风格参数无效。');
         change.persona = payload.persona;
-        change.pending = true;
       }
       if (pending) {
         // The "next session" scope only ever carries the reply style: the three switches need a
         // session, so a request that named one here was already refused above.
-        if (Object.keys(change).length) patchPersona(change);
+        if (Object.keys(change).length) patchPersona(change, '');
         return Response.json({ type: 'server-response', rpcId: envelope.rpcId, result: { ok: true, value: { ...pendingFlags(), pending: true, tokenMultiple: budget.value, tokenExact: budget.exact } } });
       }
-      // The reply style is global, so the persona branch above already refused it on this scope; a
-      // named session that reaches this line named no field this route owns.
-      if (Object.keys(effortChange).length === 0) return fail('turbo/invalid', '没有需要更新的开关。');
-      // The row is mutated in place before the write is queued, so this response and the injector's next
-      // step both read the switch back; the queued write then commits the reader once the bytes land.
-      return Response.json({ type: 'server-response', rpcId: envelope.rpcId, result: { ok: true, value: patchEffort(payload.sessionId, effortChange) } });
+      // A named session accepts the reply style too, which is the whole point of moving the style
+      // control into the settings row: without this branch a running conversation could never change
+      // its style, because only `pending` was writable.
+      if (Object.keys(change).length === 0 && Object.keys(effortChange).length === 0) return fail('turbo/invalid', '没有需要更新的开关。');
+      // The rows are mutated in place before either write is queued, so this response and the
+      // injector's next step both read the new values back; the queued writes then persist them.
+      if (Object.keys(effortChange).length) patchEffort(payload.sessionId, effortChange);
+      if (Object.keys(change).length) patchPersona(change, payload.sessionId);
+      return Response.json({ type: 'server-response', rpcId: envelope.rpcId, result: { ok: true, value: { ...flagsFor(payload.sessionId, payload.sessionId), ...(change.persona !== undefined ? { pending: true } : {}), tokenMultiple: budget.value, tokenExact: budget.exact } } });
     },
   }));
 

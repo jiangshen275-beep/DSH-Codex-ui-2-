@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Permission Review",
+    "description": "Reviews each tool call before it runs: harmless ones proceed, risky ones ask you first."
+  }
+}

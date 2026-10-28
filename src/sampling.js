@@ -120,6 +120,13 @@ function applyRequestSampling(config, sessionId, params) {
   const previous = injected.get(sessionId) ?? {};
   const recorded = {};
   for (const [key, field] of Object.entries(REQUEST_FIELDS)) {
+    if (key === 'max_tokens' && Object.hasOwn(params, key) && params[key] === null) {
+      // Host contract (patched dsh-llm-deepseek serializer): null means "put no max_tokens field on
+      // the wire at all", so the provider applies its own ceiling instead of the 256k default.
+      config[field] = null;
+      recorded[key] = null;
+      continue;
+    }
     if (Object.hasOwn(params, key)) {
       config[field] = params[key];
       recorded[key] = params[key];

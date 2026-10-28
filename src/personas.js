@@ -74,8 +74,11 @@ export function personasDir() {
 }
 
 /** The built-in row: its empty body is what makes "DeepSeek" read as "inject nothing". */
+/** 内置项的简介：它不注入任何人设，跑的就是深度求索官方那套提示词。 */
+const BUILTIN_DESCRIPTION = '官方提示词';
+
 function builtinSentinel() {
-  return { id: BUILTIN_ID, name: BUILTIN_ID, description: CODEX_DESCRIPTION, order: -1, enabled: true, text: '', builtin: true };
+  return { id: BUILTIN_ID, name: BUILTIN_ID, description: BUILTIN_DESCRIPTION, order: -1, enabled: true, text: '', builtin: true };
 }
 
 /** A persona error the route can turn into `{ ok: false, error }` without guessing at the cause. */
@@ -425,11 +428,45 @@ export function textFor(id) {
  * `DeepSeek` row is the native prompt with nothing added, so it never asks for anything. Unknown
  * ids get `{}` for the same reason `textFor` gets `''` — a stale stored mode must not fail a turn.
  */
+
+/** Output limits are separate from protected persona prompt files. null = no plugin limit. */
+export function readPersonaOutputLimit(id) {
+  const key = String(id ?? '').trim().toLowerCase();
+  if (!['codex', 'deepseek'].includes(key)) throw personaError('persona/protected', '此设置仅用于 Codex 和 DeepSeek。');
+  const dir = personasDir();
+  if (dir === null) throw personaError('persona/no-home', 'DSH_HOME 未设置。');
+  let data;
+  try { data = JSON.parse(readFileSync(join(dir, 'output-limits.json'), 'utf8')); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  const value = data[key];
+  if (value === undefined || value === null) return null;
+  if (!Number.isSafeInteger(value) || value < 1) throw personaError('persona/invalid', '已保存的输出 Token 上限无效。');
+  return value;
+}
+export function writePersonaOutputLimit(id, value) {
+  readPersonaOutputLimit(id);
+  if (value !== null && (!Number.isSafeInteger(value) || value < 1)) throw personaError('persona/invalid', '输出 Token 上限须为正整数，或选择无限制。');
+  const dir = personasDir(), file = join(dir, 'output-limits.json');
+  let data = {};
+  try { data = JSON.parse(readFileSync(file, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  data[String(id).trim().toLowerCase()] = value;
+  mkdirSync(dir, { recursive: true });
+  writeAtomically(file, JSON.stringify(data, null, 2) + '\n');
+  return { id, max_tokens: value };
+}
+
 export function paramsFor(id) {
   const needle = typeof id === 'string' ? id.trim().toLowerCase() : '';
-  if (needle.length === 0 || needle === BUILTIN_ID.toLowerCase()) return {};
+  if (needle.length === 0) return {};
   const found = loadPersonas().find(item => item.id.toLowerCase() === needle);
-  return found === undefined ? {} : { ...found.params };
+  if (found === undefined) return {};
+  // Default output cap is "no limit": `null` means "send no max_tokens at all" to the host, while a
+  // positive integer is this persona's own cap. Built-ins keep the same rule so both of them are
+  // configurable without unlocking their protected prompt text.
+  const override = ['codex', 'deepseek'].includes(needle) ? readPersonaOutputLimit(needle) : undefined;
+  const params = found.params ?? {};
+  const explicit = Object.hasOwn(params, 'max_tokens') ? params.max_tokens : undefined;
+  return { ...params, max_tokens: override ?? explicit ?? null };
 }
 
 /**
@@ -477,6 +514,10 @@ export function writePersona(input) {
   const stem = requested.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').trim();
   if (stem.length === 0 || stem === '.' || stem === '..') throw personaError('persona/invalid', '人设标识无效。');
   if (stem.toLowerCase() === BUILTIN_ID.toLowerCase()) throw personaError('persona/protected', '内置 DeepSeek 人设不可写入。');
+  // Codex 也锁死：它是这个插件的基准人设，正文与规则一旦被就地改掉，「Codex 模式」就名不副实了，
+  // 而且改坏之后没有任何地方能看出原来是什么。要定制请走「增加自定义人设」（id 不同，不受这条限制）。
+  // 首次播种 `codex.md` 走的是 `writeAtomically`，不经过这里，所以不受影响。
+  if (stem.toLowerCase() === CODEX_ID) throw personaError('persona/protected', 'Codex 人设不可更改。');
   mkdirSync(dir, { recursive: true });
   const existingFile = findFile(dir, stem);
   // Read the file directly, not through `loadPersonas`: that list is the *offered* set, so it drops

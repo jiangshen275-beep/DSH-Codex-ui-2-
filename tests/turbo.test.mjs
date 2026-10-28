@@ -415,7 +415,10 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     };
 
     const empty = await call({ sessionId: 's1', action: 'read' });
-    assert.deepEqual(empty.result, { ok: true, value: { persona: '', lightning: false, ultra: false, superfast: false, tokenMultiple: 1.5, tokenExact: true } });
+    // An unset style answers `none`, not an empty string and not `work`: `none` is a real third choice
+    // ("inject no style template"), and the old silent fold to `work` is what made the settings row look
+    // stuck on 工作 no matter what was picked.
+    assert.deepEqual(empty.result, { ok: true, value: { persona: 'none', lightning: false, ultra: false, superfast: false, tokenMultiple: 1.5, tokenExact: true } });
 
     // The three effort switches are written by this route, into `$DSH_HOME/storages/codex-ui-effort.json`
     // — the same record `dsh-codex-ui-reasoning` writes (src/turbo.js:745-750). The write is a whole-file
@@ -428,14 +431,14 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     assert.equal(armed.result.value.ultra, true);
     // The write reached the shared record, and the read route serves it back.
     const afterUpdate = await call({ sessionId: 's1', action: 'read' });
-    assert.deepEqual(afterUpdate.result.value, { persona: '', lightning: true, ultra: true, superfast: false, tokenMultiple: 1.5, tokenExact: true });
+    assert.deepEqual(afterUpdate.result.value, { persona: 'none', lightning: true, ultra: true, superfast: false, tokenMultiple: 1.5, tokenExact: true });
     assert.equal(existsSync(join(home, 'storages', 'codex-ui-effort.json')), true, 'an accepted update must create the effort record');
 
     // The record has two writers now. The test writes it directly, the way the other plugin does, and the
     // read route has to serve that too — including a rewrite that lands while this process is running.
     writeEffortRecord(home, { s1: { lightning: true, ultra: true } });
     const reread = await call({ sessionId: 's1', action: 'read' });
-    assert.deepEqual(reread.result.value, { persona: '', lightning: true, ultra: true, superfast: false, tokenMultiple: 1.5, tokenExact: true });
+    assert.deepEqual(reread.result.value, { persona: 'none', lightning: true, ultra: true, superfast: false, tokenMultiple: 1.5, tokenExact: true });
     const stored = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-effort.json'), 'utf8'));
     assert.deepEqual(stored.sessions.s1.lightning, true);
 
@@ -445,32 +448,36 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     assert.equal(partial.result.value.lightning, false);
     assert.equal(partial.result.value.ultra, true, 'an unnamed switch must not be reset');
 
-    // The hero arms the persona for the conversation that starts next: an empty id reads
-    // the picker's current value and writes it as pending, without touching session rows.
+    // The hero's "next session" scope reads and writes the pending pick without touching session rows.
     const heroRead = await call({ sessionId: '', action: 'read' });
-    assert.deepEqual(heroRead.result.value, { persona: 'work', lightning: false, ultra: false, superfast: false, pending: true, tokenMultiple: 1.5, tokenExact: true });
+    assert.deepEqual(heroRead.result.value, { persona: 'none', lightning: false, ultra: false, superfast: false, pending: true, tokenMultiple: 1.5, tokenExact: true });
     const heroPick = await call({ sessionId: '', action: 'update', persona: 'chat' });
     assert.equal(heroPick.result.value.persona, 'chat');
-    // Superfast travels the same path: set, read back, and persisted.
     // State writes are queued; await the chain rather than guessing at a delay.
     await turbo.settled();
     const afterPick = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-persona.json'), 'utf8'));
     assert.equal(afterPick.pendingPersona, 'chat');
     assert.ok(afterPick.pendingAt > 0, 'the pick records when it was made');
-    // `s1` never stamped a style, so the persona record holds no row for it — and the pick must not
-    // add one. The switches that test armed earlier live in the effort record, untouched by this write.
+    // The pick is the value every session without a row of its own follows, so it adds no row itself.
     assert.deepEqual(Object.keys(afterPick.sessions), [], 'a pending pick must not add a session row');
     const effortAfterPick = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-effort.json'), 'utf8'));
     assert.deepEqual(Object.keys(effortAfterPick.sessions), ['s1'], 'and the pick does not disturb the effort record');
-    // A session that already existed never receives a later pick.
-    const beforePick = await call({ sessionId: 's1', action: 'read' });
-    assert.equal(beforePick.result.value.persona, '', 'an existing session carries no persona');
-    // A per-session persona write is rejected: the picker only exists before a session.
+    // A session with no row of its own follows the pick — that is what lets a style change reach a
+    // conversation that is already running, which the old "stamp once, never change" rule blocked.
+    const following = await call({ sessionId: 's1', action: 'read' });
+    assert.equal(following.result.value.persona, 'chat', 'a session without its own row follows the last pick');
+    // A per-session write is accepted, and it moves both places: that session's row and the pending pick.
     const perSession = await call({ sessionId: 's1', action: 'update', persona: 'work' });
-    assert.equal(perSession.result.ok, false);
+    assert.equal(perSession.result.ok, true, 'a session may change its style mid-conversation');
+    assert.equal(perSession.result.value.persona, 'work');
+    await turbo.settled();
+    const afterSessionPick = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-persona.json'), 'utf8'));
+    assert.equal(afterSessionPick.sessions.s1.persona, 'work', 'the switch is stamped on the session');
+    assert.equal(afterSessionPick.pendingPersona, 'work', 'and the next conversation inherits the same pick');
+    assert.equal((await call({ sessionId: '', action: 'read' })).result.value.persona, 'work', 'the pending scope reads it back');
 
-    // The injector stamps the persona at a session's own first step, and never touches a
-    // conversation whose first step has already happened.
+    // The injector serves whatever style is in force at the moment a session steps — nothing is
+    // stamped onto a first turn, which is exactly what lets a running conversation change style.
     const personaCtx = fakeCtx();
     registerTurbo(personaCtx);
     const personaCall = async payload => (await personaCtx.routes.find(candidate => candidate.path === TURBO_PATH).fetch(new Request('http://local/api', {
@@ -478,40 +485,42 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
       body: JSON.stringify({ type: 'client-request', rpcId: 'r2', method: TURBO_EVENT, payload }),
     }))).json();
     const step = (id, turn, s = 1) => ({ agent: { id }, turn, step: s, signal: { aborted: false } });
+    // Every message the step produced, joined: the policy travels as one block but the per-turn
+    // reminders are separate messages, so index-based reads are fragile.
+    const textOf = result => result.messages.map(message => (message.content ?? []).map(part => part.text ?? '').join('\n')).join('\n');
+    // Back to "inject nothing" so the first check is about the language block alone.
+    await personaCall({ sessionId: '', action: 'update', persona: 'none' });
 
-    // A running conversation is out of reach for the persona pick — but the language contract
-    // is forced on every session this plugin arms, so that block is what it receives.
+    // `none` injects no style template, but the language contract is forced on every session.
     const running = await personaCtx.fire('agent/pre-step', step('s0', 2));
-    // The language block must arrive; an armed session also carries the per-turn Lightning reminder,
-    // so the count is no longer fixed — find the block by content instead of by index.
-    const texts = running.messages.map(message => message.content?.[0]?.text ?? '');
-    assert.ok(texts.length >= 1, 'the forced language block still arrives');
-    const languageOnly = texts.find(text => text.includes('Language (active)')) ?? '';
+    const languageOnly = textOf(running);
     assert.match(languageOnly, /Language \(active\) — Chinese throughout/);
     assert.match(languageOnly, /Reason in Chinese directly/);
-    assert.doesNotMatch(languageOnly, /Persona \(active\)/, 'no persona may be stamped on a running conversation');
+    assert.doesNotMatch(languageOnly, /Persona \(active\)/, 'none injects no style template');
     assert.doesNotMatch(languageOnly, /Ultra Mode|Lightning Mode/, 'and no switch it never turned on');
+    // A session that never chose a style follows the pending one, still none here.
+    assert.doesNotMatch(textOf(await personaCtx.fire('agent/pre-step', step('s2', 1))), /Persona \(active\)/);
 
-    const stamped = await personaCtx.fire('agent/pre-step', step('s2', 1));
-    const text = stamped.messages[0]?.content?.[0]?.text ?? '';
-    assert.match(text, /Persona \(active\)/);
-    assert.match(text, /talk like a person/);
-    assert.match(text, /Open by naming their state/);
+    // Switching to chat mid-conversation takes effect on the very next step. This is the bug the
+    // settings row had: it could write a pick, and the running conversation never saw it.
+    assert.equal((await personaCall({ sessionId: 's2', action: 'update', persona: 'chat' })).result.ok, true);
+    const chatText = textOf(await personaCtx.fire('agent/pre-step', step('s2', 2)));
+    assert.match(chatText, /Persona \(active\)/);
+    assert.match(chatText, /talk like a person/);
+    assert.match(chatText, /Open by naming their state/);
     // The chat contract must forbid deliverables, capability menus, and stock phrases.
-    assert.match(text, /never list what you can do/);
-    assert.match(text, /Never sell work back/);
-    assert.match(text, /别硬撑/);
-    assert.doesNotMatch(text, /precision work/);
+    assert.match(chatText, /never list what you can do/);
+    assert.match(chatText, /Never sell work back/);
+    assert.match(chatText, /别硬撑/);
+    assert.doesNotMatch(chatText, /precision work/);
 
-    // The stamp is the session's for good: a later pick does not rewrite it.
-    await personaCall({ sessionId: '', action: 'update', persona: 'work' });
-    const again = await personaCtx.fire('agent/pre-step', step('s2', 2));
-    assert.equal(again.messages.length, 0, 'the stamped session keeps its own persona');
-    const stampedRead = await personaCall({ sessionId: 's2', action: 'read' });
-    assert.equal(stampedRead.result.value.persona, 'chat');
-    // A conversation that opens after the new pick gets the new one.
-    const newest = await personaCtx.fire('agent/pre-step', step('s3', 1));
-    assert.match(newest.messages[0]?.content?.[0]?.text ?? '', /precision work/);
+    // And so does switching to work, on that same conversation.
+    await personaCall({ sessionId: 's2', action: 'update', persona: 'work' });
+    const workText = textOf(await personaCtx.fire('agent/pre-step', step('s2', 3)));
+    assert.match(workText, /precision work/);
+    assert.doesNotMatch(workText, /talk like a person/);
+    // A conversation that opens after the switch inherits the same style.
+    assert.match(textOf(await personaCtx.fire('agent/pre-step', step('s3', 1))), /precision work/);
 
     // A disarmed session that had armed text gets the off-notice exactly once.
     const injected = [];
@@ -534,19 +543,19 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     assert.equal(noChange.result.ok, false);
     assert.equal(noChange.result.error.code, 'turbo/invalid', 'a named session that names no owned field is still invalid');
 
-    // Eviction must not cost the user a switch. Lightning stamps a row for every child it fans
-    // out, so a file filled with recent persona-only rows used to push an older armed row out —
-    // the conversation silently lost Ultra/Lightning while its composer went on showing them off.
-    // Armed first, then the fan-out storm, which is the order that actually happens. Both rows go in
-    // through the other plugin's file, because this process cannot arm a session any more — the point
-    // of the test is that a persona write can never evict them.
+    // Eviction must not cost the user a switch. Switch rows and style rows live in two records, so a
+    // file full of style rows used to push an older armed row out of the *old* shared record — the
+    // conversation silently lost Ultra/Lightning while its composer went on showing them off.
+    // Armed first, then the storm, which is the order that actually happens. Both rows go in through
+    // the other plugin's file, because this process cannot arm a session any more — the point of the
+    // test is that a style write can never evict them.
     const effortFile = writeEffortRecord(home, { s1: { lightning: true, ultra: true }, 'session-armed': { lightning: true, ultra: true } });
     const armedEarly = await call({ sessionId: 'session-armed', action: 'read' });
     assert.equal(armedEarly.result.value.lightning, true, 'the read serves the record the other plugin wrote');
     const effortBytes = readFileSync(effortFile, 'utf8');
-    const stepOf = id => ({ agent: { id }, turn: 1, step: 1, signal: { aborted: false } });
-    for (let index = 0; index < 41; index += 1) await ctx.fire('agent/pre-step', stepOf(`child-${index}`));
-    await new Promise(resolve => setTimeout(resolve, 60));
+    // A storm of style switches: each one is a real per-session write, which is what fills the record.
+    for (let index = 0; index < 41; index += 1) await call({ sessionId: `child-${index}`, action: 'update', persona: 'chat' });
+    await turbo.settled();
     // The storm writes persona rows only, so it cannot evict a switch: the effort record holds the
     // two armed sessions and nothing else.
     assert.equal(readFileSync(effortFile, 'utf8'), effortBytes, 'this process never writes the effort record, so a storm cannot even reorder it');
@@ -604,7 +613,9 @@ test('only a delegated child ends with the guard that forbids child fan-out', ()
   // so a parent that received it had its own mandate cancelled by the tail of its own contract.
   assert.doesNotMatch(flat, /Ignore every rule above about fan-out/, 'a parent must not be told to ignore fan-out');
   const child = policyText({ persona: 'work', lightning: true, subagent: true });
-  assert.match(child, /Ignore every rule above about fan-out/, 'a delegated child still needs the guard');
+    // 措辞改成「上面那些是写给父会话的、不适用于你这一轮」：语义同原来那句「忽略上面全部规则」，
+    // 但避开了上游内容审核认的注入模板（中转站见到就 400）。断言跟着钉新表述。
+    assert.match(child, /written for your parent and do not apply to your turn/, 'a delegated child still needs the guard');
 });
 
 test('the turbo endpoint arms and persists the superfast flag on its own', async () => {
@@ -736,10 +747,10 @@ test('a delegated child inherits the switches of the session that spawned it', a
     assert.match(childText, /## Superfast Mode/, 'the child must receive the tree contract it is meant to run');
     assert.match(childText, /Tier: 1 of 2/, 'the tier-aware child note must be the tail');
     assert.doesNotMatch(childText, /Ignore every rule above about fan-out/, 'the fan-out-killing guard must not be the tail');
-    // The switches are inherited; the persona row is not. `personaFor` stamps a pending pick onto the id
-    // it is handed, so a shared scope would let a child claim its parent's row and pin the pick there.
-    const personaRows = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-persona.json'), 'utf8'));
-    assert.equal('session-parent-tree' in (personaRows.sessions ?? {}), false, 'a child must not write its parent persona row');
+    // The switches are inherited; the style is neither inherited nor written here — `personaFor` reads
+    // per session and no longer stamps anything, so a step can not create a persona row at all. The old
+    // write-on-first-turn rule is what let a child sharing its parent's scope claim that row.
+    assert.equal(existsSync(join(home, 'storages', 'codex-ui-persona.json')), false, 'a step must not write a persona row');
     // The parent's switches are what the child is nudged by: the one-shot injection alone was measured to
     // stop steering after a few turns, which is the whole reason the per-turn reminder exists.
     const childNudges = texts(await ctx.fire('agent/pre-step', { ...childStep, turn: 2, step: 1 }))
@@ -773,9 +784,27 @@ test('a delegated child inherits the switches of the session that spawned it', a
     const offChild = texts(await ctx.fire('agent/pre-step', { ...armedChild, turn: 2 })).join('\n');
     assert.doesNotMatch(offChild, /## Superfast Mode/, 'the revoked tree must stop reaching the child too');
     assert.doesNotMatch(offChild, /Tier: 1 of 2/, 'and the tier instruction must go with it');
-    // The session is still armed by its persona, so it keeps the skeleton blocks; what it must not keep
-    // is the tree. `OFF_NOTICE` belongs to a session with every switch off, which this one is not.
+    // The language contract still applies to this session (it is forced on every session); what must not
+    // survive is the tree. `OFF_NOTICE` belongs to a session that had armed text and lost all of it,
+    // which this one never had — its style follows the pending value and no switch was ever on.
   } finally {
     if (previous === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previous;
   }
+});
+
+test('a user-written persona layers under the reply style instead of replacing it', () => {
+  // 有人设时两层都要在提示词里：先一句分工声明，再是风格模板本体。
+  // 旧行为是「有人设就整段让位」，用户选的聊天/工作完全不起作用，症状就是「切了没用」。
+  const layered = policyText({ persona: 'chat', chinese: true, personaDeferential: true });
+  assert.match(layered, /### 人设是底色，回复风格是表达方式/, 'the layered declaration must reach the prompt');
+  assert.match(layered, /Persona \(active\) — talk like a person/, 'and the style template must still be there');
+  assert.ok(layered.indexOf('人设是底色') < layered.indexOf('talk like a person'), 'the declaration leads the template');
+  // 没有人设时不出现那句声明，模板照旧。
+  const plain = policyText({ persona: 'chat', chinese: true });
+  assert.doesNotMatch(plain, /人设是底色/);
+  assert.match(plain, /Persona \(active\) — talk like a person/);
+  // 「无」是不注入任何风格模板，但语言契约仍然照常。
+  const off = policyText({ persona: 'none', chinese: true });
+  assert.doesNotMatch(off, /Persona \(active\)/);
+  assert.match(off, /Language \(active\)/);
 });

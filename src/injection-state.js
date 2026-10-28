@@ -24,7 +24,18 @@ export function getInjection() {
   return injected;
 }
 
-/** True unless the block was explicitly switched off — an absent key means on. */
+/**
+ * 某个注入块是不是开着。
+ *
+ * 缺键即开。「想完再答」过去是唯一例外，实测后翻转：模型不往 reasoning 通道写东西时，
+ * 「边想边写」等于让它把过程打进正文。
+ * 与 `turbo-policy.js` 的 `on()`、`injection-ui.js` 的 `injectionEnabled()` 保持同一条规则。
+ */
+const DEFAULT_OFF = new Set();
+
 export function isBlockOn(id) {
-  return injected[id] !== false;
+  const value = injected[id];
+  if (value === false) return false;
+  if (value === true) return true;
+  return !DEFAULT_OFF.has(id);
 }

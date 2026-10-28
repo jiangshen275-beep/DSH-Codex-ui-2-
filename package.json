@@ -1,6 +1,6 @@
 {
   "name": "dsh-codex-ui",
-  "version": "3.1.0",
+  "version": "4.1.0-preview.1",
   "description": "Codex-style interface and prompt modes for DeepSeek Harness",
   "type": "module",
   "main": "./lib/index.js",
@@ -9,7 +9,9 @@
     "./client": "./lib/client.js",
     "./package.json": "./package.json",
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./locale/*.json": "./locale/*.json"
+    "./locale/*.json": "./locale/*.json",
+    "./permission-review": "./src/permission-review/index.js",
+    "./permission-review/locale/*.json": "./src/permission-review/locale/*.json"
   },
   "files": [
     "lib",
@@ -18,6 +20,7 @@
     "locale",
     "prompts",
     "scripts",
+    "tests",
     "computer-use",
     "cordis.patch.yml",
     "CHANGELOG.md",
@@ -29,7 +32,16 @@
     "SIDEBAR-RAIL-USER.zh.md",
     "THIRD-PARTY-NOTICES.md",
     "RESOURCE-REFERENCE.zh.md",
-    "SYSTEM-PROMPT-PLAN.zh.md"
+    "SYSTEM-PROMPT-PLAN.zh.md",
+    "!**/*.bak*",
+    "PREVIEW.zh.md",
+    "release-manifest.json",
+    "host-compat",
+    "!**/*.broken-*",
+    "!**/*.before-*",
+    "!**/*.log",
+    "!**/*.tmp*",
+    "!**/*~"
   ],
   "scripts": {
     "build": "node scripts/build-reply-forge.mjs && node scripts/build.mjs",

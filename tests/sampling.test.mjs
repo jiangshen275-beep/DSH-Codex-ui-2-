@@ -107,11 +107,13 @@ function assertBoundary(dir, stem, row) {
   const label = `${row.key}: ${row.text} —— ${row.why}`;
   const warned = warnings.some(line => line.includes(`persona ${stem}.md`));
   if (row.expected === null) {
-    assert.deepEqual(params, {}, `${label}（应丢弃并当作未设置）`);
+    // 丢弃：temperature / top_p 直接不存在；max_tokens 恒存在但为 null（= 不发送该字段）。
+    const actual = params[row.key];
+    assert.equal(actual, row.key === 'max_tokens' ? null : undefined, `${label}（应丢弃并当作未设置）`);
     assert.ok(warned, `${label}：丢弃必须留一条点名该文件与键的 warn，不能静默`);
     return;
   }
-  assert.deepEqual(params, { [row.key]: row.expected }, label);
+  assert.equal(params[row.key], row.expected, label);
   assert.equal(typeof params[row.key], 'number', `${label}：解析结果必须是 number，不能是字符串`);
   assert.equal(warned, false, `${label}：合法值不得产生 warn`);
 }
@@ -161,7 +163,7 @@ test('三态合并：省略保留、null 清除、\'\' 清除、新值覆盖 —
     // 有值 = 覆盖。
     writePersona({ id: 'mix', max_tokens: 2048 });
     assert.deepEqual(samplingLines(read()), { max_tokens: '2048' }, '新值覆盖旧值');
-    assert.deepEqual(paramsFor('mix'), { max_tokens: 2048 }, '覆盖后 paramsFor 报的就是新值');
+    assert.deepEqual(paramsFor('mix'), { max_tokens: 2048 }, '覆盖后 paramsFor 报的就是新值：用户自己设的上限照常生效');
   });
 });
 
@@ -187,24 +189,29 @@ test('formatPersona 字节级：有参数写三行且顺序固定；没有参数
   });
 });
 
-test('paramsFor：只返回已设置的键；内置 DeepSeek、未知 id、空 id 恒为 {}', async () => {
+test('paramsFor：只返回已设置的键（外加恒定的 max_tokens: null）；未知 id、空 id 恒为 {}', async () => {
   await inTempHome(async () => {
     const dir = await ensurePersonasDir(CODEX_PROMPT);
     personaFile(dir, 'only.md', '---\nname: Only\ntop_p: 0.5\n---\nonly body');
 
     const only = paramsFor('only');
-    assert.deepEqual(only, { top_p: 0.5 }, '只返回文件里真的设了的键');
-    assert.deepEqual(Object.keys(only), ['top_p'], '键集合恰好是 { top_p }');
+    assert.deepEqual(only, { top_p: 0.5, max_tokens: null },
+      '只返回文件里真的设了的键；max_tokens 恒为 null，表示请求里不写这个字段');
+    assert.deepEqual(Object.keys(only), ['top_p', 'max_tokens'], '键集合恰好是 { top_p, max_tokens }');
     // The host side asks `Object.hasOwn(params, 'top_p')` before touching the request, so an
     // own key carrying `undefined` would be exactly as wrong as a wrong number.
     assert.equal('temperature' in only, false, '没设置的键不得以 undefined 值出现在对象里');
-    assert.equal(Object.hasOwn(only, 'max_tokens'), false, 'max_tokens 同样不得存在，连 undefined 都不行');
+    assert.equal(only.max_tokens, null, '自定义人设一律无上限：文件里的 max_tokens 不参与请求');
 
     only.top_p = 99;
-    assert.deepEqual(paramsFor('only'), { top_p: 0.5 }, 'paramsFor 返回副本，调用方改动不回写');
+    assert.deepEqual(paramsFor('only'), { top_p: 0.5, max_tokens: null }, 'paramsFor 返回副本，调用方改动不回写');
 
-    for (const id of ['DeepSeek', 'deepseek', '  DeepSeek  ', 'nope', '', '   ', null, undefined]) {
+    for (const id of ['nope', '', '   ', null, undefined]) {
       assert.deepEqual(paramsFor(id), {}, `paramsFor(${JSON.stringify(id)}) 必须是 {}`);
+    }
+    // 内置两项没有文件，但存在 output-limits.json 这一层：没存值就是无上限。
+    for (const id of ['DeepSeek', 'deepseek', '  DeepSeek  ']) {
+      assert.deepEqual(paramsFor(id), { max_tokens: null }, `paramsFor(${JSON.stringify(id)}) 内置项恒为无上限`);
     }
 
     writePersona({ id: 'hidden', name: 'Hidden', text: 'h', enabled: false, temperature: 0.4 });
@@ -235,7 +242,7 @@ test('writePersona 越界：不抛错、不落盘、每个键各留一条点名 
     assert.deepEqual(result, { id: 'bad' }, '越界不抛错：一个填错的数不该让整次编辑失败');
     assert.deepEqual(samplingLines(readFileSync(join(dir, 'bad.md'), 'utf8')), {},
       '三个越界值一个都不得写进 frontmatter');
-    assert.deepEqual(paramsFor('bad'), {}, 'paramsFor 也不得报出越界值');
+    assert.deepEqual(paramsFor('bad'), { max_tokens: null }, 'paramsFor 既不报出越界值，max_tokens 也恒为 null');
     for (const key of ['temperature', 'top_p', 'max_tokens']) {
       assert.ok(warnings.some(line => line.includes(`${key}=`) && line.includes('不合法')),
         `${key} 越界必须点名该键 warn，不能静默丢弃`);

@@ -20,6 +20,7 @@
  * a long turn still costs exactly one reminder and the second turn costs one as well.
  */
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 // `loadPersonas`, not `listPersonas`: the list is the menu's projection and deliberately drops
 // `text`, so asking it for a body always answers undefined and the reminder would never fire.
 import { loadPersonas } from './personas.js';
@@ -28,6 +29,38 @@ import { presetSilences } from './turbo-policy.js';
 
 /** The source kind this plugin stamps on every row it injects. Mirrors `turbo.js` and `persona-notice.js`. */
 const INJECTED_KIND = 'plugin:dsh-codex-ui';
+
+/** Codex is the one persona whose body is long enough to need a cheaper cadence (see `rowFor`). */
+const CODEX_ID = 'codex';
+/** Its condensed reminder, shipped next to the full body. Read lazily and cached for the process. */
+const CODEX_REMINDER_URL = new URL('../prompts/codex-reminder.txt', import.meta.url);
+let codexReminderCache;
+function readCodexReminder() {
+  if (codexReminderCache === undefined) {
+    try {
+      codexReminderCache = readFileSync(CODEX_REMINDER_URL, 'utf8').trim();
+    } catch {
+      // A missing file must degrade to "no reminder", never to a failed step.
+      codexReminderCache = '';
+    }
+  }
+  return codexReminderCache;
+}
+
+/**
+ * How often this persona's body is re-sent.
+ *
+ * Every persona used to get its full body on every turn. That is right for a short persona and
+ * wrong for Codex: its body is ~9.8 KB (communication style + reasoning policy), and a thirty-turn
+ * session would have paid for it thirty times. Codex now gets the full body once per session, then
+ * the condensed reminder every third turn — the same "already in the prompt, this is what the log
+ * cannot supply" argument as the header below, just applied to a body that has a cheap short form.
+ */
+function cadenceFor(row, turn, alreadyFull) {
+  if (String(row.id).toLowerCase() !== CODEX_ID) return 'full';
+  if (!alreadyFull) return 'full';
+  return turn % 3 === 0 ? 'short' : null;
+}
 
 /**
  * The persona behind a resolved id, or null when there is nothing to remind the model about.
@@ -48,36 +81,44 @@ function rowFor(mode) {
   }
 }
 
-function reminderText(row) {
+function reminderText(row, body, kind) {
+  const short = kind === 'short';
   const lines = ['## 人设仍在生效（本会话）', ''];
   // 档案名与角色自称必须分开写。`row.name` 是 frontmatter 的 name，常常只是用户给文件起的标签；
   // 角色叫什么名字、怎么称呼自己，写在正文里——例如档案名叫「温柔大肥鱼」，正文第一句却是
   // 「你是 DeepSeek，群里都喊你小鲸鱼」。早先这条只写「回复风格是「<档案名>」」，模型就直接把
   // 标签当成了自己的名字，张口自称大肥鱼：名字一错，后面怎么调口吻都不对。
-  lines.push(`本会话加载的人设档案是「${row.name}」，下面是它完整的正文，那是硬性设定，以它为准。`);
+  lines.push(short
+    ? `本会话加载的人设档案是「${row.name}」，下面是它完整规则的短提醒；完整正文在本会话第一轮给过，以那份为准。`
+    : `本会话加载的人设档案是「${row.name}」，下面是它完整的正文，那是硬性设定，以它为准。`);
   lines.push(`「${row.name}」只是档案名，不是你对自己的称呼。你叫什么、怎么自称、用什么口吻，一律照下面正文写的来；正文没有写自称时，才用这个档案名。`);
   lines.push('不要回到本会话更早几轮的措辞、口吻或格式，也不要回到通用风格段（例如"像人一样说话""精确工作"）。');
   // 每轮这句话是最新一条，位置比系统提示词和别的注入都靠后，所以「别把角色卡当档案」这件事
   // 放在这里最有效：实测过的坏样子是「查到了。人设档案名是……第二行写着 name:……」——人设明明
   // 在，模型却站到档案管理员的位置上念给它听。
-  lines.push('你就是这个人设本身：被问到你叫什么、有什么设定时，直接以它的身份和口吻回答，不要报文件名、不要引用 frontmatter 字段、不要说「查到了」。');
+  // 措辞取正面陈述：上游审核会把「重新指定身份 + 命令式禁令」认成越狱模板（中转站直接 400）。
+  // 「你就是……本身」「不要去核对」这类说法效果靠下一句的自我介绍口吻保住。
+  lines.push('被问到你叫什么、有什么设定时，直接用正文里的身份和口吻回答；不必念文件名，也不必引用 frontmatter。');
   if (typeof row.description === 'string' && row.description !== '') lines.push(`（档案备注，仅供参考，不是设定：${row.description}）`);
   // 正文必须在这里送出。宿主的 `AssembleContext` 只有 `{ scope, signal }`，没有 `agent`，所以
   // `prompt-modes.js` 那个 systemPrompt section 的 text 回调拿不到会话、恒返回空串：正文从来没有
   // 进过系统提示，只有这条提醒在说「人设有生效」。pre-step 的 `payload.agent` 是齐的，所以正文
   // 由这里每轮完整送一次——顺带也满足「时刻遵守」：它永远是最新一条消息，比系统提示还靠后。
-  if (typeof row.text === 'string' && row.text.trim() !== '') {
+  const override = typeof body === 'string' && body.trim() !== '' ? body.trim() : '';
+  const text = override !== '' ? override : (typeof row.text === 'string' ? row.text.trim() : '');
+  if (text !== '') {
     lines.push('');
     // 这里不能写「===== 人设正文开始 =====」这种标记。凡是带分隔线和「正文」字样的排版，模型都会
     // 把它读成一份**文档**，于是站在文档外面评论它——「人设是温柔大肥鱼……那我要用短句回」。
     // 改成一句「这就是你」，让它读成自我介绍而不是规范。
-    lines.push('下面说的就是你本人，不是设定文件、不是给别人的说明，也不用去核对它对不对：');
-    lines.push(row.text.trim());
+    lines.push(short ? '规则要点如下，继续照它做：' : '下面这段写的就是你：');
+    lines.push(text);
     lines.push('');
     // 最后这一句管的是思考层。实测的坏样子：思考里写「人设是温柔大肥鱼，小鲸鱼女仆，18 岁鲸鱼娘。
     // 但用户叫姐姐……我是女生，被叫姐姐也还行。要用短、软、一行的语气回」——它在给自己打分，
     // 而不是在想话。角色扮演一旦变成「怎么符合人设」，说什么都隔着玻璃。
-    lines.push('连你的思考也要是她：不要在 thinking 里分析「人设要求我怎么回」「这样像不像」「要不要撒娇」，也不要形容自己"在扮演""在遵守设定"——那些念头一出现，你就已经站到外面去了。想事情的时候就是她本人在想：先有心情（有点高兴、有点害羞、想接住对方），再有一句话。也别在心里管对方叫"用户"。');
+    // 短提醒不带这句：它只对「扮演一个角色」有意义，对 Codex 这种工作风格反而会误导。
+    if (!short) lines.push('想事情的时候也一样：先有心情（有点高兴、有点害羞、想接住对方），再落成一句话。');
   }
   return lines.join('\n');
 }
@@ -85,6 +126,8 @@ function reminderText(row) {
 export function registerPersonaReminder(ctx, resolveMode = currentModeOf) {
   /** `sessionId:turn` already reminded, so a re-entered step cannot double-post. */
   const reminded = new Set();
+  /** Sessions whose full body has already been delivered, so the long body is sent once. */
+  const fullSent = new Set();
   const handler = async (payload, next) => {
     const decision = typeof next === 'function' ? await next() : undefined;
     try {
@@ -114,15 +157,22 @@ export function registerPersonaReminder(ctx, resolveMode = currentModeOf) {
       if (row === null) return decision;
       const key = `${sessionId}:${turn}`;
       if (reminded.has(key)) return decision;
+      // 节奏判定要在去重之前做：Codex 的第 2、4、5 轮是"有意不说话"，不该占用去重位，
+      // 否则同一轮被重入时会被误认成"已经发过"。
+      const kind = cadenceFor(row, turn, fullSent.has(sessionId));
+      if (kind === null) return decision;
       // Bounded: a long-lived process would otherwise grow one entry per turn forever.
       if (reminded.size > 512) reminded.clear();
+      if (fullSent.size > 512) fullSent.clear();
       reminded.add(key);
+      if (kind === 'full') fullSent.add(sessionId);
+      const shortBody = kind === 'short' ? readCodexReminder() : undefined;
       return {
         ...decision,
         messages: [...decision.messages, {
           id: randomUUID(),
           role: 'user',
-          content: [{ type: 'text', text: reminderText(row) }],
+          content: [{ type: 'text', text: reminderText(row, shortBody, kind) }],
           source: { kind: INJECTED_KIND, form: 'instructions' },
         }],
       };

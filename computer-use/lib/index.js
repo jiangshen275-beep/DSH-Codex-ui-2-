@@ -3,7 +3,9 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -173,6 +175,10 @@ function createControlHud(config) {
       if (markEsc || !existsSync(stopPath)) {
         writeFileSync(stopPath, markEsc ? "esc" : "turn-end", "utf8");
       }
+    } catch {}
+    // 控制结束时把系统光标形状复位。不等结果，也不许它抛错顶掉上面的收尾。
+    try {
+      runPowerShell(config, "restore_cursor", {}, undefined).catch(() => {});
     } catch {}
   }
 
@@ -373,8 +379,10 @@ async function inspect(config, args, signal, hud) {
       handle,
       activate: true,
       screenshotDir: config.screenshotDir,
+      maxWidth: config.screenshotMaxWidth,
+      fullRes: args.fullRes === true || config.screenshotFullRes === true,
     }, signal);
-    text += `\nSHOT\t${shot.path}\t${shot.width}x${shot.height}`;
+    text += `\nSHOT\t${shot.path}\t${shot.shotWidth}x${shot.shotHeight}\twindow=${shot.width}x${shot.height}\tscale=${shot.scale}`;
   }
   return `ACTIVE\t${activated.window.title}\n${text}`;
 }
@@ -403,8 +411,10 @@ async function perform(config, args, signal, hud) {
       handle,
       activate: true,
       screenshotDir: config.screenshotDir,
+      maxWidth: config.screenshotMaxWidth,
+      fullRes: args.fullRes === true || config.screenshotFullRes === true,
     }, signal);
-    return `OK\tscreenshot\t${shot.path}\t${shot.width}x${shot.height}`;
+    return `OK\tscreenshot\t${shot.path}\t${shot.shotWidth}x${shot.shotHeight}\twindow=${shot.width}x${shot.height}\tscale=${shot.scale}`;
   }
   if (args.action === "focus") {
     return formatActionResult(args.action, await runPowerShell(config, "focus", {
@@ -519,7 +529,14 @@ const computerTool = (config, hud) => ({
 
      Paths come from the latest inspect and expire after any UI change: re-inspect after an action that changes
      the screen instead of reusing a stale path. Coordinates are physical pixels relative to the target window's
-     top-left corner, so prefer a node path when one exists and fall back to x/y only when it does not.`,
+     top-left corner, so prefer a node path when one exists and fall back to x/y only when it does not.
+
+     Screenshots default to a JPEG scaled down to 1024px wide - that is the fast path, and it is the one to
+     use for locating clicks. Pass fullRes:true when the job needs pixel accuracy (identifying a typeface,
+     sampling exact colours, comparing two renders); it returns an unscaled lossless PNG instead, and scale
+     comes back as 1. The result reports window=<WxH> and scale=<r>: a position measured on the 1024px image
+     maps back to window coordinates as x/scale, y/scale. Click with the window coordinates, never the image
+     coordinates.`,
   parameters: {
     type: "object",
     properties: {
@@ -544,6 +561,7 @@ const computerTool = (config, hud) => ({
       delta: { type: "integer" },
       interactive: { type: "boolean", description: "Only actionable nodes. compact=true, full=false." },
       screenshot: { type: "boolean", description: "Capture PNG during inspect. Default false." },
+      fullRes: { type: "boolean", description: "Return the screenshot at native window size as a lossless PNG instead of the default 1024px-wide JPEG. Slower to read; use it when the job needs pixel accuracy (identifying a typeface, sampling exact colours, comparing two renders)." },
       visualPointer: { type: "boolean", description: "Move the real system pointer visibly. Default true in full mode." },
       limit: { type: "integer", minimum: 1, maximum: 30 },
       maxDepth: { type: "integer", minimum: 1, maximum: 10 },
@@ -578,12 +596,57 @@ export function apply(ctx, config = {}) {
     hudIdleSeconds: 30,
     hudBackgroundOpacity: 0.42,
     screenshotDir: join(tmpdir(), "dsh-computer-use"),
+    // 截图直接按这个宽度缩放后出 JPEG：模型看图的耗时随像素数涨，
+    // 1603 宽的图比 1024 宽多花一倍多。窗口坐标不变，图上的位置用返回的 scale 换算。
+    screenshotMaxWidth: 1024,
+    // 默认压缩档。要全局切成原版就把这里设成 true；单次覆盖用工具参数 fullRes:true。
+    screenshotFullRes: false,
     ...config,
   };
   const hud = createControlHud(effectiveConfig);
   ctx.on?.("session/event", (_session, event) => {
-    if (event?.type === "turn/end") hud.end(false);
+    if (event?.type === "turn/end") {
+      hud.end(false);
+      pruneScreenshots(effectiveConfig.screenshotDir);
+    }
   }, { global: true });
-  ctx.effect(() => () => hud.end(false));
+  ctx.effect(() => () => {
+    hud.end(false);
+    pruneScreenshots(effectiveConfig.screenshotDir, 0);
+  });
   ctx.effect(() => ctx.tools.register(computerTool(effectiveConfig, hud)));
+}
+
+// 每轮结束清一次截图。留最近几张是因为模型刚读过的那张可能还在同一轮的后续步骤里被引用，
+// 全部删干净只在插件卸载时做。
+const SCREENSHOT_KEEP = 6;
+
+function pruneScreenshots(directory, keep = SCREENSHOT_KEEP) {
+  let entries = [];
+  try {
+    entries = readdirSync(directory);
+  } catch {
+    return 0;
+  }
+  const shots = [];
+  for (const entry of entries) {
+    if (!/\.(png|jpe?g)$/i.test(entry)) continue;
+    const path = join(directory, entry);
+    try {
+      shots.push({ path, mtime: statSync(path).mtimeMs });
+    } catch {
+      // 刚被删掉或正在写入，跳过这一张
+    }
+  }
+  shots.sort((left, right) => right.mtime - left.mtime);
+  let removed = 0;
+  for (const shot of shots.slice(keep)) {
+    try {
+      unlinkSync(shot.path);
+      removed += 1;
+    } catch {
+      // 被占用就留到下一轮
+    }
+  }
+  return removed;
 }

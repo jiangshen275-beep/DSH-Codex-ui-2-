@@ -7,7 +7,28 @@
 // wrong slider position that `node --check` cannot see.
 //
 // Keep this file ASCII-only: it may be rewritten by Windows PowerShell.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
+
+// Browser-scoped background timeouts otherwise escape new Function into Node's global
+// timer queue. Keep real delays (the Ultra notice tests depend on them), then release
+// all pending browser work at suite teardown rather than forcing the process to exit.
+const bundleTimeouts = new Set();
+function bundleSetTimeout(callback, delay, ...args) {
+  const timer = setTimeout(() => {
+    bundleTimeouts.delete(timer);
+    callback(...args);
+  }, delay);
+  bundleTimeouts.add(timer);
+  return timer;
+}
+function bundleClearTimeout(timer) {
+  bundleTimeouts.delete(timer);
+  clearTimeout(timer);
+}
+after(() => {
+  for (const timer of bundleTimeouts) clearTimeout(timer);
+  bundleTimeouts.clear();
+});
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -27,7 +48,8 @@ function makeElement(tag) {
     appendChild(node) { element.children.push(node); },
     remove() {}, focus() {},
     setAttribute(name, value) { element.attributes[name] = value; },
-    getAttribute(name) { return element.attributes[name]; },
+    getAttribute(name) { return element.hasAttribute(name) ? element.attributes[name] : null; },
+    removeAttribute(name) { delete element.attributes[name]; },
     // The bundle reads `data-chatgpt-ui` off <html> before setting it, so the stub has to answer
     // the question rather than only accept the write.
     hasAttribute(name) { return Object.prototype.hasOwnProperty.call(element.attributes, name); },
@@ -62,6 +84,16 @@ function loadBundle(react = createReactShim(), storage = null, windowExtras = nu
     nodeType: 1, documentElement: makeElement('html'), head: makeElement('head'), body: makeElement('body'),
     createElement: makeElement,
     createElementNS: (_namespace, tag) => makeElement(tag),
+    createTreeWalker(root, whatToShow) {
+      const nodes = [];
+      const visit = node => {
+        if (node.nodeType === 3 && (whatToShow & 4)) nodes.push(node);
+        for (const child of node.childNodes ?? node.children ?? []) visit(child);
+      };
+      visit(root);
+      let index = 0;
+      return { nextNode: () => nodes[index++] ?? null };
+    },
     getElementById: () => null,
     addEventListener(type, handler) {
       if (!listeners.has(type)) listeners.set(type, []);
@@ -87,6 +119,9 @@ function loadBundle(react = createReactShim(), storage = null, windowExtras = nu
     // path exercised without owning the process.
     setInterval: () => 0,
     clearInterval: () => {},
+    setTimeout: bundleSetTimeout,
+    clearTimeout: bundleClearTimeout,
+    NodeFilter: { SHOW_TEXT: 4 },
     // lib/client.js:4343 measures the slider shell inside a mount effect, and 2754 subscribes a
     // ResizeObserver to the sidebar's own element — both are bare identifiers under the new-Function
     // runtime, so they must be runtime keys, not window props.
@@ -698,12 +733,13 @@ function byLabel(tree, pattern) {
 // the sidebar — deleting the rail's "更多" menu moved them down, adding `heroMarkOpen` moved them
 // back — which is why every override goes through this table instead of a raw index.
 // 索引 = 该 hook 在 `src/client.js` Sidebar 组件里 `React.useState` 的声明序号（0 起）。
-// 侧栏现在有 53 个 useState，这份表是照着源码数出来的；加/删 hook 时要同步重排。
+// Verified against both src/client.js and the shipped lib/client.js. The balanceLoading
+// state precedes brandMenu; omitting it shifted every scripted sidebar slot by one.
 const SIDEBAR_SLOT = {
-  heroMarkOpen: 14, pinsOpen: 17,
-  taskMenu: 19, renameTarget: 20, renameDraft: 21, renameError: 22, renamePending: 23,
-  recentOpen: 25, archivedOpen: 26, childPanel: 29, subagentOpen: 30, branchOpen: 31, groupShowAll: 32, ghostIds: 35,
-  navigationError: 33, purgedIds: 34, sessionQuery: 36, searchOpen: 37,
+  heroMarkOpen: 16, pinsOpen: 19,
+  taskMenu: 21, renameTarget: 22, renameDraft: 23, renameError: 24, renamePending: 25,
+  recentOpen: 27, archivedOpen: 28, childPanel: 31, subagentOpen: 32, branchOpen: 33, groupShowAll: 34, ghostIds: 37,
+  navigationError: 35, purgedIds: 36, sessionQuery: 38, searchOpen: 39,
 };
 
 function sidebarStates(overrides = {}) {
@@ -756,7 +792,9 @@ function mountSidebar(sessions, options = {}) {
       rpc: {
         call: (path, method, payload) => {
           rpcCalls.push({ path, method, payload });
-          return Promise.resolve(options.purgeResult ?? { ok: true, value: {} });
+          // A purge refusal belongs to the purge route only; unrelated activation
+          // requests (personas, aliases, purged ids) must keep their own defaults.
+          return Promise.resolve((method === 'dsh-codex-ui/purge-session' ? options.purgeResult : undefined) ?? { ok: true, value: {} });
         },
       },
     },

@@ -11,8 +11,8 @@
  *   · 坏文件不能炸宿主。它可能在用户手改之后变成半截 JSON，读的时候容错，写的时候原子替换
  *     （先写 .tmp 再 rename），保证任何时刻磁盘上都是一个完整的文件。
  */
-import { readFileSync, renameSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { readFileSync, renameSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -79,6 +79,54 @@ function launchProgram(path) {
   }
   // 程序自己的窗口要不要出现，由程序决定，所以这里不隐藏。脱钩是为了 DSH 关掉时不连带关它。
   spawn(path, [], { detached: true, stdio: 'ignore' }).unref();
+}
+
+/** 结束当前 DSH 进程，再把它原样拉起来。脚本本身脱钩运行，所以 DSH 被杀不影响它收尾。 */
+function scheduleRelaunch() {
+  if (process.platform !== 'win32') {
+    const error = new Error('快速重启目前只支持 Windows');
+    error.code = 'rail/restart';
+    throw error;
+  }
+  const exe = process.execPath;
+  if (typeof exe !== 'string' || !/\.exe$/i.test(exe) || !existsSync(exe)) {
+    const error = new Error(`拿不到可执行的 DSH 程序路径：${String(exe)}`);
+    error.code = 'rail/restart';
+    throw error;
+  }
+  const image = exe.split(/[\\/]/).pop();
+  // 为什么不是直接 spawn：实测本进程（以及它拉起的 cmd、taskkill）都处在宿主的 job object 里
+  // （IsProcessInJob 返回 True）。taskkill 结束 DSH 主进程时 job 一起关闭，脚本和 taskkill 自己
+  // 也被带走，后面那行 start 永远执行不到——表现就是"只关不开"。explorer.exe 和 wmic 都实测
+  // 拉不起来，只有计划任务行得通：进程由 Task Scheduler 服务创建，不在这个 job 里。
+  // 脚本里也不出现中文，路径一律靠 %~dp0，避免 cmd 按 GBK 读 UTF-8 造成的乱码。
+  const task = 'DshCodexUiRelaunch';
+  const script = [
+    '@echo off',
+    'timeout /t 2 /nobreak >nul',
+    `taskkill /f /im "${image}" >nul 2>&1`,
+    ':wait',
+    'timeout /t 1 /nobreak >nul',
+    `tasklist /fi "IMAGENAME eq ${image}" 2>nul | find /i "${image}" >nul && goto wait`,
+    'cd /d "%~dp0"',
+    `start "" "%~dp0${image}"`,
+    `schtasks /delete /tn "${task}" /f >nul 2>&1`
+  ].join('\r\n');
+  const file = join(dirname(exe), 'dsh-codex-ui-relaunch.cmd');
+  writeFileSync(file, `${script}\r\n`, 'latin1');
+  const created = spawnSync('schtasks', ['/create', '/tn', task, '/tr', `cmd /c "${file}"`, '/sc', 'daily', '/st', '00:00', '/f'], { encoding: 'latin1' });
+  if (created.status !== 0) {
+    const error = new Error(`建不了计划任务：${String(created.stdout ?? created.stderr ?? '').slice(0, 200)}`);
+    error.code = 'rail/restart';
+    throw error;
+  }
+  const started = spawnSync('schtasks', ['/run', '/tn', task], { encoding: 'latin1' });
+  if (started.status !== 0) {
+    const error = new Error(`计划任务没能启动：${String(started.stdout ?? started.stderr ?? '').slice(0, 200)}`);
+    error.code = 'rail/restart';
+    throw error;
+  }
+  return { scheduled: true, exe, script: file, task };
 }
 
 export function assertLaunchableProgram(path) {
@@ -204,27 +252,94 @@ export function normalizeItem(raw) {
   return item;
 }
 
-/** 读文件。不存在 → 空列表；坏 JSON → 抛错，由调用方决定怎么说。 */
-export function readBook(home) {
+/**
+ * 把一条用不了的原始条目整理成错误栏能直接渲染的一行。
+ *
+ * 为什么不直接透传异常：错误栏要说清「哪一条、原本想指向哪儿、为什么不行」三件事。只有一句
+ * 「exec 指向的文件不存在」时，用户还得自己回文件里猜是哪一条，等于没说。
+ */
+function describeBadItem(index, raw, error) {
+  const source = raw !== null && typeof raw === 'object' ? raw : {};
+  const text = key => (typeof source[key] === 'string' ? source[key].trim() : '');
+  const target = [text('panel'), text('section'), text('url'), text('exec')].find(value => value !== '') ?? '';
+  return {
+    index,
+    id: text('id').slice(0, ID_LIMIT),
+    label: text('label').slice(0, LABEL_LIMIT),
+    target: target.slice(0, 200),
+    code: typeof error?.code === 'string' ? error.code : 'rail/invalid',
+    message: String(error?.message ?? error ?? '条目无效'),
+    raw
+  };
+}
+
+/**
+ * 逐条宽容地读一遍配置。
+ *
+ * 这条行为是被一次真实故障逼出来的：只要有一条不合格（exec 指向的程序被卸载、图标名拼错、
+ * url 少了协议），原来的实现就让整份读取抛错，客户端拿不到 items，侧栏上所有自定义按钮
+ * 一起消失——坏的连带好的，用户既看不到按钮，也不知道到底哪一条坏了。
+ *
+ * 现在分两级：条目级的毛病只停用那一条，其余照常返回，坏的那条连同原因进 `bad`；文件级的
+ * 毛病（不是合法 JSON、没有 items 数组）没有条目可救，进 `fileError`，但同样要能显示出来。
+ */
+export function readBookTolerant(home) {
+  const empty = { items: [], bad: [], fileError: null, raw: [] };
   const file = railConfigPath(home);
-  if (file === null) return { version: 1, items: [] };
-  if (!existsSync(file)) return { version: 1, items: [] };
+  if (file === null || !existsSync(file)) return empty;
   const text = readFileSync(file, 'utf8');
-  if (text.trim() === '') return { version: 1, items: [] };
+  if (text.trim() === '') return empty;
   let parsed;
   try { parsed = JSON.parse(text); }
-  catch (error) { throw railError('rail/json', `${RAIL_FILE} 不是合法 JSON：${error.message}`); }
+  catch (error) { return { items: [], bad: [], fileError: railError('rail/json', `${RAIL_FILE} 不是合法 JSON：${error.message}`), raw: [] }; }
   const raw = Array.isArray(parsed) ? parsed : parsed?.items;
-  if (!Array.isArray(raw)) throw railError('rail/json', `${RAIL_FILE} 需要一个 items 数组（直接放数组也可以）。`);
+  if (!Array.isArray(raw)) return { items: [], bad: [], fileError: railError('rail/json', `${RAIL_FILE} 需要一个 items 数组（直接放数组也可以）。`), raw: [] };
   const seen = new Set();
   const items = [];
-  for (const entry of raw) {
-    const item = normalizeItem(entry);
-    if (seen.has(item.id)) throw railError('rail/duplicate', `id ${item.id} 重复了。`);
+  const bad = [];
+  raw.forEach((entry, index) => {
+    let item;
+    try { item = normalizeItem(entry); }
+    catch (error) { bad.push(describeBadItem(index, entry, error)); return; }
+    if (seen.has(item.id)) {
+      // 同 id 的第二条不生效：客户端按 id 建 Map，谁后写谁赢，留着只会随文件顺序抖动。
+      bad.push(describeBadItem(index, entry, railError('rail/duplicate', `id ${item.id} 重复了，这一条不生效。`)));
+      return;
+    }
     seen.add(item.id);
     items.push(item);
+  });
+  return { items, bad, fileError: null, raw };
+}
+
+/**
+ * 严格读：文件有任一毛病就抛错。
+ *
+ * 只在「必须确认磁盘上是干净配置才能继续」的地方用。展示路径一律走 `readBookTolerant`，
+ * 否则又会回到「一条坏条目 → 什么按钮都不显示」的老路上。
+ */
+export function readBook(home) {
+  const scan = readBookTolerant(home);
+  if (scan.fileError !== null) throw scan.fileError;
+  if (scan.bad.length > 0) {
+    const first = scan.bad[0];
+    const where = first.label !== '' ? first.label : first.id !== '' ? first.id : `第 ${first.index + 1} 条`;
+    throw railError(first.code, `${RAIL_FILE} 里有 ${scan.bad.length} 条不能用的条目（${where}：${first.message}）`);
   }
-  return { version: 1, items };
+  return { version: 1, items: scan.items };
+}
+
+/**
+ * 写之前读一次。
+ *
+ * 条目级的坏数据不该挡住写操作：不然一个已经有坏条目的配置，用户既加不进新按钮，也删不掉
+ * 那条坏的，只能去记事本里手改。坏条目的原文原样留在写回结果里，错误栏照旧看得见。
+ * 文件级的坏数据则一律拒绝——那意味着读不出用户原来的东西，覆盖下去就是把他手改的整篇抹掉。
+ */
+function readForWrite(home) {
+  const scan = readBookTolerant(home);
+  if (scan.fileError !== null) throw scan.fileError;
+  return { items: scan.items, keep: scan.bad.map(bad => bad.raw) };
 }
 
 /** 原子写回：先落 .tmp，再 rename 覆盖。中途断电也不会留下半个文件。 */
@@ -239,7 +354,7 @@ export function writeBook(book, home) {
 }
 
 export function listItems(home) {
-  return readBook(home).items;
+  return readBookTolerant(home).items;
 }
 
 /** 当前占用了侧栏格子的条目数（`pinned === true`）。 */
@@ -256,52 +371,75 @@ export function addItem(raw, home) {
     throw railError('rail/icon', `图标 ${wanted} 已经被侧栏内置按钮占了（更多 / 主页 / 用量 / 定时任务 / 插件 / 技能 / 设置），自定义项不能再用——两个一样的图标用户分不清。换一个：${[...ICON_NAMES].filter(name => !RESERVED_ICONS.has(name)).join(' / ')}。`);
   }
   const item = normalizeItem(raw);
-  const book = readBook(home);
-  const at = book.items.findIndex(entry => entry.id === item.id);
+  const scanned = readForWrite(home);
+  const items = scanned.items;
+  const at = items.findIndex(entry => entry.id === item.id);
   if (at >= 0) {
     // 覆盖时不把已经占位的条目挤掉：不写 pinned 就沿用原值。
-    if (item.pinned === undefined) item.pinned = book.items[at].pinned === true;
-    else if (item.pinned === true && countPinned(book.items, item.id) >= MAX_PINNED) {
+    if (item.pinned === undefined) item.pinned = items[at].pinned === true;
+    else if (item.pinned === true && countPinned(items, item.id) >= MAX_PINNED) {
       throw railError('rail/limit', `侧栏最多放 ${MAX_PINNED} 个自定义按钮，先取消一个再换。`);
     }
-    book.items[at] = item;
+    items[at] = item;
   } else {
     // 不写 pinned 就自动占一个空位；位子满了就默认收进弹层，而不是拒绝添加——
     // 「加得进去但暂时不占侧栏」比「加不进去」有用得多。
-    if (item.pinned === undefined) item.pinned = countPinned(book.items) < MAX_PINNED;
-    else if (item.pinned === true && countPinned(book.items) >= MAX_PINNED) {
+    if (item.pinned === undefined) item.pinned = countPinned(items) < MAX_PINNED;
+    else if (item.pinned === true && countPinned(items) >= MAX_PINNED) {
       throw railError('rail/limit', `侧栏最多放 ${MAX_PINNED} 个自定义按钮，先取消一个再换。`);
     }
-    book.items.push(item);
+    items.push(item);
   }
-  return { item, file: writeBook(book, home), items: book.items };
+  // 坏条目的原文接在后面：这次写回不能顺手把它们删掉，用户还在错误栏里看着它们。
+  const file = writeBook({ version: 1, items: [...items, ...scanned.keep] }, home);
+  return { item, file, items };
 }
 
 /** 把某一条放上侧栏（`pinned: true`）或收进弹层（`false`）。 */
 export function setPinned(id, pinned, home) {
   const clean = typeof id === 'string' ? id.trim() : '';
-  const book = readBook(home);
-  const target = book.items.find(entry => entry.id === clean);
+  const scanned = readForWrite(home);
+  const items = scanned.items;
+  const target = items.find(entry => entry.id === clean);
   if (target === undefined) throw railError('rail/not-found', `没有 id 为 ${clean} 的侧栏条目。`);
-  if (pinned === true && countPinned(book.items, clean) >= MAX_PINNED) {
+  if (pinned === true && countPinned(items, clean) >= MAX_PINNED) {
     throw railError('rail/limit', `侧栏最多放 ${MAX_PINNED} 个自定义按钮，先取消一个再换。`);
   }
   target.pinned = pinned === true;
-  return { item: target, items: book.items, file: writeBook(book, home) };
+  const file = writeBook({ version: 1, items: [...items, ...scanned.keep] }, home);
+  return { item: target, items, file };
 }
 
 export function removeItem(id, home) {
   const clean = typeof id === 'string' ? id.trim() : '';
   if (clean === '') throw railError('rail/id', '需要给出要删除的 id。');
-  const book = readBook(home);
-  const next = book.items.filter(entry => entry.id !== clean);
-  if (next.length === book.items.length) throw railError('rail/not-found', `没有 id 为 ${clean} 的侧栏条目。`);
-  return { file: writeBook({ version: 1, items: next }, home), items: next };
+  const scanned = readForWrite(home);
+  const next = scanned.items.filter(entry => entry.id !== clean);
+  if (next.length === scanned.items.length) throw railError('rail/not-found', `没有 id 为 ${clean} 的侧栏条目。`);
+  // 用户点删除点到的是那条健康条目；坏条目不在 items 里，删除这条命令不该顺手清掉它们。
+  const file = writeBook({ version: 1, items: [...next, ...scanned.keep] }, home);
+  return { file, items: next };
 }
 
 /** 客户端拉取用的载荷：只带能渲染的字段。 */
 export function describeItems(home) {
   return listItems(home).map(item => ({ ...item }));
+}
+
+/**
+ * 给界面的完整载荷：能渲染的条目 + 没能采用的条目。
+ *
+ * 两者必须一起发出去。只发 items 的话，客户端看不出「配置文件里还有一条坏的」，错误栏就
+ * 没有内容可显示；只发 errors 的话，一条坏条目还是会让整片侧栏空掉。
+ */
+export function describeRail(home) {
+  const { items, bad, fileError } = readBookTolerant(home);
+  const errors = bad.map(({ index, id, label, target, code, message }) => ({ scope: 'item', index, id, label, target, code, message }));
+  if (fileError !== null) {
+    // 文件级错误排在第一条：整份配置文件都读不出来时，逐条的原因已经无从谈起。
+    errors.unshift({ scope: 'file', index: -1, id: '', label: '', target: '', code: typeof fileError.code === 'string' ? fileError.code : 'rail/json', message: String(fileError.message ?? fileError) });
+  }
+  return { items: items.map(item => ({ ...item })), errors };
 }
 
 /**
@@ -349,6 +487,59 @@ export function readPanels(home = process.env.DSH_HOME) {
 }
 
 /**
+ * 「这一刻还有哪些会话在跑」的落盘文件。
+ *
+ * 为什么不用浏览器 localStorage：桌面版每次重启都会换一个端口，页面 origin 跟着变；
+ * 更要紧的是 `taskkill /f` 强杀进程时，localStorage 里最后几次写入不一定已经刷到磁盘，
+ * 于是「重启后自动接着做」在最需要它的那种重启（硬杀、崩溃、断电）下恰好失效。
+ * 宿主的文件系统没有这两个问题：写下去就是写下去了，换端口也读得回来。
+ */
+function runningPath(home) {
+  return typeof home === 'string' && home !== '' ? join(home, 'codex-ui-running.json') : null;
+}
+
+/**
+ * 客户端心跳调用。
+ *
+ * 空名单也照写不删：删掉之后「心跳到底跑没跑」在文件系统上就没痕迹了，之前查「重启后唤不醒」
+ * 就卡在这里——既可能是心跳没启动，也可能是启动了但判据读成空，两者表现一样。现在留一行
+ * 带 tick 计数的空记录，一眼能分清。`ids` 为空时唤醒逻辑本来就不做事，残留无害。
+ */
+export function saveRunningIds(ids, home = process.env.DSH_HOME, tick = 0) {
+  const file = runningPath(home);
+  const clean = Array.isArray(ids) ? ids.filter(id => typeof id === 'string' && id !== '') : [];
+  if (file === null) return { ids: clean };
+  try {
+    const tmp = `${file}.tmp`;
+    const ticks = typeof tick === 'number' && Number.isFinite(tick) ? tick : 0;
+    writeFileSync(tmp, JSON.stringify({ ids: clean, at: Date.now(), ticks }), 'utf8');
+    renameSync(tmp, file);
+    return { ids: clean, ticks };
+  } catch (error) {
+    const wrapped = new Error(`记不下正在跑的会话：${error?.message ?? String(error)}`);
+    wrapped.code = 'rail/running';
+    throw wrapped;
+  }
+}
+
+/** 读走并存档为「已处理」：唤醒只该发生一次，不要每次启动都重发一遍「继续」。 */
+export function takeRunningIds(home = process.env.DSH_HOME) {
+  const file = runningPath(home);
+  if (file === null || !existsSync(file)) return { ids: [], at: 0 };
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8'));
+    unlinkSync(file);
+    return {
+      ids: Array.isArray(parsed?.ids) ? parsed.ids.filter(id => typeof id === 'string' && id !== '') : [],
+      at: typeof parsed?.at === 'number' ? parsed.at : 0
+    };
+  } catch {
+    try { unlinkSync(file); } catch { /* 坏文件直接丢掉，不值得为它报错 */ }
+    return { ids: [], at: 0 };
+  }
+}
+
+/**
  * RPC 路由。与其它路由同构：client-request 进来，server-response 出去。
  * `action` 三种：list / add / remove。
  */
@@ -372,8 +563,9 @@ export function registerRailRoute(ctx, home = process.env.DSH_HOME) {
       const payload = envelope.payload ?? {};
       const action = typeof payload.action === 'string' ? payload.action : 'list';
       if (action === 'list') {
-        const listed = guard(() => describeItems(home));
-        return respond(envelope.rpcId, listed.ok ? { ok: true, value: { items: listed.value } } : listed);
+        const listed = guard(() => describeRail(home));
+        // errors 与 items 一起发：界面靠 errors 画错误栏，坏条目不再让整片侧栏消失。
+        return respond(envelope.rpcId, listed.ok ? { ok: true, value: { items: listed.value.items, errors: listed.value.errors } } : listed);
       }
       if (action === 'add') {
         const added = guard(() => addItem(payload.item, home));
@@ -415,6 +607,21 @@ export function registerRailRoute(ctx, home = process.env.DSH_HOME) {
           return respond(envelope.rpcId, saved.ok ? { ok: true, value: { panels: saved.value } } : saved);
         }
         return respond(envelope.rpcId, { ok: true, value: readPanels(home) });
+      }
+      if (action === 'runningWrite') {
+        const saved = guard(() => saveRunningIds(payload.ids, home, payload.ticks));
+        return respond(envelope.rpcId, saved.ok ? { ok: true, value: saved.value } : saved);
+      }
+      if (action === 'runningTake') {
+        const taken = guard(() => takeRunningIds(home));
+        return respond(envelope.rpcId, taken.ok ? { ok: true, value: taken.value } : taken);
+      }
+      if (action === 'restart') {
+        // 快速重启：脱钩跑一个脚本，等两秒（界面那边已经把任务停掉、唤醒标记也写好了），
+        // 再结束当前进程并把它重新拉起来。不用 process.exit()：宿主在 web boot 阶段被打断
+        // 会弹「应用无法启动」的框，那正是这次要绕开的东西。
+        const relaunched = guard(() => scheduleRelaunch());
+        return respond(envelope.rpcId, relaunched.ok ? { ok: true, value: relaunched.value } : relaunched);
       }
       return respond(envelope.rpcId, failure('rail/action', `不认识的 action：${action}（可用 list / add / remove）。`));
     }
@@ -472,10 +679,17 @@ export function railTool(home = process.env.DSH_HOME) {
       const action = typeof args?.action === 'string' ? args.action : 'list';
       try {
         if (action === 'list') {
-          const items = describeItems(home);
-          if (items.length === 0) return `OK\tlist\t0 条。侧边栏目前只有内置五项。文件：${railConfigPath(home) ?? '（DSH_HOME 未设置）'}`;
+          const { items, errors } = describeRail(home);
+          const file = railConfigPath(home) ?? '（DSH_HOME 未设置）';
           const lines = items.map(item => `${item.id}\t${item.label}\t${item.panel !== undefined ? `panel=${item.panel}` : item.section !== undefined ? `section=${item.section}` : item.exec !== undefined ? `exec=${item.exec}` : `url=${item.url}`}\t${item.pinned === true ? '侧栏' : '弹层'}`);
-          return `OK\tlist\t${items.length} 条\n${lines.join('\n')}`;
+          // 失效条目也列出来：Agent 接手时最常问的是「我上次加的那条为什么不见了」，
+          // 只报可用条数会让它以为是自己没写进去，然后重复 add 同一条。
+          const badLines = errors.map(error => {
+            const name = error.label !== '' ? error.label : error.id !== '' ? error.id : `第 ${error.index + 1} 条`;
+            return `BAD\t${name}\t${error.target !== '' ? error.target : '（没有目标）'}\t${error.code}\t${error.message}`;
+          });
+          if (items.length === 0 && errors.length === 0) return `OK\tlist\t0 条。侧边栏目前只有内置五项。文件：${file}`;
+          return [`OK\tlist\t${items.length} 条可用${errors.length === 0 ? '' : `、${errors.length} 条失效已停用`}\t${file}`, ...lines, ...badLines].join('\n');
         }
         if (action === 'panels') {
           const { at, panels } = readPanels(home);

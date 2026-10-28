@@ -1,0 +1,5 @@
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';
+const dir=process.argv[2];if(!dir)throw Error('Usage: node apply.mjs <resources/app.asar.unpacked/dsh/node_modules/@deepseek-ai> [--apply]');
+const apply=process.argv.includes('--apply'),sha=s=>crypto.createHash('sha256').update(s).digest('hex'),data=JSON.parse(fs.readFileSync(new URL('./patches.json',import.meta.url),'utf8'));const pending=[];
+for(const p of data.entries){const file=path.resolve(dir,p.path),text=fs.readFileSync(file,'utf8'),h=sha(text);if(h===p.afterSHA256){console.log('Already applied '+p.path);continue}if(h!==p.beforeSHA256)throw Error('Version mismatch, nothing written: '+p.path);const next=text.slice(0,p.start)+p.insert+text.slice(p.start+p.remove);if(sha(next)!==p.afterSHA256)throw Error('Patch integrity failed');pending.push({file,next})}
+for(const p of pending){if(apply){fs.copyFileSync(p.file,p.file+'.bak-codex-preview-'+Date.now());fs.writeFileSync(p.file,p.next)}console.log((apply?'Applied ':'Dry-run OK ')+p.file)}

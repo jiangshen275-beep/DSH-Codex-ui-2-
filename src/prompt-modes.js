@@ -1,5 +1,5 @@
 import { presetSilences, SECTION_MANDATE } from './turbo-policy.js';
-import { BUILTIN_ID, deletePersona, ensurePersonasDir, listPersonas, loadPersonas, readPersonaFile, resolvePersonaId, textFor, writePersona } from './personas.js';
+import { BUILTIN_ID, readPersonaOutputLimit, writePersonaOutputLimit, deletePersona, ensurePersonasDir, listPersonas, loadPersonas, readPersonaFile, resolvePersonaId, textFor, writePersona } from './personas.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -27,7 +27,7 @@ const requestSchema = z.object({ type: z.literal('client-request'), rpcId: z.str
 // feature is shipped separately and a mismatch there would 404 the whole menu.
 const personaRequestSchema = z.object({ type: z.literal('client-request'), rpcId: z.string().min(1).max(256), method: z.string().min(1).max(128).optional(), payload: z.unknown() });
 const personaPayloadSchema = z.object({
-  action: z.enum(['create', 'delete', 'list', 'read', 'update']),
+  action: z.enum(['create', 'delete', 'list', 'read', 'update', 'read-output-limit', 'write-output-limit']),
   id: z.string().min(1).max(128).optional(),
   name: z.string().max(80).optional(),
   description: z.string().max(2000).optional(),
@@ -311,6 +311,11 @@ export async function apply(ctx) {
     const { action, id, name, description, text, temperature, top_p, max_tokens } = parsed.data;
     try {
       if (action === 'list') return { ok: true, value: { personas: listPersonas() } };
+      if (action === 'read-output-limit') return { ok: true, value: { id, max_tokens: readPersonaOutputLimit(id) } };
+      if (action === 'write-output-limit') {
+        if (max_tokens === undefined) return fail('persona/invalid', '缺少输出 Token 上限。');
+        return { ok: true, value: writePersonaOutputLimit(id, max_tokens) };
+      }
       // Editing a persona needs its body, and a persona body can be thousands of characters — far
       // too much to ship inside every `list`. The editor reads the one it is about to open, and it
       // reads it from the file rather than from the list: `resolvePersonaId`/`textFor` answer "what

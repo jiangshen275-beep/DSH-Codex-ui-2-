@@ -40,8 +40,20 @@ export const INJECTION_SECTION_LABEL = '注入块';
  * `switches` 里缺席的 id 一律视为 `true`：宿主只把显式关掉的项写进文件（`value === false` 才留），
  * 所以一份老状态、一个被手删的键、一份坏掉的 JSON 都必须读成"开"，否则文件损坏会静默关掉契约。
  */
+/**
+ * 某个注入块是不是开着。
+ *
+ * 默认全开，含「想完再答」。它过去是唯一例外，实测翻转：模型不往 reasoning 通道写东西时，
+ * 「边想边写」等于让它把过程打进正文。
+ * 这条规则和宿主侧 `policyText` 里的 `on()` 必须一致，否则界面显示「开」而实际没注入。
+ */
+const DEFAULT_OFF = new Set();
+
 export function injectionEnabled(switches, id) {
-  return (switches ?? {})[id] !== false;
+  const value = (switches ?? {})[id];
+  if (value === false) return false;
+  if (value === true) return true;
+  return !DEFAULT_OFF.has(id);
 }
 
 /** 发一次请求，返回宿主解包后的 `result`；`payload` 之外的字段由路由要求补齐在这里。 */

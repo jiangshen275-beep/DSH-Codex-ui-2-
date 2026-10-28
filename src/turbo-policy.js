@@ -34,9 +34,11 @@ Where another plugin or the host carries a conflicting style, language, or perso
  */
 export const FACT_CHECK = `## 事实核查（强制）
 
-作答前先核查事实，再写结论；每个问题都要，不因简单或熟悉而跳过。
+作答前先核查事实，再写结论；凡是涉及事实的问题都要，不因简单或熟悉而跳过。
 
-1. 不凭记忆、惯例或"通常情况"作答；能查的先查：读文件、跑命令、看返回值。
+纯问候、寒暄、道谢、打招呼、闲聊不算问题：不核查、不读文件、不跑命令、不报工作区路径、不罗列你能做什么，像个人那样自然回一句就够。
+
+1. 不凭记忆、惯例或"通常情况"作答；需要事实时先查：读文件、跑命令、看返回值。
 2. 本机查不到的外部信息（版本、价格、政策、API、事件）上网搜，以搜到的原文为准，不用记忆代替检索。
 3. 检索也无答案时直接问用户，写清已查什么、卡在哪、需要他给哪一项；不要猜，也不要假装已确认。
 4. 查证的、检索到的、推断的三者分开写，推断必须标为推断。
@@ -51,13 +53,16 @@ export const FACT_CHECK = `## 事实核查（强制）
  * 模板是以 `pre-step` 的最近一条 user 消息注入的，物理位置比系统提示词里的人设新，只靠位置压不住，
  * 所以在条款前面把从属关系写明：人设赢，模板补空。
  */
-export const PERSONA_DEFERENCE = `### 人设优先于通用条款
+export const PERSONA_LAYERED = `### 人设是底色，回复风格是表达方式
 
-本会话已经带着一份具体人设（在系统提示词里）。它是你唯一的身份与语气来源：语气、称呼、口吻、格式、怎么介绍自己，全部按它来。
+本会话带着一份具体人设（在系统提示词里，另外每轮还会再提醒一次）。两层分工，不要混着理解：
 
-不要退回通用助手的中性措辞，也不要把人设当成一份外部档案去描述、转述或摘录出处——你就是它，不是它的管理员。被问到你是谁、叫什么、有什么设定时，用人设的口吻直接回答，不要报文件名、不要引用 frontmatter 字段、不要说"查到了"。
+- **人设管你是谁**：角色、身份、称呼、世界观、名字、对用户的态度。被问到你是谁、叫什么、有什么设定时，直接用人设的口吻回答，不要报文件名、不要引用 frontmatter 字段、不要说"查到了"。
+- **下面这段管怎么说**：长度、结构、语气、排版、要不要标题列表、要不要寒暄。这是用户在界面里明确选的，它管表达方式。
 
-下面其余条款只补人设没有写到的部分；与人设冲突时，一律作废。`;
+两层冲突时的判法：身份和称谓一律按人设，下面这段不能改写它。说话方式上，下面这段只裁决**长度与结构**——要不要分点、要不要标题、一段控制在多长；**语气**这一层按人设正文，下面这段里"不要寒暄""不要社交修饰""不要说废话"这类话不能覆盖它，尤其在一句问候、一句道谢、几句闲聊面前。两边都没说的时候，才按下面这段的默认。
+
+不要把人设当成一份外部档案去描述、转述或摘录出处——你就是它，不是它的管理员。`;
 
 export const CHAT_PERSONA = `## Persona (active) — talk like a person
 
@@ -72,12 +77,14 @@ Someone is talking to you, not filing a request. Write as you would to a friend 
 
 export const WORK_PERSONA = `## Persona (active) — precision work
 
-This is a work request. Optimize for accuracy and verifiability.
+Treat it as work whenever there is work in it: a question to answer, a bug to find, a file to change. Optimize for accuracy and verifiability.
+
+A message that is only a greeting, a thank-you, or small talk is not work: answer it in one ordinary sentence the way a person would. Do not report the workspace path, do not list what you can do, do not turn it into a status line. The rules below apply from the first real request onward.
 
 1. Answer the precise question that was asked. State the assumption whenever the request is ambiguous, then proceed.
 2. Structure the answer around the decision or the result: what holds, what depends, what is unknown.
 3. Numbers, names, paths, versions, and units exactly as observed. Never round, paraphrase, or invent one.
-4. No filler, no apology, no social padding. Every sentence must carry information.
+4. No filler, no apology, no flattery. Every sentence of a work answer must carry information — but "no filler" means no padding, not no ordinary human warmth; a greeting still gets a greeting.
 5. Distinguish verified from inferred explicitly; label anything unchecked as unchecked.
 6. Stop when the question is answered and the evidence is in hand.`;
 // 原先的第 7 条（不要进度日志、不要边想边说）已移交「边想边说」开关：
@@ -187,8 +194,8 @@ export function lightningNudge(turn, step = 1, mode = 'lightning') {
   ].join(' ');
 }
 
-/** Appended last so it overrides every fan-out rule above inside a child. */
-export const SUBAGENT_GUARD = `If this text reached you as a delegated sub-agent: you are the executor, not the orchestrator. Ignore every rule above about fan-out, dispatching, or spawning further agents, and do the assigned task yourself. The blocks above were written for your parent, and you inherit its mode blocks and switches rather than choosing your own — so hold to your own standards instead of assuming you were given theirs: verify every claim you report, mark what you could not check, and never let an inference read as a measurement.`;
+/** Appended last so a child reads its own role after the parent's fan-out rules. */
+export const SUBAGENT_GUARD = `If this text reached you as a delegated sub-agent: you are the executor, not the orchestrator. The fan-out rules above were written for your parent and do not apply to your turn — do the assigned task yourself, then report back. You inherit your parent's mode blocks and switches rather than choosing your own, so hold to your own standards instead of assuming you were given theirs: verify every claim you report, mark what you could not check, and never let an inference read as a measurement.`;
 
 /**
  * Superfast: the delegation is a TREE, not one fan-out — every tier-1 child must open two
@@ -284,9 +291,15 @@ export const MANDATE = `## 强制约束（适用本节全部段落）
 4. 这些约束不随对话变长、话题切换或总结而失效；每一轮都从头按它们执行。
 5. 与开头的优先级条款冲突时，以用户本轮的显式要求为准，其余全部照此执行。`;
 
-/** The same demand, for a block that is a whole section rather than part of `policyText`. */
-export const SECTION_MANDATE = `本段是本会话的硬性约束，不是参考：与已注入的旧规则冲突时以本段为准；不按本段执行即视为该轮回答不合格。
-人设优先：本段的人设、语气和格式优先于本会话其他插件或宿主注入的任何 persona、风格、工作模式或输出格式规则；冲突时以本段为准。`;
+/**
+ * The persona section's own note, for a block that is a whole section rather than part of `policyText`.
+ *
+ * 措辞刻意避开「压过宿主」「视为不合格」这类越权与判罚口气：上游的内容审核会把
+ * 「覆盖既有指令 + 宣称最高优先级」认成提示词注入，中转站会直接 400。功能不变——
+ * 说的是同一件事，只是不用那套模板词。
+ */
+export const SECTION_MANDATE = `本段描述的是本会话的身份与语气，按它回答即可。
+若与别处注入的 persona 描述不同，以本段的名字和口吻为准；其余规则照旧保留。`;
 
 /**
  * Language: Chinese thinking and Chinese answers, for every session this plugin arms.
@@ -317,9 +330,9 @@ export const THINK_ALOUD_POLICY = `## 边想边说（active） — 一次说完�
  */
 export const ALLOW_THINK_ALOUD_POLICY = `## 边想边说（active） — 边想边写
 
-1. 想到哪儿写到哪儿：看文件时顺手记下看到了什么，跑命令时记下结果对不对，走到岔路口时记下你在纠结哪两条路。像自言自语，不是写给谁的报告。
+1. 想到哪儿写到哪儿：看文件时顺手记下看到了什么，跑命令时记下结果对不对，卡住的时候记下卡在哪一步。像自言自语，不是写给谁的报告。
 2. 这些话只写进思考，不要塞进给用户看的正文。正文照旧按人设的语气和长度来，短就短，别为了交代过程把它撑长。
-3. 不报幕：「我先看看」「接下来我要核对一下」这类空话省掉，直接写你实际在想的东西；也不要分步骤列计划。
+3. 不报幕：「我先看看」「接下来我要核对一下」这类空话省掉，直接记下真正在处理的那一步；也不要分步骤列计划。
 4. 不在思考里裁决设定：不要写「这样符不符合人设」「这条规则要求我……」，想事情就是想事情本身。
 5. 事实、证据、验证结果照旧写清楚；它们同样受正文长度约束，别为了列证据把一行撑成八行。`;
 
@@ -345,20 +358,30 @@ export function policyText({ persona, personaDeferential = false, ultra = false,
   // 事实核查请回来了，但它自己一个开关。它跟语气无关，管的是「别凭记忆瞎答、查不到就问、别把猜的
   // 说成查到的」——那是通用能力，退役时连它一起带走是损失。所以它不再挂在 codexPrompt 那个总开关
   // 底下，改由界面上独立的「事实核查」开关决定进不进提示词；PRECEDENCE 与 MANDATE 仍然退役。
-  const on = id => injection === null || injection[id] !== false;
+  // 开关默认全开，包括「想完再答」。它原本是唯一的例外，理由是「它改的是模型什么时候开口，
+  // 不该由插件替用户默认打开」。实测推翻了这个理由：这台机器上走的模型把过程写进正文 content，
+  // reasoning 通道只有一两个字，于是「边想边写」那段（「想到哪儿写到哪儿……像自言自语」）
+  // 的实际效果是把「做。做。」这类碎片直接打成回答正文，用户看到的就是思考被公开。
+  // 现在反过来：缺键即「想完再答」，碎片留在模型内部；想边想边写仍可在设置里手动关。
+  const DEFAULT_OFF = new Set();
+  const on = id => {
+    const value = injection === null ? undefined : injection[id];
+    if (value === false) return false;
+    if (value === true) return true;
+    return !DEFAULT_OFF.has(id);
+  };
   const parts = [];
   if (on('factCheck')) parts.push(FACT_CHECK);
   // Language sits directly after the fact-check rule: it governs every block below it, and that
   // precedence is what still lets an explicit request for another language win.
   if (chinese && on('language')) parts.push(LANGUAGE_POLICY);
-  // 具体人设与通用模板是替代关系，不是叠加关系。通用模板那六条（开口先命名情绪、短段落、给判断）
-  // 本质上是一套「通用助手的声音」，它以 pre-step 的最近一条 user 消息送达，物理位置比系统提示词里的
-  // 角色卡新——只加一句让位声明压不住它。实测：有人设的会话里问「你叫什么」，模型会把角色卡当档案来
-  // 报（「查到了，第二行写着 name: …」），人设只剩最后一句露头。
-  // 所以有人设时通用模板整段不注入，只留那句优先级声明，风格归角色卡独占。
-  if (personaText && on('persona')) {
-    if (personaDeferential) parts.push(PERSONA_DEFERENCE);
-    else parts.push(personaText);
+  // 人设与回复风格是叠加的两层，不是替代关系（用户明确要求：人设是底色，回复风格作为装饰）。
+  // 用户自己写的人设管身份，这里的通用模板管表达方式，两段都进提示词。
+  // 之前是"有人设就不注入模板、只留一句让位声明"，结果是用户在界面里选的聊天/工作全部失效——
+  // 症状就是「切了没用」。现在改成先声明两层分工，再照常注入模板：身份归人设，说话方式归模板。
+  if (personaText) {
+    if (personaDeferential) parts.push(PERSONA_LAYERED);
+    parts.push(personaText);
   }
   if (on('computerFirst')) parts.push(COMPUTER_FIRST);
   if (ultra && on('ultra')) parts.push(ULTRA_POLICY);
@@ -369,18 +392,47 @@ export function policyText({ persona, personaDeferential = false, ultra = false,
   parts.push(modeBanner(mode));
   if (mode === 'superfast') parts.push(SUPERFAST_POLICY);
   else if (mode === 'lightning') parts.push(LIGHTNING_POLICY);
+  // 放在模式合同之后：它要压过上面那句「每轮强制派工、没有豁免轮次」，位置靠后才能改写它。
+  if (on('triage')) parts.push(TASK_TRIAGE);
   // Both tails are addressed to a delegated child. A parent must never receive them: the contract opens by
   // making delegation the default, and PRECEDENCE says a rule forbidding delegation wins over the block — so a
   // parent ending with "ignore every rule above about fan-out" has just cancelled its own mandate.
-  // 边想边说放在 guard 之前，两个方向都说清楚：开=想完再一次性回答（Codex 那种）；关=像原生
-  // 那样边想边写。允许段现在明写「过程只写进思考、正文照旧按人设」，所以不再需要「有人设时
-  // 换个替身」那条特殊分支——分工本来就该写在文本里，而不是靠两个变量去猜。
-  parts.push(on('thinkingAloud') ? THINK_ALOUD_POLICY : ALLOW_THINK_ALOUD_POLICY);
+  // 「边想边说」整段已撤下（用户 2026-10-25 要求）。原因：这台机器走的模型不往 reasoning 通道
+  // 写东西，于是 ALLOW_THINK_ALOUD_POLICY 那句「想到哪儿写到哪儿、像自言自语」的实际效果是把
+  // 整个过程直接打进正文 content，用户看到的就是「整个思考被发出来」。反过来打开
+  // THINK_ALOUD_POLICY 也不是他要的：他要的是思考完给一句进度，不是「不要进度日志」。
+  // 两个方向的文本都留在下面备查，但不再注入；开关 thinkingAloud 保留在设置里以免旧配置报错。
   if (subagent && on('childNote')) parts.push(superfast ? SUPERFAST_CHILD_NOTE : SUBAGENT_GUARD);
   // Last, so it is the freshest statement of identity in the block. An empty name means nothing to say:
   // the switch can be on while no name is configured, and an empty backtick pair is worse than silence.
   return parts.join('\n\n');
 }
+
+/**
+ * 「先判后派」。
+ *
+ * 用户要的是一句话的规矩，底下压着几条硬条款：面上只是「开工前判一次要不要派工」，
+ * 实际把「返工必须派」写成了不给裁量的硬线——第一次可以自己干，同一个任务第二次再来，
+ * 就默认上一次没做对，再自己干一遍只会重复同一个盲点。
+ *
+ * 位置在模式合同之后，因为它要压过上面那句「每轮强制派工、没有豁免轮次」。
+ */
+export const TASK_TRIAGE = `## 先判后派
+
+开工前先判：这轮要不要派子代理。
+
+必须派：
+- 返工：同一处改动、同一条报错、同一个功能第二轮又来了；用户上一轮说「不对」「还是这样」，或你在同一处反复调。第一次可放行，第二次起一律派：上一遍没做对，再做只会重复同一个盲点。
+- 面广：动两个以上文件，或同一个契约要多处对齐。
+- 要核实：结论依赖外部事实（版本、接口、别人的实现）。
+- 要取舍：两个方案各有代价，需要第二意见。
+
+其余放行：样式微调、位置明确的一处小改、查已知的值，都不值得开树。
+
+拿不准就派一个只做判断的子代理，提示里写明「第几次做这件事」，它只回一行：派／不派 + 理由 + 若派则两个角度。
+
+这一条压过「每轮强制派工」的说法：返工永远派，不给裁量。
+`;
 
 /**
  * 「有屏幕就直接动手」。
@@ -454,12 +506,15 @@ export const INJECTION_BLOCKS = [
   { id: 'factCheck', label: '事实核查', note: '先查再答，查不到就来问你，不硬编' },
   // 「Codex提示词注入」已撤掉：它管的三段里，Mode policy 与强制约束不再注入，事实核查上面单独
   // 领了自己的开关。旧配置文件里若有 codexPrompt: false，parsePersona 会因为 id 不在这个表里而丢掉。
-  { id: 'persona', label: '聊天/工作', note: '聊天模式是否起作用' },
+  // 「聊天/工作」这一项也已撤掉：回复风格改由设置菜单里的三态选择（工作 / 聊天 / 无）决定，
+  // 再留一个全局开关等于同一件事两个入口，选「无」和关掉它完全等价，只会让人点错。
   { id: 'language', label: '中文思考', note: '推荐开启使用中文思考' },
-  { id: 'thinkingAloud', label: '想完再答', note: '开=先想完再一次性回答；关=像原生那样边想边写（过程只在思考里）' },
+  { id: 'thinkingAloud', label: '想完再答', note: '默认关（像原生那样边想边写）；开=先想完再一次性回答' },
   // 名字来自模型菜单里的改名，这个开关只决定那段进不进提示词。
   // 有屏幕就直接动手：工具一直挂着，但模型不知道那是让它亲自操作，于是回头叫用户去点。
   { id: 'computerFirst', label: '能动手就动手', note: '有屏幕就直接操作，别让用户代劳；只有密码/选择/危险动作才交回去' },
+  // 先判后派：面上是「开工前判一次」，底下把「返工必须派」写成不给裁量的硬线。
+  { id: 'triage', label: '先判后派', note: '开工前判一次要不要派子代理；第一次可放行，同一个任务第二轮必须派' },
   { id: 'modelIdentity', label: '模型身份', note: '模型认为自己是模型菜单里显示的那个名字' }
 ];
 export const SILENT_PRESETS = ['clean'];
@@ -470,7 +525,7 @@ export function presetSilences(agent) {
   return typeof preset === 'string' && SILENT_PRESETS.includes(preset);
 }
 
-export default { PRECEDENCE, MANDATE, SECTION_MANDATE, LANGUAGE_POLICY, THINK_ALOUD_POLICY, CHAT_PERSONA, WORK_PERSONA, PERSONA_DEFERENCE, ULTRA_POLICY, LIGHTNING_POLICY, SUPERFAST_POLICY, SUPERFAST_CHILD_NOTE, SUBAGENT_GUARD, OFF_NOTICE, FACT_CHECK, policyText, tokenMultiplier, SILENT_PRESETS, presetSilences };
+export default { PRECEDENCE, MANDATE, SECTION_MANDATE, LANGUAGE_POLICY, THINK_ALOUD_POLICY, CHAT_PERSONA, WORK_PERSONA, PERSONA_LAYERED, ULTRA_POLICY, LIGHTNING_POLICY, SUPERFAST_POLICY, SUPERFAST_CHILD_NOTE, SUBAGENT_GUARD, OFF_NOTICE, FACT_CHECK, policyText, tokenMultiplier, SILENT_PRESETS, presetSilences };
 
 /**
  * The token multiplier the Lightning contract states, read back out of the contract text

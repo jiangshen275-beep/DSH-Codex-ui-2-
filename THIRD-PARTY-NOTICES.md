@@ -14,8 +14,12 @@ The project code is licensed under MIT (see `LICENSE`). **That license covers th
 
 - The upstream project and this fork are **not affiliated with, endorsed by, or sponsored by OpenAI**. "Codex", "OpenAI", and "ChatGPT" are trademarks of OpenAI.
 - If you redistribute this package, publish it, or ship it inside another product, **you are responsible for satisfying yourself that you may redistribute the assets above.** The MIT license of the code is not a license to them.
-- If you need a redistribution-clean build, first disable the font inlining in `scripts/build.mjs` (it reads `assets/fonts/*.woff2` unconditionally and would fail with ENOENT), then remove `assets/codex.png` and `assets/fonts/`, then run `node scripts/build.mjs`, and replace the `@font-face` declarations in `src/style.css` with a system font stack.
+- If you need a redistribution-clean build, first disable the font inlining in `scripts/build.mjs` (font inlining is enabled only by font placeholders in src/style.css), then remove `assets/codex.png` and `assets/fonts/`, then run `node scripts/build.mjs`, and replace the `@font-face` declarations in `src/style.css` with a system font stack.
 - Source details, extraction dates, and hashes are documented in `RESOURCE-REFERENCE.zh.md`.
+
+## Noto Sans SC
+
+- assets/fonts/NotoSC-Regular-dsh.woff2 and NotoSC-SemiBold-dsh.woff2 are subset derivatives of Noto Sans SC (Noto project), distributed under SIL Open Font License 1.1. Their license text is included at assets/fonts/OFL-NotoSansSC.txt.
 
 ## Dependencies
 
@@ -23,3 +27,7 @@ The project code is licensed under MIT (see `LICENSE`). **That license covers th
 - Interoperability with DeepSeek Harness (`@deepseek-ai/dsh`) is by way of its published plugin interfaces; DSH is not bundled here.
 
 Third-party assets are excluded from the MIT license of the code; see above.
+
+## Historical host compatibility patches
+
+`host-compat/patches.json` includes adaptations and replacement fragments from DeepSeek Harness client UI packages, including a substantial tool bundle replacement. These derive from DeepSeek code (MIT, copyright DeepSeek); this project MIT statement does not replace upstream notices. The patches target specific historical hashes and are never applied by package installation. They are not a full DSH distribution.

@@ -1,0 +1,37 @@
+{
+  "name": "dsh-codex-ui",
+  "version": "4.1.0-preview.1",
+  "createdAt": "2026-10-28T16:13:12.035Z",
+  "sourceTag": "v4.1.0-preview.1",
+  "clientSHA256": "92ca5bfd00b64c0f114c51dc6b746a7fa4076bdaf20636a9ed683f76d9529463",
+  "permissionReviewSHA256": "3d72894069133268190e94d45daca15ef2be336780d4ceba0f6ad0f4e8d973be",
+  "embeddedPermissionReview": true,
+  "clientReproducible": true,
+  "hostPatches": "optional historical hash-gated patches; never applied by installation; app.asar is not included or changed",
+  "verification": {
+    "liveReviewPanel": "12 records, correct directory, no alert on 2026-10-28",
+    "directoryAuditTests": "27 passed on 2026-10-28",
+    "releaseTests": {
+      "main": {
+        "tests": 155,
+        "pass": 154,
+        "fail": 0,
+        "skipped": 1
+      },
+      "replyForge": {
+        "tests": 14,
+        "pass": 14,
+        "fail": 0
+      },
+      "hostIntegration": "Some host-reference integration branches skipped: required host packages unavailable",
+      "clientBundle": {
+        "tests": 45,
+        "pass": 45,
+        "fail": 0
+      },
+      "syntaxCheck": "npm run check passed"
+    }
+  },
+  "excluded": "profiles, credentials, sessions, audit records, diary data, temporary backups, node_modules",
+  "sourceBuild": "npm ci --ignore-scripts; npm run build; lib/client.js must match clientSHA256"
+}

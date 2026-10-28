@@ -111,6 +111,7 @@ namespace DshComputerUseControlOverlay {
         private IntPtr keyboardHook = IntPtr.Zero;
         private Native.LowLevelKeyboardProc keyboardCallback;
         private int tickCount;
+        private bool cursorApplied;
 
         public OverlayForm(
             string statePath,
@@ -141,6 +142,15 @@ namespace DshComputerUseControlOverlay {
             TransparencyKey = Color.Magenta;
             DoubleBuffered = true;
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
+            // host 重启时 HUD 可能被强杀，OnFormClosing 不会执行，系统光标会一直是 DSH 画的箭头。
+            // 只有磁盘上还留着 DSH 自己写的 cursorlock，才说明那支箭头是我们改的；
+            // 游戏、网页自己设的窗口级光标没有这个文件，不会被这里碰到。
+            try {
+                if (File.Exists(statePath + ".cursorlock")) {
+                    Native.SystemParametersInfo(Native.SPI_SETCURSORS, 0, IntPtr.Zero, Native.SPIF_SENDCHANGE);
+                    File.Delete(statePath + ".cursorlock");
+                }
+            } catch {}
             if (backgroundLayer) {
                 SetCustomCursor();
                 timer = new Timer();
@@ -207,11 +217,14 @@ namespace DshComputerUseControlOverlay {
                 Native.UnhookWindowsHookEx(keyboardHook);
                 keyboardHook = IntPtr.Zero;
             }
-            if (backgroundLayer) {
-                // 只有最后一个实例退出才恢复系统光标，否则会把新实例设好的光标顶掉。
-                if (!OtherInstanceActive()) {
-                    Native.SystemParametersInfo(Native.SPI_SETCURSORS, 0, IntPtr.Zero, Native.SPIF_SENDCHANGE);
-                }
+            // 只要本实例设过光标，或磁盘上还有 DSH 的 cursorlock，就把系统光标恢复回来。
+            // 系统光标是全局资源，不恢复的话 DSH 一退出，箭头就一直停在黑底白边上。
+            // 没被 DSH 碰过的光标没有 lock，不会被这里覆盖。
+            bool ownsCursor = cursorApplied;
+            try { ownsCursor = ownsCursor || File.Exists(statePath + ".cursorlock"); } catch {}
+            if (ownsCursor && !OtherInstanceActive()) {
+                Native.SystemParametersInfo(Native.SPI_SETCURSORS, 0, IntPtr.Zero, Native.SPIF_SENDCHANGE);
+                try { File.Delete(statePath + ".cursorlock"); } catch {}
             }
             base.OnFormClosing(e);
         }
@@ -346,6 +359,10 @@ namespace DshComputerUseControlOverlay {
                     bool applied = false;
                     if (copy != IntPtr.Zero) {
                         applied = Native.SetSystemCursor(copy, Native.OCR_NORMAL);
+                        if (applied) {
+                            cursorApplied = true;
+                            try { File.WriteAllText(statePath + ".cursorlock", DateTime.UtcNow.ToString("o")); } catch {}
+                        }
                         // 成功时系统接管该句柄，失败时仍归我们销毁。
                         if (!applied) Native.DestroyIcon(copy);
                     }

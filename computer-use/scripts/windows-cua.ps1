@@ -1,6 +1,6 @@
 ﻿param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("list_windows", "activate", "snapshot", "screenshot", "focus", "set_value", "click", "type", "key", "open_url", "scroll", "drag", "move", "self_test")]
+    [ValidateSet("list_windows", "activate", "snapshot", "screenshot", "focus", "set_value", "click", "type", "key", "open_url", "scroll", "drag", "move", "restore_cursor", "self_test")]
     [string]$Action,
 
     [string]$Payload = "e30="
@@ -115,6 +115,9 @@ namespace DshComputerUse {
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern uint SendInput(uint inputCount, INPUT[] inputs, int inputSize);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
 
         [DllImport("user32.dll")]
         public static extern bool SetProcessDPIAware();
@@ -773,9 +776,69 @@ function Capture-Ui($InputObject) {
             $bitmap.Size,
             [System.Drawing.CopyPixelOperation]::SourceCopy
         )
-        $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
     } finally {
         $graphics.Dispose()
+    }
+
+    # 两档。默认压缩档：按 maxWidth 缩一档再出 JPEG，模型读图的耗时随像素数涨，
+    # 1600 宽的图比 1024 宽多花一倍多。fullRes=true 是原版档：不缩放、出无损 PNG，
+    # 给逐像素的活（认字体、取色值、比两张渲染）用。
+    # 两档都不改窗口坐标；压缩档的图上位置要除返回的 scale 才换算回窗口坐标。
+    $fullRes = $false
+    if ($null -ne $InputObject.fullRes) { $fullRes = [bool]$InputObject.fullRes }
+    $maxWidth = 0
+    if ($null -ne $InputObject.maxWidth) { $maxWidth = [int]$InputObject.maxWidth }
+    if ($maxWidth -le 0) { $maxWidth = 1024 }
+    $scale = 1.0
+    if (-not $fullRes -and $bounds.width -gt $maxWidth) { $scale = [double]$maxWidth / [double]$bounds.width }
+
+    $outBitmap = $bitmap
+    $scaled = $false
+    if ($scale -lt 1.0) {
+        $targetWidth = [int][Math]::Round([double]$bounds.width * $scale)
+        $targetHeight = [int][Math]::Round([double]$bounds.height * $scale)
+        $outBitmap = [System.Drawing.Bitmap]::new(
+            $targetWidth,
+            $targetHeight,
+            [System.Drawing.Imaging.PixelFormat]::Format24bppRgb
+        )
+        $scaler = [System.Drawing.Graphics]::FromImage($outBitmap)
+        try {
+            $scaler.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $scaler.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+            $scaler.DrawImage($bitmap, 0, 0, $targetWidth, $targetHeight)
+        } finally {
+            $scaler.Dispose()
+        }
+        $scaled = $true
+    }
+
+    if ($fullRes) {
+        if ($path -notmatch '\.png$') { $path = [IO.Path]::ChangeExtension($path, '.png') }
+    } elseif ($path -notmatch '\.jpe?g$') {
+        $path = [IO.Path]::ChangeExtension($path, '.jpg')
+    }
+    $jpegCodec = $null
+    foreach ($codec in [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders()) {
+        if ($codec.MimeType -eq 'image/jpeg') { $jpegCodec = $codec; break }
+    }
+    $shotWidth = $outBitmap.Width
+    $shotHeight = $outBitmap.Height
+    $encoderParams = [System.Drawing.Imaging.EncoderParameters]::new(1)
+    $encoderParams.Param[0] = [System.Drawing.Imaging.EncoderParameter]::new(
+        [System.Drawing.Imaging.Encoder]::Quality, [long]86
+    )
+    try {
+        if ($fullRes) {
+            $outBitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+        } elseif ($null -ne $jpegCodec) {
+            $outBitmap.Save($path, $jpegCodec, $encoderParams)
+        } else {
+            $outBitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+        }
+    } finally {
+        $encoderParams.Dispose()
+        if ($scaled) { $outBitmap.Dispose() }
         $bitmap.Dispose()
     }
 
@@ -786,6 +849,10 @@ function Capture-Ui($InputObject) {
         path = [IO.Path]::GetFullPath($path)
         width = $bounds.width
         height = $bounds.height
+        shotWidth = $shotWidth
+        shotHeight = $shotHeight
+        scale = [Math]::Round($scale, 4)
+        fullRes = $fullRes
         bounds = $bounds
     }
 }
@@ -917,6 +984,13 @@ function Drag-Ui($InputObject) {
     }
 }
 
+function Restore-SystemCursor {
+    # 重载系统光标方案：把被别的程序改过的光标句柄恢复成当前方案的默认样子。
+    # 只动形状，不动位置，也不改用户的方案选择。
+    $ok = [DshComputerUse.Native]::SystemParametersInfo(0x0057, 0, [IntPtr]::Zero, 0x02)
+    return [pscustomobject]@{ ok = [bool]$ok; restored = [bool]$ok }
+}
+
 function Invoke-SelfTest {
     $fakeElement = [pscustomobject]@{
         Current = [pscustomobject]@{
@@ -954,6 +1028,7 @@ try {
         "scroll" { Scroll-Ui $inputObject }
         "drag" { Drag-Ui $inputObject }
         "move" { Move-Ui $inputObject }
+        "restore_cursor" { Restore-SystemCursor }
         "self_test" { Invoke-SelfTest }
     }
     $result | ConvertTo-Json -Depth 20 -Compress
