@@ -12,7 +12,7 @@
  *     （先写 .tmp 再 rename），保证任何时刻磁盘上都是一个完整的文件。
  */
 import { readFileSync, renameSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -82,53 +82,6 @@ function launchProgram(path) {
 }
 
 /** 结束当前 DSH 进程，再把它原样拉起来。脚本本身脱钩运行，所以 DSH 被杀不影响它收尾。 */
-function scheduleRelaunch() {
-  if (process.platform !== 'win32') {
-    const error = new Error('快速重启目前只支持 Windows');
-    error.code = 'rail/restart';
-    throw error;
-  }
-  const exe = process.execPath;
-  if (typeof exe !== 'string' || !/\.exe$/i.test(exe) || !existsSync(exe)) {
-    const error = new Error(`拿不到可执行的 DSH 程序路径：${String(exe)}`);
-    error.code = 'rail/restart';
-    throw error;
-  }
-  const image = exe.split(/[\\/]/).pop();
-  // 为什么不是直接 spawn：实测本进程（以及它拉起的 cmd、taskkill）都处在宿主的 job object 里
-  // （IsProcessInJob 返回 True）。taskkill 结束 DSH 主进程时 job 一起关闭，脚本和 taskkill 自己
-  // 也被带走，后面那行 start 永远执行不到——表现就是"只关不开"。explorer.exe 和 wmic 都实测
-  // 拉不起来，只有计划任务行得通：进程由 Task Scheduler 服务创建，不在这个 job 里。
-  // 脚本里也不出现中文，路径一律靠 %~dp0，避免 cmd 按 GBK 读 UTF-8 造成的乱码。
-  const task = 'DshCodexUiRelaunch';
-  const script = [
-    '@echo off',
-    'timeout /t 2 /nobreak >nul',
-    `taskkill /f /im "${image}" >nul 2>&1`,
-    ':wait',
-    'timeout /t 1 /nobreak >nul',
-    `tasklist /fi "IMAGENAME eq ${image}" 2>nul | find /i "${image}" >nul && goto wait`,
-    'cd /d "%~dp0"',
-    `start "" "%~dp0${image}"`,
-    `schtasks /delete /tn "${task}" /f >nul 2>&1`
-  ].join('\r\n');
-  const file = join(dirname(exe), 'dsh-codex-ui-relaunch.cmd');
-  writeFileSync(file, `${script}\r\n`, 'latin1');
-  const created = spawnSync('schtasks', ['/create', '/tn', task, '/tr', `cmd /c "${file}"`, '/sc', 'daily', '/st', '00:00', '/f'], { encoding: 'latin1' });
-  if (created.status !== 0) {
-    const error = new Error(`建不了计划任务：${String(created.stdout ?? created.stderr ?? '').slice(0, 200)}`);
-    error.code = 'rail/restart';
-    throw error;
-  }
-  const started = spawnSync('schtasks', ['/run', '/tn', task], { encoding: 'latin1' });
-  if (started.status !== 0) {
-    const error = new Error(`计划任务没能启动：${String(started.stdout ?? started.stderr ?? '').slice(0, 200)}`);
-    error.code = 'rail/restart';
-    throw error;
-  }
-  return { scheduled: true, exe, script: file, task };
-}
-
 export function assertLaunchableProgram(path) {
   const text = typeof path === 'string' ? path.trim() : '';
   const ext = (text.match(/\.[^\\/]+$/) ?? [''])[0].toLowerCase();
@@ -487,59 +440,6 @@ export function readPanels(home = process.env.DSH_HOME) {
 }
 
 /**
- * 「这一刻还有哪些会话在跑」的落盘文件。
- *
- * 为什么不用浏览器 localStorage：桌面版每次重启都会换一个端口，页面 origin 跟着变；
- * 更要紧的是 `taskkill /f` 强杀进程时，localStorage 里最后几次写入不一定已经刷到磁盘，
- * 于是「重启后自动接着做」在最需要它的那种重启（硬杀、崩溃、断电）下恰好失效。
- * 宿主的文件系统没有这两个问题：写下去就是写下去了，换端口也读得回来。
- */
-function runningPath(home) {
-  return typeof home === 'string' && home !== '' ? join(home, 'codex-ui-running.json') : null;
-}
-
-/**
- * 客户端心跳调用。
- *
- * 空名单也照写不删：删掉之后「心跳到底跑没跑」在文件系统上就没痕迹了，之前查「重启后唤不醒」
- * 就卡在这里——既可能是心跳没启动，也可能是启动了但判据读成空，两者表现一样。现在留一行
- * 带 tick 计数的空记录，一眼能分清。`ids` 为空时唤醒逻辑本来就不做事，残留无害。
- */
-export function saveRunningIds(ids, home = process.env.DSH_HOME, tick = 0) {
-  const file = runningPath(home);
-  const clean = Array.isArray(ids) ? ids.filter(id => typeof id === 'string' && id !== '') : [];
-  if (file === null) return { ids: clean };
-  try {
-    const tmp = `${file}.tmp`;
-    const ticks = typeof tick === 'number' && Number.isFinite(tick) ? tick : 0;
-    writeFileSync(tmp, JSON.stringify({ ids: clean, at: Date.now(), ticks }), 'utf8');
-    renameSync(tmp, file);
-    return { ids: clean, ticks };
-  } catch (error) {
-    const wrapped = new Error(`记不下正在跑的会话：${error?.message ?? String(error)}`);
-    wrapped.code = 'rail/running';
-    throw wrapped;
-  }
-}
-
-/** 读走并存档为「已处理」：唤醒只该发生一次，不要每次启动都重发一遍「继续」。 */
-export function takeRunningIds(home = process.env.DSH_HOME) {
-  const file = runningPath(home);
-  if (file === null || !existsSync(file)) return { ids: [], at: 0 };
-  try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8'));
-    unlinkSync(file);
-    return {
-      ids: Array.isArray(parsed?.ids) ? parsed.ids.filter(id => typeof id === 'string' && id !== '') : [],
-      at: typeof parsed?.at === 'number' ? parsed.at : 0
-    };
-  } catch {
-    try { unlinkSync(file); } catch { /* 坏文件直接丢掉，不值得为它报错 */ }
-    return { ids: [], at: 0 };
-  }
-}
-
-/**
  * RPC 路由。与其它路由同构：client-request 进来，server-response 出去。
  * `action` 三种：list / add / remove。
  */
@@ -607,21 +507,6 @@ export function registerRailRoute(ctx, home = process.env.DSH_HOME) {
           return respond(envelope.rpcId, saved.ok ? { ok: true, value: { panels: saved.value } } : saved);
         }
         return respond(envelope.rpcId, { ok: true, value: readPanels(home) });
-      }
-      if (action === 'runningWrite') {
-        const saved = guard(() => saveRunningIds(payload.ids, home, payload.ticks));
-        return respond(envelope.rpcId, saved.ok ? { ok: true, value: saved.value } : saved);
-      }
-      if (action === 'runningTake') {
-        const taken = guard(() => takeRunningIds(home));
-        return respond(envelope.rpcId, taken.ok ? { ok: true, value: taken.value } : taken);
-      }
-      if (action === 'restart') {
-        // 快速重启：脱钩跑一个脚本，等两秒（界面那边已经把任务停掉、唤醒标记也写好了），
-        // 再结束当前进程并把它重新拉起来。不用 process.exit()：宿主在 web boot 阶段被打断
-        // 会弹「应用无法启动」的框，那正是这次要绕开的东西。
-        const relaunched = guard(() => scheduleRelaunch());
-        return respond(envelope.rpcId, relaunched.ok ? { ok: true, value: relaunched.value } : relaunched);
       }
       return respond(envelope.rpcId, failure('rail/action', `不认识的 action：${action}（可用 list / add / remove）。`));
     }

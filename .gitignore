@@ -31,3 +31,8 @@ dsh-codex-ui-cover-v3-16x9.png
 备份/
 HANDOVER-*.md
 *.before-queue-remap
+
+# 本地工作目录：打包产物、封面包、内部归档
+_local_fixes/
+_private/
+_release_archive/

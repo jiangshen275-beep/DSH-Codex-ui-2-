@@ -1,5 +1,29 @@
 import React from 'react';
 const h = React.createElement;
+// ---- Flash wake presentation: retain native renderers for every other source. ----
+function isFlashWakeNode(node) {
+  const source = node?.data?.source;
+  return source?.kind === 'plugin:dsh-codex-ui:flash-wake' && source.form === 'instructions';
+}
+
+function registerFlashWakeFilters(ctx, mountSlot) {
+  for (const key of ['turn-trigger', 'context']) {
+    mountSlot('conversation.chat.node', () => {
+      const native = ctx.slots.entries?.('conversation.chat.node')?.find(entry => entry.options?.key === key);
+      if (!native?.component) return undefined;
+      function FlashWakeFilteredNode(props) {
+        // Use an element, not a direct component call: the native context view is React.memo.
+        return isFlashWakeNode(props.node) ? null : h(native.component, props);
+      }
+      return ctx.slots.register({
+        ...native.options, name: 'conversation.chat.node', key,
+        priority: Math.min(-10, (native.options.priority ?? 0) - 10),
+        inject: native.inject, store: native.store, locale: native.locale
+      }, FlashWakeFilteredNode);
+    });
+  }
+}
+// ---- End flash wake presentation. ----
 // New-session hero copy. The native headline and brand mark come from the `conversation`
 // locale dictionary and the client UI primitives, which a plugin must not replace, so the
 // hero is re-rendered here: a DeepSeek mark in the brand-mark slot and one title element
@@ -622,288 +646,6 @@ function openExternal(url) {
  * means the document is stale, never that the new sheet should be skipped.
  */
 // ── 停止运行中的会话 + 刷新 ────────────────────────────────────────────────
-// 桌面版在任务跑着的时候直接重载界面，会话会卡死、只能重启宿主。所以刷新前先把正在跑的
-// 会话 cancel 掉：Host 侧收尾完，界面重新连上来时没有半截的 run 在等它。
-// cancel 是「中止」不是「暂停」：被停掉的那一轮不会在刷新后接着跑。
-// 桌面版在任务跑着的时候直接重载界面，加载器会判定 dsh-codex-ui 没激活，
-// 弹出「应用无法启动」的框，只能重启。所以刷新必须先把正在跑的轮次停掉，
-// 停稳了再重载；被停掉的会话记进 localStorage，页面回来之后再发一条「继续」，
-// 让它们接着做完。
-// 客户端没有 resume 这种接口（ISession 里只有 cancel），所以「唤醒」实际是
-// 重新发一条续跑指令，不是把原来那一轮接着跑。
-const UI_STOP_SETTLE_MS = 900;
-const UI_RELOAD_WAIT_MS = 6000;
-const UI_RESUME_KEY = 'dsh-codex-ui/resume-after-reload';
-const UI_RESUME_MAX_AGE_MS = 10 * 60 * 1000;
-const UI_RESUME_TEXT = '继续（刚才刷新界面把这一轮打断了，请从上次中断的地方接着做，已经完成的操作不要再重复）';
-// 「上次是带着活被打断的」这项判定靠心跳落盘，而不是靠点按钮那一刻临时写：
-// 硬重启（taskkill、崩溃、断电）根本不给客户端写清单的机会，只有提前记下来才追得回来。
-const UI_WATCH_KEY = 'dsh-codex-ui/running-watch';
-const UI_WATCH_TICK_MS = 2000;
-// 状态没变也隔一会儿重报一次：服务端那份记录带时间戳，重启后要靠它判断这条记录新不新鲜。
-const UI_WATCH_REPORT_MS = 5000;
-// 心跳起步的延迟，以及取残留记录的等待上限。
-// 两者必须配对：取记录要等 RPC 回来，而心跳第一拍会把「没有活」写下去、把要唤醒的名单抹掉。
-// 所以唤醒读在后面、心跳起在前面一点（4s > 3s），既不会互相踩，也不会因为 RPC 卡住就再也不发心跳。
-const UI_WATCH_START_DELAY_MS = 4000;
-const UI_RUNNING_TAKE_TIMEOUT_MS = 3000;
-
-function readResumeList() {
-  try {
-    const raw = window.localStorage?.getItem?.(UI_RESUME_KEY);
-    if (typeof raw !== 'string' || raw === '') return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(item => item && typeof item.id === 'string' && typeof item.at === 'number');
-  } catch (error) {
-    console.warn('[dsh-codex-ui] resume list unreadable:', String(error));
-    return [];
-  }
-}
-
-function writeResumeList(list) {
-  try {
-    if (list.length === 0) window.localStorage?.removeItem?.(UI_RESUME_KEY);
-    else window.localStorage?.setItem?.(UI_RESUME_KEY, JSON.stringify(list));
-  } catch (error) {
-    console.warn('[dsh-codex-ui] resume list unwritable:', String(error));
-  }
-}
-
-/**
- * 正在跑哪些会话，每两秒照一次盘。
- *
- * 为什么不只在点重启按钮时记：那条路只覆盖「用户主动点按钮」。宿主被 taskkill、崩溃、断电时
- * 客户端没有任何执行机会，清单永远是空的，重启后就只能干等用户手打一句「继续」。
- * 心跳写的是同一份事实，但写在事发之前，所以任何形态的中断都追得回来。
- *
- * 正常退出的情形不会误唤醒：会话跑完就 `running === false`，下一拍把标记清掉，重启后读到空。
- */
-function writeRunningWatch(ids) {
-  try {
-    if (ids.length === 0) window.localStorage?.removeItem?.(UI_WATCH_KEY);
-    else window.localStorage?.setItem?.(UI_WATCH_KEY, JSON.stringify({ ids, at: Date.now() }));
-  } catch (error) {
-    console.warn('[dsh-codex-ui] running watch unwritable:', String(error));
-  }
-}
-
-/** 读出并立刻清掉标记：只唤醒一次，别让每一次后续启动都重发一遍「继续」。 */
-function takeRunningWatch() {
-  try {
-    const raw = window.localStorage?.getItem?.(UI_WATCH_KEY);
-    window.localStorage?.removeItem?.(UI_WATCH_KEY);
-    if (typeof raw !== 'string' || raw === '') return [];
-    const parsed = JSON.parse(raw);
-    const at = typeof parsed?.at === 'number' ? parsed.at : 0;
-    const ids = Array.isArray(parsed?.ids) ? parsed.ids.filter(id => typeof id === 'string') : [];
-    return ids.map(id => ({ id, at }));
-  } catch (error) {
-    console.warn('[dsh-codex-ui] running watch unreadable:', String(error));
-    return [];
-  }
-}
-
-/**
- * 把「这一刻还有哪些会话在跑」报到宿主，由宿主落到 `$DSH_HOME/codex-ui-running.json`。
- *
- * 为什么不在浏览器里存：桌面版每次重启都换端口，页面 origin 跟着变；更要紧的是强杀进程时
- * localStorage 最后几次写入未必已刷盘，于是最需要它的那种重启（taskkill、崩溃、断电）恰好失效。
- * 文件没有这个问题：写下去就是写下去了，换端口也读得回来。
- *
- * 上报时机：状态一变立刻报；状态没变每 15 秒补报一次，让宿主那份记录的时间戳保持新鲜。
- */
-function startRunningWatch(ctx) {
-  // 插件实例可能被热重载换掉；定时器挂在 window 上，换实例时先收掉上一份，不让两份同时跑，
-  // 也不让它跟着实例一起被销毁。
-  try {
-    if (typeof window.__cgRunningWatchStop === 'function') window.__cgRunningWatchStop();
-  } catch {
-    // 收不掉也要继续，下面的去抖还能兜住重复。
-  }
-  window.__cgRunningWatchStop = null;
-  let lastKey = null;
-  let lastAt = 0;
-  // 拍数只为诊断：宿主那边把 tick 一起记下来，就能分清「心跳没跑」和「跑了但判据读成空」。
-  let ticks = 0;
-  const tick = () => {
-    ticks += 1;
-    // 两个信号取并集：会话表里的 running，和宿主直接写在 DOM 上的「正在生成」。
-    // 只认会话表不够——页面重载或进程重启之后，表里的 running 要等下一次状态推送才准，
-    // 而心跳恰恰要在那一刻记录状态，晚一拍就记成「没活」，重启后就什么都不唤醒了。
-    let ids = [];
-    try {
-      const byId = ctx.sessions?.list?.getSnapshot?.()?.byId ?? {};
-      ids = Object.values(byId).filter(session => session && session.running === true).map(session => session.id);
-    } catch (error) {
-      // store 还没建好，交给下面的 DOM 兜底。
-    }
-    if (ids.length === 0) {
-      try {
-        if (document.querySelector('[data-chat-running="true"]') !== null) {
-          const viewing = document
-            .querySelector('[data-conversation-content]')
-            ?.getAttribute('data-conversation-session');
-          if (typeof viewing === 'string' && viewing !== '') ids = [viewing];
-        }
-      } catch (error) {
-        // DOM 也读不到：这一拍算「没活」，下一拍再试。
-      }
-    }
-    writeRunningWatch(ids);
-    const key = ids.join('\u0000');
-    const now = Date.now();
-    if (key === lastKey && now - lastAt < UI_WATCH_REPORT_MS) return;
-    lastKey = key;
-    lastAt = now;
-    try {
-      void ctx.connection?.rpc?.call?.('/api', 'dsh-codex-ui/rail', { action: 'runningWrite', ids, ticks })?.catch?.(() => {});
-    } catch (error) {
-      // 通道不可用就只留 localStorage 那份，下一拍再试。
-    }
-  };
-  const startTimer = setTimeout(tick, UI_WATCH_START_DELAY_MS);
-  const timer = setInterval(tick, UI_WATCH_TICK_MS);
-  // 故意不挂 ctx.effect：心跳是页面级的事，插件实例被热重载换掉时它不该跟着死。
-  // 之前挂在 effect 上，结果整个心跳只跑了首拍就不再上报，记录里 ticks 一直停在 1。
-  window.__cgRunningWatchStop = () => {
-    clearTimeout(startTimer);
-    clearInterval(timer);
-    window.__cgRunningWatchStop = null;
-  };
-}
-
-/** 从宿主取走上一轮留下的「被打断时还在跑」的会话，取走即删除，保证只唤醒一次。 */
-async function takeRunningFromHost(ctx) {
-  try {
-    // 必须有上限：页面刚站起来时 RPC 可能还没接上，`await` 一旦挂住，挂在 `.finally` 上的心跳
-    // 就永远不会启动 —— 表现就是「重启后再也唤不醒」，而且一点报错都没有。
-    const pending = ctx.connection?.rpc?.call?.('/api', 'dsh-codex-ui/rail', { action: 'runningTake' });
-    const timeout = new Promise(resolve => { setTimeout(() => resolve(null), UI_RUNNING_TAKE_TIMEOUT_MS); });
-    const response = await Promise.race([Promise.resolve(pending), timeout]);
-    if (response?.ok !== true) return [];
-    const ids = Array.isArray(response.value?.ids) ? response.value.ids : [];
-    const at = typeof response.value?.at === 'number' ? response.value.at : 0;
-    return ids.filter(id => typeof id === 'string' && id !== '').map(id => ({ id, at }));
-  } catch (error) {
-    console.warn('[dsh-codex-ui] running record take failed:', String(error));
-    return [];
-  }
-}
-
-async function stopRunningSessions(ctx) {
-  const stopped = [];
-  try {
-    const snapshot = ctx.sessions?.list?.getSnapshot?.();
-    const byId = snapshot?.byId ?? {};
-    const running = Object.values(byId).filter(session => session && session.running === true);
-    for (const session of running) {
-      try {
-        await ctx.sessions.using(session.id, { source: 'controllerOperation' }, reference => reference.binding.session.cancel());
-        stopped.push(session.id);
-      } catch (error) {
-        console.warn('[dsh-codex-ui] cancel before reload failed:', String(error));
-      }
-    }
-  } catch (error) {
-    console.warn('[dsh-codex-ui] running-session scan failed:', String(error));
-  }
-  return stopped;
-}
-
-function anySessionRunning(ctx) {
-  try {
-    const byId = ctx.sessions?.list?.getSnapshot?.()?.byId ?? {};
-    return Object.values(byId).some(session => session && session.running === true);
-  } catch {
-    return false;
-  }
-}
-
-// 快速重启：停掉正在跑的轮次、记下要唤醒的会话，然后请宿主把整个进程重启一遍。
-// 不能只重载页面——桌面版在任务没停稳时重载会让宿主在 web boot 阶段报
-// `dsh-codex-ui: import failed`，界面卡死，只能重启应用。宿主那边没有重启通道时，
-// 退回整页重载（老行为），至少不会什么都不发生。
-async function reloadAfterStop(ctx, onPhase) {
-  const report = typeof onPhase === 'function' ? onPhase : () => {};
-  const stopped = await stopRunningSessions(ctx);
-  if (stopped.length > 0) {
-    const at = Date.now();
-    writeResumeList(stopped.map(id => ({ id, at })));
-    report('已停止 ' + stopped.length + ' 个任务，重启后自动接着做');
-  }
-  const deadline = Date.now() + UI_RELOAD_WAIT_MS;
-  while (Date.now() < deadline) {
-    if (!anySessionRunning(ctx)) break;
-    await new Promise(resolve => { setTimeout(resolve, 200); });
-  }
-  await new Promise(resolve => { setTimeout(resolve, UI_STOP_SETTLE_MS); });
-  try {
-    const response = await ctx.connection?.rpc?.call?.('/api', 'dsh-codex-ui/rail', { action: 'restart' });
-    if (response?.ok === true) {
-      report('正在重启…');
-      return true;
-    }
-  } catch (error) {
-    console.warn('[dsh-codex-ui] host restart unavailable, falling back to reload:', String(error));
-  }
-  try {
-    window.location.reload();
-    return true;
-  } catch (error) {
-    console.warn('[dsh-codex-ui] reload refused:', String(error));
-    report('重启被拒绝');
-    return false;
-  }
-}
-
-// 页面回来之后把被中断的会话叫醒。会话服务要等一会儿才就绪，所以隔一秒试一次。
-async function startUiResume(ctx) {
-  // 只认「用户自己点了重启按钮」那一条清单（reloadAfterStop 在停稳任务之后写进 localStorage）。
-  //
-  // 这里原来是三条来源合并：用户点重启的清单、一份本地 watch、以及宿主磁盘上「被打断时还在跑」
-  // 的记录。后两条会在用户根本没动界面的情况下也触发——比如外部脚本重启了宿主进程，插件就把
-  // 上一轮当成「被打断」，自作主张往队列里塞一条「继续（刚才刷新界面…）」。用户看到的是一条
-  // 自己没发过的消息挂在输入框上方，这种事解释不清，不该做。
-  const pending = readResumeList();
-  writeResumeList([]);
-  if (pending.length === 0) return;
-  const now = Date.now();
-  const fresh = pending.filter(item => now - item.at < UI_RESUME_MAX_AGE_MS);
-  if (fresh.length === 0) return;
-  let attempt = 0;
-  const tick = async () => {
-    attempt += 1;
-    let failed = false;
-    for (const item of fresh) {
-      try {
-        await ctx.sessions.using(item.id, { source: 'controllerOperation' }, reference =>
-          reference.binding.session.prompt([{ type: 'text', text: UI_RESUME_TEXT }], 'queue'));
-      } catch (error) {
-        failed = true;
-        console.warn('[dsh-codex-ui] resume failed for ' + item.id + ':', String(error));
-      }
-    }
-    if (failed && attempt < 5) setTimeout(() => { void tick(); }, 1500);
-  };
-  setTimeout(() => { void tick(); }, 1200);
-}
-
-function startUiReloadWatch(ctx) {
-  const onKey = event => {
-    if (event.defaultPrevented || event.repeat) return;
-    if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
-    if (String(event.key).toLowerCase() !== 'r') return;
-    const target = event.target;
-    if (target instanceof Element && target.closest('.xterm') !== null) return;
-    event.preventDefault();
-    void reloadAfterStop(ctx);
-  };
-  document.addEventListener('keydown', onKey, true);
-  const stop = () => document.removeEventListener('keydown', onKey, true);
-  if (typeof ctx.effect === 'function') ctx.effect(() => stop);
-}
-
 // ── 发送键第三态：被手动停止的那一轮，停止位置换成「继续」播放键 ──────────────
 //
 // 宿主的发送键只有两态：运行中且输入框为空时是方块（停止生成），其余时候是箭头发送。于是
@@ -1530,8 +1272,10 @@ function cgPermissionNativeTitleTree(node, R) {
   if (typeof node.type === 'function' && typeof props.onAcknowledgedChange === 'function' && typeof props.onConfirm === 'function' && /完整|完全|full.access/i.test(String(props.title))) {
     return R.createElement(cgPermissionReferenceConfirmation, { nativeType: node.type, nativeProps: props });
   }
-  if (Array.isArray(props.items) && props.items.some(item => ['read-only','workspace-write','danger-full-access','auto','review'].includes(item.id))) {
-    if (props.items.some(item => item.id === 'cg-permission-title')) return node;
+  // 宿主不同版本把预设键放在 `id` 或 `value` 里，两处都要认；只认一个会在升级后漏判全部条目。
+  const presetKey = item => (item && (item.value ?? item.id));
+  if (Array.isArray(props.items) && props.items.some(item => ['read-only','workspace-write','danger-full-access','auto','review'].includes(presetKey(item)))) {
+    if (props.items.some(item => presetKey(item) === 'cg-permission-title')) return node;
     const copy = {
       'workspace-write': ['请求批准', '编辑外部文件和使用互联网时始终询问'],
       auto: ['帮我批准', '仅对检测到的风险操作请求批准'],
@@ -1540,20 +1284,25 @@ function cgPermissionNativeTitleTree(node, R) {
     };
     const label = (id, unavailable) => R.createElement('span', { className: 'cg-permission-copy', 'data-permission-mode': id,
       ...(unavailable ? { title: '当前宿主未提供此模式' } : {}) },
-      R.createElement('span', { className: 'cg-permission-name' }, copy[id][0]),
-      R.createElement('span', { className: 'cg-permission-description' }, copy[id][1]));
+      R.createElement('span', { className: 'cg-permission-name' }, copy[id]?.[0] ?? id),
+      R.createElement('span', { className: 'cg-permission-description' }, copy[id]?.[1] ?? ''));
     const approveIcon = R.createElement('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, 'data-cg-approve-icon': '' },
       R.createElement('path', { d: 'M12 2.5 21 7v7c0 3.5-5.5 7.5-9 9-3.5-1.5-9-5.5-9-9V7l9-4.5Z' }),
       R.createElement('path', { d: 'm8 10 2.5 2.5L8 15m5 0h4' }));
     const requestIcon = cgPermissionRequestGlyph(R);
-    const visible = props.items.filter(item => item.id !== 'read-only').map(item => copy[item.id] ? { ...item, label: label(item.id, false), ...((item.id === 'auto' || item.id === 'review') ? { icon: approveIcon } : item.id === 'workspace-write' ? { icon: requestIcon } : {}) } : item);
-    if (!visible.some(item => item.id === 'auto' || item.id === 'review')) {
-      const at = visible.findIndex(item => item.id === 'danger-full-access');
-      visible.splice(at < 0 ? visible.length : at, 0, { id: 'auto', disabled: true, icon: approveIcon, label: label('auto', true) });
+    const visible = props.items.filter(item => presetKey(item) !== 'read-only').map(item => {
+      const key = presetKey(item);
+      return copy[key] ? { ...item, label: label(key, false), ...((key === 'auto' || key === 'review') ? { icon: approveIcon } : key === 'workspace-write' ? { icon: requestIcon } : {}) } : item;
+    });
+    // 宿主只给已配置的档位；缺这一档时补一个**可点**的项，而不是禁用项。
+    // 之前补的是 disabled 的 auto，界面上就是一条永远灰着的「帮我批准」——用户点不动，也看不出是不是坏了。
+    if (!visible.some(item => { const key = presetKey(item); return key === 'auto' || key === 'review'; })) {
+      const at = visible.findIndex(item => presetKey(item) === 'danger-full-access');
+      visible.splice(at < 0 ? visible.length : at, 0, { id: 'review', value: 'review', icon: approveIcon, label: label('review', false) });
     }
     // Keep display order independent of the host catalog order.
     const rank = id => id === 'workspace-write' ? 0 : (id === 'auto' || id === 'review') ? 1 : id === 'danger-full-access' ? 3 : 2;
-    visible.sort((a, b) => rank(a.id) - rank(b.id));
+    visible.sort((a, b) => rank(presetKey(a)) - rank(presetKey(b)));
     let anchor = props.anchor;
     if (R.isValidElement(anchor)) {
       const text = props.selectedId === 'danger-full-access' ? '完全访问' : copy[props.selectedId]?.[0];
@@ -1808,6 +1557,37 @@ function startCgThinkingIconStrip(ctx) {
   ctx.effect(() => () => { try { observer?.disconnect(); } catch { /* ignore */ } clearInterval(timer); });
 }
 
+// 拉取权威目录，不缓存合并会话；热卸载时取消本实例的延迟任务。
+function cgStartSessionCatalogRefresh(ctx, onUpdated) {
+  let disposed = false;
+  let pending = null;
+  const refresh = () => {
+    if (disposed) return Promise.resolve();
+    if (pending !== null) return pending;
+    pending = Promise.resolve().then(() => {
+      if (!disposed && typeof ctx.sessions?.refresh === 'function') return ctx.sessions.refresh();
+    }).then(() => { if (!disposed) onUpdated(); }).catch(error => {
+      if (!disposed) console.warn('[dsh-codex-ui] session catalog refresh failed:', error);
+    }).finally(() => { pending = null; });
+    return pending;
+  };
+  const listener = () => { void refresh(); };
+  window.addEventListener('cg-refresh-sessions', listener);
+  const timers = [1200, 6000].map(delay => setTimeout(listener, delay));
+  void refresh();
+  return () => {
+    disposed = true;
+    for (const timer of timers) clearTimeout(timer);
+    window.removeEventListener('cg-refresh-sessions', listener);
+  };
+}
+function cgIsMissingSession(error) {
+  const code = String(error?.code ?? '');
+  const message = String(error?.message ?? error ?? '');
+  return /(?:^|\/)session[/-]not[-_]found$/i.test(code)
+    || /(?:no such session|hold no such session|session[\s:/_-]+(?:[^\r\n]*?\s)?not[- ]found|会话.*不存在)/i.test(message);
+}
+
 export function apply(ctx) {
   // 回复锻造（原 dsh-codex-ui-HF）先起：它自带样式注入与 DOM 扫描，不依赖本包其余
   // 模块的初始化顺序，挂不上也不该拖累下面任何一步，所以单独包一层。
@@ -1830,10 +1610,16 @@ export function apply(ctx) {
   // host and reloads the page).
   typeof startHostUpgradeCompat === 'function' && startHostUpgradeCompat(ctx);
   startStyleWatch();
+  // Explicit, expiring one-shot authorization only; no automatic running-session scan.
+  try {
+    if (typeof startAuthorizedResume === 'function') startAuthorizedResume(ctx, {
+      request: payload => ctx.connection.rpc.call('/api', 'dsh-codex-ui/authorized-resume', payload)
+    });
+  } catch (error) { console.warn('[dsh-codex-ui] authorized resume client unavailable:', error); }
   try { registerCgPermissionNativeTitle(ctx); } catch (error) { console.warn('[dsh-codex-ui] native permission title unavailable:', error); }
   try { startCgDisclosureMotion(ctx); } catch (error) { console.warn('[dsh-codex-ui] disclosure motion unavailable:', error); }
   try { startCgThinkingIconStrip(ctx); } catch (error) { console.warn('[dsh-codex-ui] thinking glyph strip unavailable:', error); }
-  startUiReloadWatch(ctx);
+
   // 发送键第三态（停止后变播放键续做）。与上面两条互不依赖，单独兜一层：这颗键装不上
   // 只是少一条捷径，不该带走样式、刷新拦截或会话唤醒。
   try {
@@ -1841,17 +1627,9 @@ export function apply(ctx) {
   } catch (error) {
     console.warn('[dsh-codex-ui] resume key unavailable:', String(error));
   }
-  // 插件启用/禁用（热切换）之后侧栏偶尔少几行，重启才回来。宿主的快照推送不归我们管，但重渲染归，
-  // 所以重挂后分两次点一遍侧栏：立刻一次、隔 6 秒再一次，覆盖「第一次读时宿主还没推完」的窗口。
-  for (const delay of [1200, 6000]) {
-    setTimeout(() => {
-      try { window.dispatchEvent(new Event('cg-refresh-sessions')); } catch { /* 派不出去不影响别的事 */ }
-    }, delay);
-  }
-  // 唤醒先发起，心跳随后启动。心跳自己延迟 4 秒起步，比唤醒读记录的 3 秒上限更晚，
-  // 所以既不会抢在唤醒前面把名单抹掉，也不会因为唤醒那条链卡住就再也发不出心跳。
-  void startUiResume(ctx);
-  startRunningWatch(ctx);
+
+
+
   // 完成提醒要读会话 store，而模块顶层拿不到 ctx，所以只能在这里启动。
   typeof startDoneNotify === 'function' && startDoneNotify(ctx);
   // 「停下来等你」的提示音。和上面那条链刻意分开：一个是不用管的事跑完了，一个是不管就会一直卡着。
@@ -1918,19 +1696,6 @@ export function apply(ctx) {
     }
   } catch (error) {
     console.warn('[dsh-codex-ui] rail-items unreadable:', String(error));
-  }
-  // 侧栏那颗刷新按钮：点下去先停掉正在跑的会话，再重载界面。order 900 排在用户自定义条目之后。
-  try {
-    const disposeReloadRail = railRegister({
-      id: 'ui-reload',
-      label: '重启',
-      icon: 'refresh',
-      order: 900,
-      onClick: () => { void reloadAfterStop(ctx); }
-    });
-    if (typeof ctx.effect === 'function') ctx.effect(() => disposeReloadRail);
-  } catch (error) {
-    console.warn('[dsh-codex-ui] reload rail entry unavailable:', String(error));
   }
   // 配置文件通道：宿主把 `$DSH_HOME/dsh-codex-ui-rail.json` 经由 rpc 读出来。用户自己改文件、
   // 或者他的 Agent 用 `sidebar_rail` 工具写文件，都从这条路进来，界面上 15 秒内出现。
@@ -2029,6 +1794,7 @@ export function apply(ctx) {
     try { return ctx.slots.inject(...args); }
     catch (error) { console.warn('dsh-codex-ui: slot registration refused', error); return undefined; }
   };
+  registerFlashWakeFilters(ctx, mountSlot);
   // 注入块设置页：宿主设置弹窗左侧多一项，页面本身是一列开关，逐个控制 `policyText()` 里的段落。
   // 走同一个容错入口，老宿主只丢这一页；`registerInjectionSection` 由 build 拼进本工厂体
   // （见 scripts/build.mjs），所以这里没有 import。
@@ -2042,22 +1808,143 @@ export function apply(ctx) {
     const native = ctx.slots.entries('conversation.session.header.utilities').find(entry => entry.options.id === 'session-log-download');
     const header = ctx.slots.entriesOfSlot('conversation.session.header')[0];
     if (!native || !header) return;
+    const INJECTION_REPORT_METHOD = 'chatgpt-ui/injection-report';
+    // 浮层要活得比菜单久：菜单一关，槽组件就被重渲染，React state 跟着丢——实测是「点一下闪一下
+    // 然后没了」。所以浮层直接挂到 document.body，用原生 DOM 搭，跟 React 生命周期脱钩。
+    const OVERLAY_ATTR = 'data-cg-injection-overlay';
+    const box = (tag, style, text) => {
+      const node = document.createElement(tag);
+      if (style !== '') node.style.cssText = style;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    };
+    const CARD = 'width:min(880px,92vw);max-height:82vh;overflow:auto;background:#1b1b1c;color:#e8e8e8;'
+      + 'border:1px solid #3a3a3c;border-radius:12px;padding:14px 16px;box-shadow:0 18px 48px rgba(0,0,0,.55);'
+      + 'font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace';
+    const PRE = 'white-space:pre-wrap;word-break:break-word;margin:4px 0 0;color:#d6d6d8';
+    const BTN = 'background:#2a2a2c;color:#e8e8e8;border:1px solid #3a3a3c;border-radius:6px;padding:3px 10px;cursor:pointer';
+
+    function fillInjectionReport(body, result) {
+      body.replaceChildren();
+      // 形状不对时把实际收到的字段打出来：这一路只有「路由没挂上、宿主回了别的东西」会造成
+      // `ok: true` 但没有 `system`，不把字段名露出来就只能靠猜。
+      if (!result || result.ok !== true || result.system === undefined) {
+        const keys = result && typeof result === 'object' ? Object.keys(result).join(',') || '（空对象）' : String(result);
+        const detail = result && result.error ? String(result.error) : `收到的字段：${keys}`;
+        body.append(box('div', 'color:#9a9a9d', `读取失败：${detail}`));
+        return;
+      }
+      body.append(box('div', 'color:#9a9a9d;margin-bottom:10px',
+        `第 ${result.turn ?? '—'} 轮 · 系统提示 ${result.system.chars} 字符`
+        + `${result.system.hasPersonaSection ? ' · 含人设节' : ''}`
+        + ` · 运行时段落 ${result.counts?.sections ?? 0} 个 · 工具 ${result.counts?.tools ?? 0} 个`));
+
+      const part = title => {
+        const wrapper = box('div', 'border-top:1px solid #303032;padding:8px 0');
+        wrapper.append(box('div', 'color:#8ab4f8;margin-bottom:4px', title));
+        return wrapper;
+      };
+
+      if (result.reminder) {
+        const reminder = part(`人设提醒（${result.reminder.chars} 字符）`);
+        reminder.append(box('pre', PRE, result.reminder.text));
+        body.append(reminder);
+      }
+
+      const sectionList = result.sections ?? [];
+      if (sectionList.length > 0) {
+        const contexts = part('运行时段落（每轮挂上去的上下文）');
+        for (const section of sectionList) {
+          const details = box('details', 'margin:2px 0 6px');
+          const summary = box('summary', 'cursor:pointer;color:#c8c8ca', `${section.name} · ${section.chars} 字符`);
+          details.append(summary, box('pre', PRE, section.text));
+          contexts.append(details);
+        }
+        body.append(contexts);
+      }
+
+      const system = part(`系统提示（${result.system.chars} 字符${result.system.hasPersonaSection ? '，已含人设正文' : ''}）`);
+      const details = box('details', 'margin:2px 0 6px');
+      details.append(box('summary', 'cursor:pointer;color:#c8c8ca', '展开／收起全文'), box('pre', PRE, result.system.text));
+      system.append(details);
+      body.append(system);
+    }
+
+    async function openInjectionOverlay(sessionIdValue) {
+      document.querySelector(`[${OVERLAY_ATTR}]`)?.remove();
+      const veil = box('div', 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2147483000;'
+        + 'display:flex;align-items:center;justify-content:center;padding:24px');
+      veil.setAttribute(OVERLAY_ATTR, '');
+      const card = box('div', CARD);
+      const head = box('div', 'display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px');
+      head.append(box('div', 'font-size:14px;font-weight:600', '本轮注入'));
+      const actions = box('div', 'display:flex;gap:8px');
+      const close = () => { veil.remove(); document.removeEventListener('keydown', onKey); };
+      const onKey = event => { if (event.key === 'Escape') close(); };
+      const reload = box('button', BTN, '刷新');
+      const dismiss = box('button', BTN, '关闭');
+      reload.setAttribute('type', 'button');
+      dismiss.setAttribute('type', 'button');
+      dismiss.addEventListener('click', close);
+      actions.append(reload, dismiss);
+      head.append(actions);
+      const body = box('div', '', '正在读取本轮注入…');
+      body.style.color = '#9a9a9d';
+      card.append(head, body);
+      veil.append(card);
+      veil.addEventListener('click', event => { if (event.target === veil) close(); });
+      document.addEventListener('keydown', onKey);
+      document.body.append(veil);
+      const load = async () => {
+        body.style.color = '';
+        body.replaceChildren(box('div', 'color:#9a9a9d', '正在读取本轮注入…'));
+        try {
+          const raw = await ctx.connection.rpc.call('/api', INJECTION_REPORT_METHOD, { sessionId: String(sessionIdValue ?? '') });
+          // 宿主 RPC 可能直接给结果，也可能包一层 `value`（人设那几条就是后者）；两种都认。
+          const result = raw && raw.system !== undefined ? raw : (raw?.value ?? raw);
+          fillInjectionReport(body, result);
+        } catch (failure) {
+          body.replaceChildren(box('div', 'color:#9a9a9d', `读取失败：${String(failure?.message ?? failure)}`));
+        }
+      };
+      reload.addEventListener('click', () => { void load(); });
+      await load();
+    }
+
     function ConversationMoreMenu(props) {
       const views = props.useConversationViews(value => value);
       const preferred = props.useStore(state => state.view);
       const active = views.find(view => view.id === preferred)?.id ?? views[0]?.id;
       const original = native.component(props);
-      return React.cloneElement(original, {}, React.Children.map(original.props.children, child => {
-        if (!React.isValidElement(child) || !Array.isArray(child.props.items)) return child;
-        return React.cloneElement(child, {
-          items: [...views.map(view => ({ id: `cg-view:${view.id}`, label: view.label, icon: h(Icon, { name: active === view.id ? 'check' : view.id === 'chat' ? 'chat' : 'trace' }) })), ...child.props.items],
-          onSelect: id => {
-            if (!id.startsWith('cg-view:')) return child.props.onSelect(id);
-            child.props.onClose();
-            props.selectView(id.slice('cg-view:'.length));
-          }
-        });
-      }));
+      const sessionId = String(props.sessionId ?? props.session?.id ?? '');
+      const openReport = () => { void openInjectionOverlay(sessionId); };
+      // 菜单条目挂在原生组件内部的 `Menu` 上，不一定是直接子节点：只在 `original.props.children`
+      // 第一层找 `items` 会找不到，菜单照常弹出但一条都不加。递归走整棵元素树，命中带 `items`
+      // 数组的按钮才注入，其余原样返回。
+      const ourItems = [
+        ...views.map(view => ({ id: `cg-view:${view.id}`, label: view.label, icon: h(Icon, { name: active === view.id ? 'check' : view.id === 'chat' ? 'chat' : 'trace' }) })),
+        { id: 'cg-injected', label: '本轮注入', icon: h(Icon, { name: 'trace' }) },
+      ];
+      const withOurItems = node => {
+        if (!React.isValidElement(node)) return node;
+        const childProps = node.props ?? {};
+        const mapped = childProps.children === undefined ? undefined : React.Children.map(childProps.children, withOurItems);
+        if (Array.isArray(childProps.items)) {
+          return React.cloneElement(node, {
+            items: [...ourItems, ...childProps.items],
+            onSelect: id => {
+              if (id === 'cg-injected') { childProps.onClose?.(); openReport(); return; }
+              if (!id.startsWith('cg-view:')) return childProps.onSelect?.(id);
+              childProps.onClose?.();
+              props.selectView(id.slice('cg-view:'.length));
+            },
+            children: mapped,
+          });
+        }
+        if (mapped === childProps.children) return node;
+        return React.cloneElement(node, { children: mapped });
+      };
+      return withOurItems(original);
     }
     return ctx.slots.register({
       name: 'conversation.session.header.utilities', ...native.options, priority: -10,
@@ -2412,16 +2299,10 @@ export function apply(ctx) {
   }
   function Sidebar({ collapsed, renderSlot, useSessionStatus, useSessions, useWorkspaces, usePanelInfo }) {
     const panel = usePanelInfo(s => s.activePanelId);
-    const sessions = useSessions(s => s.byId);
-    // 插件被启用/禁用（热切换）之后，侧栏偶尔只渲染出一部分会话，重启进程才恢复——别人家的插件也一样，
-    // 所以不是本插件的清理逻辑干的，更像是宿主那次快照推送没跟上。这里自己救一次：重挂后隔几秒点一遍
-    // 重渲染，`useSessions` 会重新读一次 store 快照，没跟上那几行通常就补回来了。
+    const allSessions = useSessions(s => s.byId);
+    const sessions = React.useMemo(() => Object.fromEntries(Object.entries(allSessions).filter(([id]) => !id.startsWith('session-cgflash-'))), [allSessions]);
     const [, forceSessionRefresh] = React.useState(0);
-    React.useEffect(() => {
-      const onRefresh = () => forceSessionRefresh(count => count + 1);
-      window.addEventListener('cg-refresh-sessions', onRefresh);
-      return () => window.removeEventListener('cg-refresh-sessions', onRefresh);
-    }, []);
+    React.useEffect(() => cgStartSessionCatalogRefresh(ctx, () => forceSessionRefresh(count => count + 1)), []);
     const currentSession = Object.values(sessions).find(session => (session.retainedBy?.mainView ?? 0) > 0);
     const [storedMode, setStoredMode] = React.useState(null);
     const currentMode = storedMode && storedMode.sessionId === currentSession?.id ? storedMode.mode : currentSession?.projectionValues?.cgPromptMode;
@@ -2817,7 +2698,7 @@ export function apply(ctx) {
         Promise.resolve(ctx.connection.rpc.call('/api', 'dsh-codex-ui/forget-sessions', { sessionIds: [id] })).catch(() => {});
       } catch { /* 记不上就只在本次隐藏 */ }
     };
-    const isMissingSession = error => /not[- ]?found|no such session|hold no such session/i.test(String(error?.message ?? error));
+    const isMissingSession = cgIsMissingSession;
     const missingNotice = '该会话的数据已不存在（日志已删除或被清理），已把它从列表里隐藏。';
     // A session the agent spawned as a subagent rides `parentId` in the client list store (the remote
     // summary calls it parentSessionId, and marks such rows origin 'subagent'). DSH's own sidebar
@@ -2881,9 +2762,9 @@ export function apply(ctx) {
               const result = await projections.call(ctx.remote.session, { sessionId: id });
               const gone = result?.ok === false
                 ? isMissingSession(result.error)
-                : result?.value === null || result?.value === undefined;
+                : result?.ok === true && result.value === null;
               if (gone && !cancelled) markGhost(id);
-            } catch (error) { if (isMissingSession(error)) markGhost(id); }
+            } catch (error) { if (!cancelled && isMissingSession(error)) markGhost(id); }
           }
         })();
         return () => { cancelled = true; };
@@ -4003,11 +3884,6 @@ export function apply(ctx) {
   // cg-schedules 已经占了默认优先级，所以这里必须给一个不同的 priority，否则注册被静默 warn 掉，
   // 表现就是按钮点了没反应、go('cg-skills') 抛 "main panel ... is not registered"。
   mountSlot('main', () => ctx.slots.register({ name: 'main', key: 'cg-skills', priority: 1 }, SkillsPanel));
-  // Agent 日记。priority 用 2，避开 cg-schedules 的默认值和 cg-skills 的 1——同一个 priority
-  // 会让后注册的那个被静默跳过，症状就是侧栏点了没反应。
-  // setDiaryHost 必须先调：DiaryPanel 的代码被拼在工厂体顶层，看不到这里的 `ctx`。
-  setDiaryHost(ctx);
-  mountSlot('main', () => ctx.slots.register({ name: 'main', key: 'cg-diary', priority: 2 }, DiaryPanel));
   // DeepSeek's usage dashboard lives on a host that refuses to be framed, so the rail opens it in
   // a browser tab instead of embedding it: `X-Frame-Options` / `frame-ancestors` leave an iframe
   // blank, and a blank panel is worse than a link. Nothing is registered in `main` for it.

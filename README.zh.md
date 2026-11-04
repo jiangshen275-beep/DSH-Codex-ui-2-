@@ -1,3 +1,7 @@
+> 4.1.2-preview.1：公开版已移除本机专用Agent日记及重启续跑，包括工具、面板、心跳和刷新快捷键接管。历史描述以PREVIEW.zh.md当前说明为准。
+
+> 当前版本：4.2.0-preview.1，本地预览包。新增会话头「...」菜单里的「本轮注入」：一眼看清这一轮模型实际吃到的系统提示（字符数、是否含人设正文）、运行时段落、人设提醒与工具数量；只读会话事件，不改模型输入。细节与验证边界见 PREVIEW.zh.md。本轮未上传 GitHub 或 npm，尚无对应远端标签。
+
 <img src="assets/codex.png" width="72" alt="Codex icon">
 
 # dsh-codex-ui
@@ -12,21 +16,18 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 
 > **关于本项目**：这是 [Loliyer520/dsh-codex-ui](https://github.com/Loliyer520/dsh-codex-ui) 的衍生版本（MIT），在其基础上继续开发：新增 Ultra 档与闪电编排两套提示词契约、强制中文、会话重命名、已归档会话删除、子代理/分支分组，并修掉了一批缺陷。**与 OpenAI 无隶属或背书关系**；随包分发的 Codex 图标与 OpenAI Sans 字体属于 OpenAI，授权与风险见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
-## 4.1.0 预览版
+## 4.1.2 预览版
 
-当前版本：`4.1.0-preview.1`。安装包：`dsh-codex-ui-4.1.0-preview.1.tgz`。完整源码与包内容同版公开，仓库标签为 `v4.1.0-preview.1`；安装无需重新构建。
+当前版本：`4.1.2-preview.1`。安装包：`dsh-codex-ui-4.1.2-preview.1.tgz`。源码与运行产物随包提供；本轮仅本地打包，未创建远端标签，安装无需重新构建。
 
 本版包含权限面板样式与排序、工具/整轮/侧栏展开收起动画、人设输出上限设置、内嵌审批模块和“审查者后台”。详细验证与宿主兼容边界见 [PREVIEW.zh.md](PREVIEW.zh.md)。历史截图不代表本版全部布局。
 
-本次只发布 GitHub Release，未发布 npm registry；建议下载 Release 附件，在 DSH 插件页添加 tarball 的绝对路径，安装后正常重启 DSH。运行中不要覆盖宿主 `app.asar`。
+本轮未上传 GitHub 或 npm；拿到本地安装包后，在 DSH 插件页添加 tarball 的绝对路径，安装后正常重启 DSH。运行中不要覆盖宿主 `app.asar`。
 
-## 4.0.0 更新了什么
+## 保留的字体与滚动条改进
 
-- **侧栏按钮从「刷新」变成「重启」**：点下去先停掉所有正在跑的轮次，把要唤醒的会话写进续跑清单，等会话真的停下，再请宿主重启整个进程；应用起来后自动给被打断的会话发「继续」。计划任务执行完自己删干净。
-- **强杀也丢不了续跑名单**：名单以前放在浏览器 localStorage，而 `taskkill /f` 强杀时最后几次写入未必刷盘——最需要它的那种重启恰好失效。现在心跳每两秒把「哪些会话在跑」报给宿主，落在 `$DSH_HOME/codex-ui-running.json`；重启后读一次、删掉，和 localStorage 清单合并去重再逐条续跑。
 - **中文不再依赖机器上装了什么**：思源黑体按 GB2312 常用 7540 字裁子集（两个字重，各 1.1 MB）内联进包，拉丁字母走 OpenAI Sans。
 - **滚动条按 Codex 规格重做**：7px 宽、轨道透明、thumb `#353535`（悬停 `#494949`）、近乎直角的 2px 圆角、两端不显示按钮。宿主原本是 5px 的 `#3c3c3d` 胶囊。
-- **日记工具要求勤记**：每完成一个能说清的步骤就立刻记一条，会话被重启或换人接手时先记下中断点再动手。
 
 3.1.0 带的是模式三选一互斥、超快合同自包含、人设正文真正进系统提示、事实核查开关、委派深度自动补 2，以及默认关闭的子代理会话清收。
 ## 3.0.0 的三个大件
@@ -47,7 +48,6 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 - **电脑控制**：截屏、窗口树检查、指针移动、点击、键入、滚动、拖拽；控制期间屏幕顶部常驻提示并实时显示当前目标（如「正在点击 (320, 480) · 记事本」）。原 `dsh-computer-use` 并入本包，配置 `computerUse.enabled: false` 可关（不写即开）。
 - **界面与其它**：浅色 / 深色 / 窄窗口适配；超快模式滑条四段暖色递深（minimal·low / high / xhigh·max / ultra 渐变）；努力滑条旋钮 24×24 正圆（常态带投影，超快 + Ultra 态加描边与发光）；字体与图标随包分发（字体以 base64 内联进 `lib/client.js`）；设置菜单显示官方 DeepSeek API 余额（服务端缓存 30 秒，只有校验过的余额字段回到前端），并带刷新 / 控制台 / 设置 / 插件 / 帮助入口。
 
-**历史版本（4.0.0）**：产物 `dsh-codex-ui-4.1.0-preview.1.tgz`（`npm pack` 生成，不入库）。4.0.0 把「重启」做成了真重启：停轮次、写续跑清单、等会话真停下、请宿主重启进程，起来后自动续跑；续跑名单落在磁盘上，强杀进程也不会丢。此外中文改用内联字体、滚动条按 Codex 规格重做。3.0.0 的三大件（回复锻造（会话改写）、可自定义侧边栏、电脑操控）与 3.1.0 的模式统一都还在，安装方式没变，装一个包就有全部能力。2.x 的历史要点见 [CHANGELOG.md](CHANGELOG.md)。界面类改动刷新页面即可，提示词契约类与宿主侧改动（侧边栏的链接/程序启动、电脑控制、重启）需要重启 DSH。
 
 ## 新对话页：回复风格、标题与图标
 
@@ -72,16 +72,16 @@ DeepSeek Harness 的 Codex 风格 UI 插件（MIT，上游 `Loliyer520/dsh-codex
 
 **A. 本地 tarball（不依赖 registry，最快）**
 
-拿到 `dsh-codex-ui-4.1.0-preview.1.tgz` 后，在 DSH **插件 → 添加插件**里填该文件的绝对路径，或：
+拿到 `dsh-codex-ui-4.1.2-preview.1.tgz` 后，在 DSH **插件 → 添加插件**里填该文件的绝对路径，或：
 
 ```powershell
-dsh plugin --profile <profile名称> add 'C:/路径/dsh-codex-ui-4.1.0-preview.1.tgz'
+dsh plugin --profile <profile名称> add 'C:/路径/dsh-codex-ui-4.1.2-preview.1.tgz'
 ```
 
 **B. npm**
 
 ```powershell
-dsh plugin --profile <profile名称> add dsh-codex-ui@4.1.0-preview.1
+dsh plugin --profile <profile名称> add dsh-codex-ui@4.1.2-preview.1
 ```
 
 > ⚠️ **这个包目前还没有发布到 npm**（公共 registry 上会返回 404）——现在执行上面这条会失败，首次安装请用 A 或 C 方式。若你打算发布到 npm，这条命令在发布满 24 小时后即可用。

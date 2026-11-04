@@ -12,13 +12,9 @@
 // only records the intent and draws the UI; the text that actually changes how the
 // agent works is injected here, per session, immediately before a step enters.
 //
-// Injection follows the engine's own discipline (the built-in @pluginId context
-// injector does the same three things):
-//   · call `next()` first and append to whatever the framework decided;
-//   · filter by exact `agent.id` — children inherit the parent scope, so a
-//     scope-registered listener would leak the policy into every subagent;
-//   · inject only when the resolved text changed, because every injected message
-//     is persisted as a `user/message` on each step it is appended to.
+// Current hosts read policy through systemPrompt.context, without persisting user messages.
+// The pre-step listener only updates short reminder state. Hosts without that API retain
+// the deduplicated message injector, with independent provenance for reminder messages.
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -78,8 +74,16 @@ const DEFAULT_PERSONA = 'none';
 /** The single file both records used to share. Read once, split, then retired — never deleted. */
 const LEGACY_FILE = 'codex-ui-turbo.json';
 
-/** Tools that count as delegation: they start or continue a child, or hand work to one. */
-const DISPATCH_TOOLS = new Set(['subagent', 'subagent_fork', 'send_message']);
+/** Count dispatch attempts at tool/call, regardless of the eventual result. */
+const DISPATCH_TOOLS = new Set(['subagent', 'subagent_fork', 'send_message', 'flash_start', 'flash_run', 'superfast_start']);
+const isDispatchCall = data => {
+  if (DISPATCH_TOOLS.has(data?.name)) return true;
+  if (data?.name !== 'flash_control') return false;
+  try {
+    const args = typeof data.arguments === 'string' ? JSON.parse(data.arguments) : data.arguments;
+    return args?.action === 'add';
+  } catch { return false; }
+};
 /**
  * A turn whose tool calls reached this count with zero dispatches is flagged in the log.
  *
@@ -369,6 +373,8 @@ function migrateLegacyState() {
 
 /** The source kind this plugin stamps on every row it injects. */
 const INJECTED_KIND = 'plugin:dsh-codex-ui';
+// Reminders are not policy revisions: sharing this kind re-injected the full contract after each nudge.
+const NUDGE_KIND = 'plugin:dsh-codex-ui:nudge';
 const textOfMessage = message => (message?.content ?? []).filter(block => block?.type === 'text').map(block => block.text).join('');
 
 /** The text of the newest row this plugin owns in one message list, or `undefined` for none. */
@@ -469,8 +475,7 @@ export function registerTurbo(ctx) {
   // The switches are published process-wide because the Codex prompt section is assembled elsewhere:
   // `applyPromptModes` runs before this function in `lib/index.js`, so it cannot be handed the value.
   setInjection(personaState.injection);
-  /** sessionId -> the parts of the block currently injected there (drives the off-notice). */
-  const armedBySession = new Map();
+  // Dynamic context is a read-only snapshot: resolving it must not consume state or emit messages.
   // Two records, two chains: a slow persona write must not hold up a switch write, and neither may
   // interleave two whole-file rewrites of the same file.
   let personaWrites = Promise.resolve();
@@ -576,6 +581,10 @@ export function registerTurbo(ctx) {
 
   const resolve = (sessionId, agent, position) => {
     if (!sessionId) return '';
+    if (sessionId.startsWith('session-cgflash-')) {
+      if (sessionId.startsWith('session-cgflash-sf-')) return '你是隐藏超快执行者，父会话的直接子代理：只做任务包这一整块工作，只改自己write_paths内的文件，不派生子代理、不另起run；用superfast_report报progress/artifact，真正阻塞才help等待父回复。';
+      return '你是后台闪电执行者，按当前任务包直接工作；不得派生代理，不继承父会话的普通派工规则。';
+    }
     // A session on a preset that owns its own prompt gets nothing from this plugin — not the language
     // contract, not the persona, not the orchestration blocks. resolve() is the single source for all of them.
     if (presetSilences(agent)) return '';
@@ -603,44 +612,55 @@ export function registerTurbo(ctx) {
     // 有人设时模板照常注入，只是前面多加一段两层分工的声明（`PERSONA_LAYERED`），
     // 让模型知道身份按人设、说话方式按这一段。
     const personaDeferential = personaTextOf(agent?.session) !== '';
-    // Keyed by the session's own id, never by `scope`: what a session was told is a fact about that
-    // session, and a child must not overwrite its parent's record of the same switches.
-    const armed = armedBySession.get(sessionId) ?? new Set();
+
     // The switches ride in their own parameter rather than inside `flags`: `active` below is built from
     // `Object.keys(flags)`, so an object-valued entry would make every session look armed forever and
     // `emptied` would never fire again.
     const text = policyText({ ...flags, subagent, injection: personaState.injection, personaDeferential });
-    // `chinese` is a skeleton block, not an arming switch: it is forced true for every session, so
-    // counting it here made `active` non-empty forever and `emptied` could never fire. A session whose
-    // every real switch was turned off kept its `armed` record and was never told the contract was gone.
-    // `persona` is a three-value style, not a boolean: `none` is a real choice that injects nothing, so
-    // it must not count as armed — otherwise choosing 无 would look like a live switch forever.
-    const active = new Set(Object.keys(flags).filter(key => {
-      if (key === 'chinese') return false;
-      if (key === 'persona') return flags.persona === 'chat' || flags.persona === 'work';
-      return Boolean(flags[key]) && flags[key] !== false;
-    }));
-    // 边想边说双向注入（开=禁止段、关=允许段），任何会话都有一段，别的块全关也不能误发 OFF_NOTICE。
-    active.add('thinkingAloud');
-    // A session with no persona and no switches carries nothing; if it previously carried a
-    // contract, tell it once that the contract is gone.
-    const emptied = armed.size > 0 && active.size === 0;
-    armedBySession.set(sessionId, active);
-    return emptied ? OFF_NOTICE : text;
+    return text;
   };
 
-  const disposeInjector = createPolicyInjector(ctx, resolve);
-  // The contract above is delivered once; this keeps the mandate in front of the model on every turn.
-  // Without it the only copy sits hundreds of turns back in the log and steers nothing — measured on a live
-  // armed session: 539 tool calls, zero delegations, with the contract demonstrably present in the log.
+  const reminderBySession = new Map();
+  const hasContext = typeof ctx.systemPrompt?.context === 'function';
+  const disposeInjector = hasContext ? ctx.systemPrompt.context({
+    name: 'dsh-codex-ui:mode-policy',
+    order: 620,
+    interpolate: false,
+    text: ({ agent } = {}) => {
+      const sessionId = agent?.id;
+      const text = resolve(sessionId, agent);
+      if (!text || presetSilences(agent) || sessionId?.startsWith('session-cgflash-')) return text;
+      const header = agent?.session?.header;
+      const child = header?.origin === 'subagent' || (header?.delegationDepth ?? 0) > 0;
+      const scope = child && typeof header?.parentSession === 'string' ? header.parentSession : sessionId;
+      const flags = effortFlags(scope);
+      const mode = flags.superfast ? 'superfast' : flags.lightning ? 'lightning' : 'standard';
+      const reminder = reminderBySession.get(sessionId);
+      return injectionOn(personaState.injection, 'lightning') && reminder?.mode === mode
+        ? `${text}\n\n${reminder.text}` : text;
+    },
+  }) : createPolicyInjector(ctx, resolve);
+  // Official hosts read the current policy and short reminder through dynamic context only.
+  // Legacy hosts retain message injection, with reminder provenance separate from the stable contract.
   const nudgedTurn = new Set();
+  // Session and turn are both required: concurrent sessions reuse the same turn numbers.
+  const turnTools = new Map();
+  const turnKey = (sessionId, turn) => JSON.stringify([sessionId, turn]);
+  const toolsFor = (sessionId, turn) => {
+    const key = turnKey(sessionId, turn);
+    if (!turnTools.has(key)) {
+      turnTools.set(key, { calls: 0, dispatch: 0, firstStep: null, nextReview: null, earlyChecked: false });
+      if (turnTools.size > 2048) turnTools.delete(turnTools.keys().next().value);
+    }
+    return turnTools.get(key);
+  };
   const nudgeHandler = async (payload, next) => {
     const decision = typeof next === 'function' ? await next() : undefined;
     try {
       if (!decision || decision.kind !== 'enter' || !Array.isArray(decision.messages)) return decision;
       if (payload?.signal?.aborted) return decision;
       const sessionId = payload?.agent?.id;
-      if (typeof sessionId !== 'string' || sessionId === '') return decision;
+      if (typeof sessionId !== 'string' || sessionId === '' || sessionId.startsWith('session-cgflash-')) return decision;
       if (presetSilences(payload?.agent)) return decision;
       // Same two scopes as the injector: the switches come from the conversation this session belongs to,
       // so a delegated child is nudged by the switches its parent carries rather than by a row that does
@@ -654,24 +674,51 @@ export function registerTurbo(ctx) {
       // the generic body. Read through the same revalidating reader the injector uses: a snapshot would
       // nag a session the user just disarmed and stay silent on one just armed.
       const row = currentEffort().sessions[scope];
-      if (row?.lightning !== true && row?.superfast !== true) return decision;
+      if (!injectionOn(personaState.injection, 'lightning') || (row?.lightning !== true && row?.superfast !== true)) {
+        reminderBySession.delete(sessionId);
+        return decision;
+      }
       const turn = payload?.turn;
       if (!Number.isFinite(turn)) return decision;
-      // Once per turn — and the turn, not the step, is what decides that. This used to require
-      // `step === 1`, which is only true on the first turn after a restart: the host opens a new turn
-      // by writing `phase.turn` and never resets `phase.step` (`dsh-agent-loop`'s `turn()`: `turn =
-      // phase.turn + 1` then `phase.turn = turn`, while the step is `phase.step + 1`), so turn two's
-      // first step is numbered above 1. The reminder was therefore delivered once per process.
-      const key = `${sessionId}:${turn}`;
-      if (nudgedTurn.has(key)) return decision;
-      nudgedTurn.add(key);
+      const step = Number.isFinite(payload?.step) ? payload.step : 1;
+      if (row?.superfast === true) {
+        // Superfast retains its once-per-turn reminder, including inherited child scopes.
+        const key = turnKey(sessionId, turn);
+        if (nudgedTurn.has(key)) return decision;
+        nudgedTurn.add(key);
+        if (nudgedTurn.size > 2048) nudgedTurn.delete(nudgedTurn.values().next().value);
+      } else {
+        const tools = toolsFor(sessionId, turn);
+        if (tools.firstStep === null) {
+          // Host step numbers are cumulative: measure from this turn's first observed step.
+          tools.firstStep = step;
+          tools.nextReview = step + 8;
+        } else {
+          let early = false;
+          if (!tools.earlyChecked && step >= tools.firstStep + 2) {
+            tools.earlyChecked = true;
+            early = tools.dispatch === 0;
+          }
+          if (!early && step < tools.nextReview) return decision;
+          // Dispatch attempts suppress only the early zero-dispatch reminder, never later reviews.
+          tools.nextReview = step + 8;
+        }
+      }
+      const mode = row?.superfast === true ? 'superfast' : 'lightning';
+      const text = lightningNudge(turn, step, mode);
+      if (hasContext) {
+        // Replaced in place: context assembly sees the latest short state, never another user row.
+        reminderBySession.set(sessionId, { mode, text });
+        if (reminderBySession.size > 2048) reminderBySession.delete(reminderBySession.keys().next().value);
+        return decision;
+      }
       return {
         ...decision,
         messages: [...decision.messages, {
           id: randomUUID(),
           role: 'user',
-          content: [{ type: 'text', text: lightningNudge(turn, 1, row?.superfast === true ? 'superfast' : 'lightning') }],
-          source: { kind: INJECTED_KIND, form: 'instructions' },
+          content: [{ type: 'text', text }],
+          source: { kind: NUDGE_KIND, form: 'instructions' },
         }],
       };
     } catch {
@@ -686,24 +733,24 @@ export function registerTurbo(ctx) {
    *
    * Why it exists: a text contract only binds the model's account of its own work. These counts come
    * from `tool/call` events the host commits, so "I settled it in one pass" is checked against what was
-   * actually called. It never blocks a step, never rewrites state, and writes exactly one log line.
+   * actually called. It never blocks a step or changes tool execution.
    *
-   * Turn boundaries come from `turn/start`; tool names from `tool/call`. Both are durable events.
+   * Turn boundaries come from `turn/start`; tool names and JSON arguments from `tool/call`.
    */
-  const turnTools = new Map();
   const fanoutTracker = (session, event) => {
     try {
-      if (session?.header?.id === undefined) return;
+      const sessionId = session?.header?.id ?? session?.id;
+      const turn = event?.data?.turn;
+      if (typeof sessionId !== 'string' || !Number.isFinite(turn)) return;
       if (event?.type === 'turn/start') {
-        turnTools.set(event.data.turn, { calls: 0, dispatch: 0 });
-        if (turnTools.size > 64) turnTools.delete([...turnTools.keys()][0]);
+        // A pre-step observation or replay may already have created this exact row.
+        toolsFor(sessionId, turn);
         return;
       }
       if (event?.type !== 'tool/call') return;
-      const row = turnTools.get(event.data?.turn);
-      if (row === undefined) return;
+      const row = toolsFor(sessionId, turn);
       row.calls += 1;
-      if (DISPATCH_TOOLS.has(event.data?.name)) row.dispatch += 1;
+      if (isDispatchCall(event.data)) row.dispatch += 1;
     } catch { /* counting must never fail the event */ }
   };
   const offFanout = ctx.on('session/event', fanoutTracker);
@@ -714,16 +761,28 @@ export function registerTurbo(ctx) {
    */
   const offReport = ctx.on('agent/turn-stopping', payload => {
     try {
-      const sessionId = payload?.agent?.session?.id;
-      const row = [...turnTools.values()].at(-1);
-      if (sessionId === undefined || row === undefined) return;
-      if (row.calls < FANOUT_FLAG_THRESHOLD || row.dispatch > 0) return;
-      ctx.logger?.info?.(`[codex-ui] fan-out check: this turn spent ${row.calls} tool calls with 0 dispatches — the answer must name a false condition (a)-(d) in clause 1 of the Lightning contract.`);
+      const sessionId = payload?.agent?.id ?? payload?.agent?.session?.id ?? payload?.agent?.session?.header?.id;
+      const turn = payload?.turn;
+      if (typeof sessionId !== 'string' || !Number.isFinite(turn)) return;
+      if (sessionId.startsWith('session-cgflash-') || presetSilences(payload?.agent)) return;
+      const header = payload?.agent?.session?.header;
+      const isChild = header?.origin === 'subagent' || (header?.delegationDepth ?? 0) > 0;
+      const scope = isChild && typeof header?.parentSession === 'string' ? header.parentSession : sessionId;
+      const flags = currentEffort().sessions[scope];
+      if (!injectionOn(personaState.injection, 'lightning') || (flags?.lightning !== true && flags?.superfast !== true)) return;
+      const row = turnTools.get(turnKey(sessionId, turn));
+      if (row === undefined || row.reported || row.calls < FANOUT_FLAG_THRESHOLD || row.dispatch > 0) return;
+      row.reported = true;
+      ctx.logger?.info?.(`[codex-ui] fan-out check: session ${sessionId} turn ${turn} spent ${row.calls} tool calls with 0 dispatch attempts — review independent remaining work under the active mode contract; simple tasks remain exempt.`);
     } catch { /* a report that fails must not fail the turn */ }
   });
   // `ctx.on` lifetime is already owned by the plugin fiber; this only covers an
   // explicit teardown, so an ignored return value would not leak anything.
-  ctx.effect(() => () => { disposeInjector(); offNudge(); offFanout(); offReport(); personaWrites.catch(() => {}); effortWrites.catch(() => {}); });
+  ctx.effect(() => () => {
+    disposeInjector(); offNudge(); offFanout(); offReport();
+    reminderBySession.clear(); nudgedTurn.clear(); turnTools.clear();
+    personaWrites.catch(() => {}); effortWrites.catch(() => {});
+  });
   /** Resolves once every queued write of either record has been attempted; used by tests. */
   const settled = () => Promise.all([personaWrites.catch(() => {}), effortWrites.catch(() => {})]);
 

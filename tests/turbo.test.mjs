@@ -7,16 +7,29 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { policyText, OFF_NOTICE, LIGHTNING_POLICY, lightningNudge, tokenMultiplier, ULTRA_POLICY, SUBAGENT_GUARD, FACT_CHECK, SUPERFAST_POLICY, PRECEDENCE, MANDATE, WORK_PERSONA, CHAT_PERSONA, LANGUAGE_POLICY } from '../src/turbo-policy.js';
+import { policyText, OFF_NOTICE, LIGHTNING_POLICY, lightningNudge, tokenMultiplier, ULTRA_POLICY, SUBAGENT_GUARD, FACT_CHECK, SUPERFAST_POLICY, PRECEDENCE, MANDATE, WORK_PERSONA, CHAT_PERSONA, LANGUAGE_POLICY, INJECTION_BLOCKS } from '../src/turbo-policy.js';
 import { createPolicyInjector, registerTurbo, TURBO_EVENT, TURBO_PATH } from '../src/turbo.js';
 
-function fakeCtx() {
+function fakeCtx({ context = false } = {}) {
   const listeners = new Map();
   const routes = [];
+  const logs = [];
+  const contexts = [];
+  const effects = [];
   return {
     routes,
+    logs,
+    contexts,
+    ...(context ? { systemPrompt: { context(entry) {
+      contexts.push(entry);
+      return () => { const index = contexts.indexOf(entry); if (index >= 0) contexts.splice(index, 1); };
+    } } } : {}),
+    dispose() { for (const cleanup of effects.splice(0)) cleanup(); },
+    emitEvent(session, event) {
+      for (const handler of listeners.get('session/event') ?? []) handler(session, event);
+    },
     get listenerCount() { let total = 0; for (const chain of listeners.values()) total += chain.length; return total; },
-    logger: { warn() {} },
+    logger: { warn() {}, info(message) { logs.push(message); } },
     on(name, handler) {
       const chain = listeners.get(name) ?? [];
       chain.push(handler);
@@ -41,7 +54,7 @@ function fakeCtx() {
       callback({ connection: { fetch: { register: route => { routes.push(route); return () => {}; } } } });
       return () => {};
     },
-    effect() { return () => {}; },
+    effect(factory) { const cleanup = factory(); if (typeof cleanup === 'function') effects.push(cleanup); return () => {}; },
   };
 }
 
@@ -83,17 +96,14 @@ test('policy text is empty only when both switches are off', () => {
   assert.doesNotMatch(both, /Ignore every rule above about fan-out/, 'a parent must not be told to ignore fan-out');
 });
 
-test('lightning triggers two children on every turn, with no condition to satisfy', () => {
-  const text = policyText({ lightning: true });
-  assert.match(text, /dispatch two subagents on two different angles/);
-  assert.match(text, /ONE assistant message/);
-  // The mandate carries no trigger list any more: a conditional wording is what previously turned the
-  // mandate back into a judgement call. This asserts the absence, not a phrasing.
-  assert.doesNotMatch(text, /when a condition holds|four fan-out conditions/, 'no trigger list may return');
-  assert.match(text, /Delegation is MANDATORY, on every turn, with no exemption/);
-  // The recursion guard keeps a child from fanning out again; the parent-side text must not carry it.
-  assert.doesNotMatch(text, /delegated sub-agent/);
-  assert.match(policyText({ lightning: true, subagent: true }), /delegated sub-agent/);
+test('lightning routes through hidden A/B/C channel instead of ordinary forced delegation', () => {
+  const text=policyText({lightning:true});
+  assert.match(text,/首选flash_start提交2–4条独立任务/);
+  assert.match(text,/flash_control reply/);
+  assert.match(text,/整理者S只对回传数据轻量汇总/);
+  assert.doesNotMatch(text,/dispatch two subagents on two different angles|Delegation is MANDATORY/);
+  assert.doesNotMatch(text,/## 先判后派/);
+  assert.match(text,/旧的固定两分支、只调用一次flash_run/);
 });
 
 test('Ultra demands a wider read of the request, not just stricter reporting', () => {
@@ -143,69 +153,52 @@ test('Ultra demands a wider read of the request, not just stricter reporting', (
   assert.match(ULTRA_POLICY, /the persona wins on form and Ultra wins on substance/);
 });
 
-test('Lightning discloses its cost, keeps delegation purposeful, and never shrinks the work itself', () => {
-  assert.match(LIGHTNING_POLICY, /Cost is disclosed, never rationed/);
-  assert.match(LIGHTNING_POLICY, /Never drop an angle, a check, or a verification to spend less/);
-  // Purpose before volume: 22 children accumulated over eleven turns, every batch a ritual pair. The
-  // anti-ritual rules survive that episode. What changed since is the exemption set: the conditional
-  // gate ("when a condition holds") swung the behaviour to zero delegations across 539 tool calls in one
-  // armed session, so the contract now states the mandate unconditionally and names no exemption at all.
-  assert.match(LIGHTNING_POLICY, /Split by angle, never clone/);
-  assert.match(LIGHTNING_POLICY, /Two copies of one prompt are not two children/);
-  assert.match(LIGHTNING_POLICY, /Never dispatch to re-confirm ground this conversation already covered/);
-  assert.match(LIGHTNING_POLICY, /Two is the floor, and there is no ceiling on the parent/);
-  // The old text capped the turn at one batch and forbade a second. Both are gone: "at least two" was
-  // always a floor, and a new development reopens the fan-out in the same turn.
-  assert.match(LIGHTNING_POLICY, /a turn that carries six independent angles dispatches six/);
-  assert.match(LIGHTNING_POLICY, /A new development is:/);
-  assert.doesNotMatch(LIGHTNING_POLICY, /Never dispatch a second round in the same turn/, 'the one-batch cap must not return');
-  assert.match(LIGHTNING_POLICY, /Keep only as many in flight as the harness can run at once/);
-  // The mandate is unconditional, and the absence of an exemption list is the point: a closed list of
-  // exceptions is what a reader turns into a judgement call once the list runs out of matches.
-  assert.match(LIGHTNING_POLICY, /Delegation is MANDATORY, on every turn, with no exemption/);
-  assert.match(LIGHTNING_POLICY, /There is no exempt turn/);
-  assert.match(LIGHTNING_POLICY, /A reason this turn looks special is not an exemption/);
-  assert.doesNotMatch(LIGHTNING_POLICY, /needs no children at all/, 'the blanket exemption must not return');
-  assert.doesNotMatch(LIGHTNING_POLICY, /Delegation is the DEFAULT, not a judgement call/, 'the conditional gate must not return');
-  // Reuse beats respawn: a continued child keeps its reading, a new one re-reads and leaves a session.
-  assert.match(LIGHTNING_POLICY, /Reuse before you respawn/);
-  assert.match(LIGHTNING_POLICY, /continue that child with a message instead of creating another one/);
-  assert.match(LIGHTNING_POLICY, /a check that has to stand on its own still needs a new child/);
-  // Numbering stays one clean run, because the model reads the numbers as structure. The list is no
-  // longer 1..12: clause 3 was merged away when the trigger list went, so the run is 1..12 over eleven
-  // numbers plus the closing cost clause, and the assertion follows the actual sequence rather than an
-  // assumed one — a gap is the defect it exists to catch, not the expected value.
-  const numbers = [...LIGHTNING_POLICY.matchAll(/^(\d+)\./gm)].map(match => Number(match[1]));
-  assert.equal(numbers.length, new Set(numbers).size, 'no duplicate numbering');
-  assert.deepEqual(numbers, [...numbers].sort((a, b) => a - b), `numbering must ascend: ${numbers}`);
-  // The self-check is what makes the mandate enforceable rather than advisory.
-  assert.match(LIGHTNING_POLICY, /Self-check before you send: name the condition that fired/);
-  // Waiting on children is silent work, not a reason to speak.
-  assert.match(LIGHTNING_POLICY, /While relevant children run, keep working — reading, checking, verifying — and send nothing to the user/);
-  assert.doesNotMatch(LIGHTNING_POLICY, /never keep more than six in flight/, 'concurrency is limited by the harness, not by price');
-  // The reminder is the ONLY copy of the mandate the model sees each turn, so it must restate the same
-  // terms verbatim. Nothing asserted this before — which is exactly how the two texts drifted apart.
-  const reminder = lightningNudge(1, 1);
-  assert.ok(reminder.includes('dispatch two subagents on two different angles'), 'the mandate must appear in the reminder verbatim');
-  assert.ok(reminder.includes('This is mandatory and unconditional'), 'the reminder must keep the unconditional wording');
-  assert.ok(reminder.includes('There is no exempt turn'), 'the exemption-free statement must survive in the reminder');
-  assert.ok(reminder.includes('that check is not delegation'), 'reuse-first must stay in the reminder');
-  // The completion half travels with the same reminder. Without it the reminder only ever asked for
-  // dispatches and said nothing about when a turn may end — which is how a turn could dispatch two
-  // children, start writing while they were still flying, and still read as compliant.
-  assert.ok(reminder.includes('it ends only after the last child is back'), 'the completion rule must ride along every turn');
-  assert.ok(reminder.includes('all four must be true'), 'the four completion conditions must be named');
-  assert.ok(reminder.includes('the conflicts between summaries are resolved, not averaged'), 'averaging summaries must be ruled out');
-  assert.ok(reminder.includes('you have read the code the answer describes'), 'reading the code yourself must be required');
-  assert.ok(reminder.includes('every verification has actually executed'), 'an unrun check must not count');
-  assert.ok(reminder.includes('fails this turn'), 'writing over a running child must be named as a failure');
-  assert.ok(reminder.includes('handed to a child to check independently'), 'a fix must be re-checked by a fresh child');
-  // The figure the interface advertises must stay readable out of the contract.
-  assert.deepEqual(tokenMultiplier(), { value: 1.5, exact: true });
-  // Reuse-first: the check must be in the contract, and the per-turn reminder must repeat it, or every turn
-  // keeps pushing toward new children regardless.
-  assert.match(LIGHTNING_POLICY, /one list_agents call tells you which child is inactive and fits/);
-  assert.match(lightningNudge(1, 1), /that check is not delegation/);
+test('hidden Lightning requires complete tasks, separate ownership and honest partial results', () => {
+  assert.match(LIGHTNING_POLICY,/materials/);
+  assert.match(LIGHTNING_POLICY,/write_paths为不重叠绝对路径/);
+  assert.match(LIGHTNING_POLICY,/所有Agent无父历史/);
+  assert.match(LIGHTNING_POLICY,/失败\/partial\/未验证项必须保留/);
+  assert.match(LIGHTNING_POLICY,/不能重复执行已分派内容/);
+  assert.match(lightningNudge(1,1),/首轮flash_start派2–4个/);
+  assert.doesNotMatch(lightningNudge(1,1),/dispatch two subagents/);
+  assert.match(LIGHTNING_POLICY, /短定位文件与接口后尽早派工/);
+  assert.match(LIGHTNING_POLICY, /每个分支只交一个小验收产物/);
+  assert.match(LIGHTNING_POLICY, /每轮整合\/验证后重新拆分/);
+  assert.match(LIGHTNING_POLICY, /max-tokens仍算失败，不自动重试/);
+  assert.match(LIGHTNING_POLICY, /先读现存文件和已交artifact/);
+  assert.match(lightningNudge(1, 3), /只补剩余/);
+  assert.match(lightningNudge(1, 3), /不凑分工/);
+});
+
+test('Lightning gates public reporting per run without delaying artifact acceptance or help', () => {
+  assert.match(LIGHTNING_POLICY, /收到artifact即可使用，不等整理/);
+  assert.match(LIGHTNING_POLICY, /有空槽用flash_control add追加1–4条/);
+  assert.match(LIGHTNING_POLICY, /collecting尚未收齐时，artifact\/branch终态仅内部消化、提前验收与续派/);
+  assert.match(LIGHTNING_POLICY, /禁止每来一个分支就面向用户重复总结/);
+  assert.match(LIGHTNING_POLICY, /不要求每次工具调用前发正文进度/);
+  assert.match(LIGHTNING_POLICY, /help即时回复，仅就所需决定交流，不复述产物/);
+  assert.match(LIGHTNING_POLICY, /run-complete\/run-failed或该run reporting phase为ready后/);
+  assert.match(LIGHTNING_POLICY, /统一向用户报告一次，只补此前已公开内容的变化/);
+  assert.match(LIGHTNING_POLICY, /旧run的ready不放行新run/);
+  assert.match(LIGHTNING_POLICY, /single-final整理须汇齐全部结果与artifact/);
+  assert.match(LIGHTNING_POLICY, /deliveredFacts仅内部送达不是已向用户说/);
+  assert.match(lightningNudge(2, 3), /collecting仅内部验收续派\/help决定.*ready统一报告一次/);
+});
+
+test('Lightning collecting suppresses internal recaps, not direct user answers or final delivery', () => {
+  const text = policyText({ lightning: true });
+  assert.match(text, /汇报闸门仅抑制内部artifact\/branch终态的逐份复述，不是禁止所有沟通/);
+  assert.match(text, /collecting期间用户直接提问、催问或要求解释，必须及时给出非空答复/);
+  assert.match(text, /按已确认事实回应当下问题，未完成与未验证项如实说明/);
+  assert.match(text, /不等ready、不以静默或“无新增”代替回答/);
+  assert.match(text, /这类答复不放行其余内部产物的逐份总结，也不冒充最终交付/);
+  assert.match(text, /最终交付必须非空，包含结果与实际验证/);
+  assert.match(text, /collecting不等于禁止所有沟通/);
+  const nudge = lightningNudge(3, 5);
+  assert.match(nudge, /闸门仅抑制内部artifact逐份复述/);
+  assert.match(nudge, /collecting不等于禁止所有沟通/);
+  assert.match(nudge, /用户直接提问\/催问\/要解释必须及时非空答复，不等ready/);
+  assert.match(nudge, /父给非空最终回答/);
 });
 
 test('Chinese is the default for every armed session, and yields when another plugin or the host sets a language', () => {
@@ -230,7 +223,8 @@ test('Chinese is the default for every armed session, and yields when another pl
   const full = policyText({ persona: 'work', ultra: true, lightning: true, chinese: true });
   assert.ok(full.indexOf('Language (active)') < full.indexOf('Persona (active)'), 'language before persona');
   assert.ok(full.indexOf('Language (active)') < full.indexOf('Ultra Mode'), 'language before Ultra');
-  assert.ok(full.indexOf('## Mode policy — scope and precedence') < full.indexOf('Language (active)'), 'precedence stays first');
+  // The preamble is retired (covered above too); indexOf === -1 must not masquerade as ordering.
+  assert.ok(!full.includes(PRECEDENCE), 'the retired precedence block stays absent');
   // Callers that arm nothing still get an empty block; the host is what forces the flag.
   assert.equal(policyText(), '');
 });
@@ -245,20 +239,23 @@ test('有屏幕就直接动手：默认就注入，关掉才不注入', () => {
   assert.ok(!off.includes('有屏幕就直接动手'), '关掉后一个字都不该留');
 });
 
-test('事实核查回到注入里，但只有它回来：策略前言与强制约束仍然退役', () => {
-  // 「Codex提示词注入」那层壳撤掉了，原因是它把语气和语气无关的东西捆在一起。事实核查单独领开关后
-  // 请回来——它管的是「别凭记忆瞎答、查不到就问」，跟扮演无关，关掉它不影响人设。所以这里两个方向
-  // 都要钉住：默认随每个模式出现，开关关掉就真的不出现；另外两段永远不回来。
+test('事实核查、先判后派、想完再答已退役：任何模式都不再注入', () => {
+  // 用户 2026-11-04 要求撤掉这三项：设置里的开关移除，文本也不再进提示词。
+  // 策略前言与强制约束更早退役，同样不该回来。
   assert.equal(policyText(), '', 'an unarmed session still gets nothing');
   for (const flags of [{ chinese: true }, { ultra: true }, { lightning: true }, { superfast: true }, { persona: 'work' }, { persona: 'chat' }]) {
     const text = policyText(flags);
-    assert.ok(text.includes(FACT_CHECK), `事实核查该随每个模式注入：${JSON.stringify(flags)}`);
+    assert.ok(!text.includes(FACT_CHECK), `事实核查不该再注入：${JSON.stringify(flags)}`);
+    assert.ok(!text.includes('## 先判后派'), `先判后派不该再注入：${JSON.stringify(flags)}`);
+    assert.ok(!text.includes('## 边想边说'), `想完再答不该再注入：${JSON.stringify(flags)}`);
     assert.ok(!text.includes(PRECEDENCE), `策略前言不该再出现：${JSON.stringify(flags)}`);
     assert.ok(!text.includes(MANDATE), `强制约束不该再出现：${JSON.stringify(flags)}`);
   }
-  // 缺键视为开，只有显式 false 才关——和别的注入块同一个约定。
-  assert.ok(!policyText({ chinese: true, injection: { factCheck: false } }).includes(FACT_CHECK), '开关关掉时必须真的消失');
-  assert.ok(policyText({ chinese: true, injection: {} }).includes(FACT_CHECK), '缺键视为开');
+  // 开关表里也不该再有这三项：旧配置里的键会被丢掉，不会报错。
+  const ids = INJECTION_BLOCKS.map(block => block.id);
+  for (const gone of ['factCheck', 'triage', 'thinkingAloud']) {
+    assert.ok(!ids.includes(gone), `开关表不该再有 ${gone}`);
+  }
 });
 
 test('the injected contract stays free of accidental duplication', () => {
@@ -294,9 +291,9 @@ test('the injected contract stays free of accidental duplication', () => {
 });
 
 test('the cost figure shown to the client is read back out of the contract', () => {
-  assert.deepEqual(tokenMultiplier(), { value: 1.5, exact: true });
+  assert.deepEqual(tokenMultiplier(), { value: null, exact: false });
   // The armed contract itself must state the same number the interface advertises.
-  assert.match(LIGHTNING_POLICY, /at least 1\.5x the tokens/);
+  assert.doesNotMatch(LIGHTNING_POLICY, /at least 1\.5x the tokens/);
 });
 
 test('injector appends one message per session, only when the text changes', async () => {
@@ -418,7 +415,7 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     // An unset style answers `none`, not an empty string and not `work`: `none` is a real third choice
     // ("inject no style template"), and the old silent fold to `work` is what made the settings row look
     // stuck on 工作 no matter what was picked.
-    assert.deepEqual(empty.result, { ok: true, value: { persona: 'none', lightning: false, ultra: false, superfast: false, tokenMultiple: 1.5, tokenExact: true } });
+    assert.deepEqual(empty.result, { ok: true, value: { persona: 'none', lightning: false, ultra: false, superfast: false, tokenMultiple: null, tokenExact: false } });
 
     // The three effort switches are written by this route, into `$DSH_HOME/storages/codex-ui-effort.json`
     // — the same record `dsh-codex-ui-reasoning` writes (src/turbo.js:745-750). The write is a whole-file
@@ -431,14 +428,14 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
     assert.equal(armed.result.value.ultra, true);
     // The write reached the shared record, and the read route serves it back.
     const afterUpdate = await call({ sessionId: 's1', action: 'read' });
-    assert.deepEqual(afterUpdate.result.value, { persona: 'none', lightning: true, ultra: true, superfast: false, tokenMultiple: 1.5, tokenExact: true });
+    assert.deepEqual(afterUpdate.result.value, { persona: 'none', lightning: true, ultra: true, superfast: false, tokenMultiple: null, tokenExact: false });
     assert.equal(existsSync(join(home, 'storages', 'codex-ui-effort.json')), true, 'an accepted update must create the effort record');
 
     // The record has two writers now. The test writes it directly, the way the other plugin does, and the
     // read route has to serve that too — including a rewrite that lands while this process is running.
     writeEffortRecord(home, { s1: { lightning: true, ultra: true } });
     const reread = await call({ sessionId: 's1', action: 'read' });
-    assert.deepEqual(reread.result.value, { persona: 'none', lightning: true, ultra: true, superfast: false, tokenMultiple: 1.5, tokenExact: true });
+    assert.deepEqual(reread.result.value, { persona: 'none', lightning: true, ultra: true, superfast: false, tokenMultiple: null, tokenExact: false });
     const stored = JSON.parse(readFileSync(join(home, 'storages', 'codex-ui-effort.json'), 'utf8'));
     assert.deepEqual(stored.sessions.s1.lightning, true);
 
@@ -450,7 +447,7 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
 
     // The hero's "next session" scope reads and writes the pending pick without touching session rows.
     const heroRead = await call({ sessionId: '', action: 'read' });
-    assert.deepEqual(heroRead.result.value, { persona: 'none', lightning: false, ultra: false, superfast: false, pending: true, tokenMultiple: 1.5, tokenExact: true });
+    assert.deepEqual(heroRead.result.value, { persona: 'none', lightning: false, ultra: false, superfast: false, pending: true, tokenMultiple: null, tokenExact: false });
     const heroPick = await call({ sessionId: '', action: 'update', persona: 'chat' });
     assert.equal(heroPick.result.value.persona, 'chat');
     // State writes are queued; await the chain rather than guessing at a delay.
@@ -574,36 +571,28 @@ test('turbo endpoint reads and updates per-session flags and survives a corrupt 
   }
 });
 
-test('Superfast builds a two-tier tree, stamps the tier in every child prompt, and stops at tier 2', () => {
+test('Superfast uses speed-first DAG executors and lossless direct delivery', () => {
   const tree = policyText({ persona: 'work', superfast: true });
-  // The tree is the point: a tier-1 child must open at least two of its own, and a new development
-  // reopens that fan-out because two is a floor rather than a budget.
   assert.match(tree, /## Superfast Mode/);
-  assert.match(tree, /open at least two grandchildren before you report back/);
-  assert.match(tree, /Two is the floor, not a budget/);
-  assert.match(tree, /A new development reopens the fan-out/);
-  // Depth travels inside the prompts, because the host cannot tell a child how deep it sits.
-  assert.match(tree, /Tier: N of 2/);
-  assert.match(tree, /Tier: 2 of 2/);
-  // And it is bounded by depth, not by width: without this the fan-out is seven agent contexts instead
-  // of one, each with its own fixed cost.
-  assert.match(tree, /The one ceiling is depth, not width/);
-  assert.match(tree, /There is no tier 3|there is no tier 3/);
-  assert.match(tree, /never fan out past tier 2/);
-  // The subtree reports only after it is quiet: same completion rule as the parent.
-  assert.match(tree, /Do not report to the parent until the subtree is quiet/);
-  // 超快那份现在自带全部骨架：闪电合同不再跟着它一起注入，所以「怎么简报子代理」这些父级规则
-  // 必须在这份里自查得到。这条断言就是它的看门人。
-  assert.doesNotMatch(tree, /## Lightning Mode/, '超快不该再连带注入闪电那份');
-  assert.match(tree, /Delegation is mandatory at every tier/);
-  assert.match(tree, /Split by angle, never clone/);
-  assert.match(tree, /You manage: plan, decompose/);
-  assert.match(tree, /One writer per file/);
-  assert.match(tree, /Ask, do not assume/);
-  // The ordinary guard would forbid the very delegation the tree is built from, so it must be gone.
-  assert.doesNotMatch(tree, /Ignore every rule above about fan-out/);
-  assert.doesNotMatch(tree, /the tier-aware note belongs to the child/);
-  assert.match(policyText({ persona: 'work', superfast: true, subagent: true }), /your prompt's first line fixes that tier/);
+  assert.match(tree, /superfast_start \/ superfast_control/);
+  assert.match(tree, /默认每父32个并发执行槽/);
+  assert.match(tree, /实际capacity和宿主限制/);
+  assert.match(tree, /依赖DAG/);
+  assert.match(tree, /执行者不派生代理或另起run/);
+  assert.match(tree, /互斥write_paths/);
+  assert.match(tree, /真正阻塞才help等待父reply/);
+  assert.match(tree, /artifact、分支完成、容量变化、help或终态/);
+  assert.match(tree, /collecting期间/);
+  assert.match(tree, /用户直接提问、催问或要解释仍及时非空回应/);
+  assert.match(tree, /不展开普通 subagent 树/);
+  assert.match(tree, /取消必跑整理S/);
+  assert.match(tree, /程序化无损汇集/);
+  assert.match(tree, /不无脑重跑已证实分支全套/);
+  assert.match(tree, /shell并非静态强制路径沙箱/);
+  assert.match(tree, /superfast_control add/);
+  assert.doesNotMatch(tree, /小组长A.B.C.D|每个组长必须派2–3个执行者/);
+  assert.doesNotMatch(tree, /## Lightning Mode|Delegation is mandatory at every tier|never fan out past tier 2/);
+  assert.match(policyText({ persona: 'work', superfast: true, subagent: true }), /你是直接执行者/);
 });
 
 test('only a delegated child ends with the guard that forbids child fan-out', () => {
@@ -673,8 +662,8 @@ test('Lightning re-asserts its mandate once per turn, and only for an armed sess
       body: JSON.stringify({ type: 'client-request', rpcId: 'rn', method: TURBO_EVENT, payload }),
     }))).json();
     const stepOf = (id, turn, step = 1) => ({ agent: { id }, turn, step, signal: { aborted: false } });
-    const nudges = result => result.messages.map(m => m.content?.[0]?.text ?? '').filter(text => text.includes('Lightning is armed'));
-    const disarm = result => result.messages.map(m => m.content?.[0]?.text ?? '').filter(text => text.includes('Lightning is armed'));
+    const nudges = result => result.messages.map(m => m.content?.[0]?.text ?? '').filter(text => text.includes('快速闪电协作已开启'));
+    const disarm = result => result.messages.map(m => m.content?.[0]?.text ?? '').filter(text => text.includes('快速闪电协作已开启'));
 
     // An unarmed session never sees it.
     const cold = await ctx.fire('agent/pre-step', stepOf('s-cold', 3));
@@ -689,17 +678,19 @@ test('Lightning re-asserts its mandate once per turn, and only for an armed sess
     const firstNudges = nudges(first);
     assert.equal(firstNudges.length, 1, 'the first step of a turn carries exactly one reminder');
     assert.match(firstNudges[0], /turn 3/);
-    assert.match(firstNudges[0], /dispatch two subagents on two different angles/);
-    // One reminder per turn, on its first step. It used to repeat on steps 2 and 3 as well; that repetition
-    // is gone, so a later step of the same turn carries nothing.
+    assert.match(firstNudges[0], /首轮flash_start派2–4个/);
     const second = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 2));
-    assert.deepEqual(nudges(second), [], 'a later step of the same turn is not reminded again');
+    assert.deepEqual(nudges(second), [], 'no per-step nagging');
     const third = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 3));
-    assert.deepEqual(nudges(third), [], 'and the third step carries nothing either');
-    const fourth = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 4));
-    assert.deepEqual(nudges(fourth), [], 'a long turn is not nagged');
-    const repeated = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 1));
+    assert.equal(nudges(third).length, 1, 'zero dispatches trigger an early reminder at +2 steps');
+    const repeated = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 3));
     assert.deepEqual(nudges(repeated), [], 'the same step is never nudged twice');
+    assert.deepEqual(nudges(await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 10))), []);
+    const periodic = await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 11));
+    assert.equal(nudges(periodic).length, 1, 'review again eight steps after the early reminder');
+    assert.notEqual(nudges(periodic)[0], firstNudges[0], 'periodic reminders have distinct step text');
+    ctx.emitEvent({ header: { id: 's-armed' } }, { type: 'tool/call', data: { turn: 3, name: 'flash_start', arguments: '{}' } });
+    assert.equal(nudges(await ctx.fire('agent/pre-step', stepOf('s-armed', 3, 19))).length, 1, 'dispatch does not stop ongoing reviews');
     // The next turn gets its own, with its own number — that is what defeats the injector's
     // "same text, skip" rule, which is why the one-shot contract stopped steering anything.
     const nextTurn = await ctx.fire('agent/pre-step', stepOf('s-armed', 4, 1));
@@ -745,7 +736,7 @@ test('a delegated child inherits the switches of the session that spawned it', a
     // The tree contract reached the child, and the tier-aware tail replaced the ordinary guard: the
     // ordinary guard forbids fan-out outright, which cancels the very delegation Superfast is built from.
     assert.match(childText, /## Superfast Mode/, 'the child must receive the tree contract it is meant to run');
-    assert.match(childText, /Tier: 1 of 2/, 'the tier-aware child note must be the tail');
+    assert.match(childText, /你是直接执行者/, 'the role-aware child note must be the tail');
     assert.doesNotMatch(childText, /Ignore every rule above about fan-out/, 'the fan-out-killing guard must not be the tail');
     // The switches are inherited; the style is neither inherited nor written here — `personaFor` reads
     // per session and no longer stamps anything, so a step can not create a persona row at all. The old
@@ -754,11 +745,11 @@ test('a delegated child inherits the switches of the session that spawned it', a
     // The parent's switches are what the child is nudged by: the one-shot injection alone was measured to
     // stop steering after a few turns, which is the whole reason the per-turn reminder exists.
     const childNudges = texts(await ctx.fire('agent/pre-step', { ...childStep, turn: 2, step: 1 }))
-      .filter(text => text.includes('is armed'));
+      .filter(text => text.includes('超快闪电已开启'));
     assert.equal(childNudges.length, 1, 'a child inherits the per-turn reminder from its parent switches');
     // 提醒必须跟着模式走：父会话开的是超快，子代理收到的就不能是那句只讲一层的「Lightning is armed」，
     // 否则同一轮里两套合同打架，模型会挑轻的那条听。
-    assert.match(childNudges[0], /Superfast is armed/, '超快模式下每轮提醒也必须说超快');
+    assert.match(childNudges[0], /超快闪电已开启/, '超快模式下每轮提醒也必须说超快');
     assert.doesNotMatch(childNudges[0], /^\s*Lightning is armed/, '超快模式不该再收到闪电那版提醒');
     // A child of an unarmed parent still gets nothing but its own tail: no switches, no tree.
     writeEffortRecord(home, {});
@@ -783,7 +774,7 @@ test('a delegated child inherits the switches of the session that spawned it', a
     writeEffortRecord(home, { 'session-parent-tree': { lightning: false, superfast: false } });
     const offChild = texts(await ctx.fire('agent/pre-step', { ...armedChild, turn: 2 })).join('\n');
     assert.doesNotMatch(offChild, /## Superfast Mode/, 'the revoked tree must stop reaching the child too');
-    assert.doesNotMatch(offChild, /Tier: 1 of 2/, 'and the tier instruction must go with it');
+    assert.doesNotMatch(offChild, /你是直接执行者/, 'and the role instruction must go with it');
     // The language contract still applies to this session (it is forced on every session); what must not
     // survive is the tree. `OFF_NOTICE` belongs to a session that had armed text and lost all of it,
     // which this one never had — its style follows the pending value and no switch was ever on.
@@ -807,4 +798,223 @@ test('a user-written persona layers under the reply style instead of replacing i
   const off = policyText({ persona: 'none', chinese: true });
   assert.doesNotMatch(off, /Persona \(active\)/);
   assert.match(off, /Language \(active\)/);
+});
+
+test('Lightning reminders use relative steps, dispatch attempts and isolated session/turn state', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'codex-ui-relative-'));
+  const previous = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  try {
+    const ctx = fakeCtx();
+    registerTurbo(ctx);
+    const ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+    writeEffortRecord(home, Object.fromEntries(ids.map(id => [id, { lightning: true }])));
+    const step = async (id, turn, n, session = undefined) => {
+      const result = await ctx.fire('agent/pre-step', { agent: { id, session }, turn, step: n });
+      return result.messages.flatMap(m => m.content ?? []).filter(b => b.text?.startsWith('快速闪电协作已开启'));
+    };
+    const call = (id, turn, name, args) => ctx.emitEvent({ header: { id } }, {
+      type: 'tool/call', data: { turn, step: 101, callId: `${id}-${name}`, name, arguments: args },
+    });
+    for (const id of ids) assert.equal((await step(id, 7, 101)).length, 1);
+    call('a', 7, 'flash_start', '{}');
+    call('b', 7, 'flash_run', '{}');
+    call('c', 7, 'flash_control', JSON.stringify({ action: 'add' }));
+    // Call attempts count even when no success event ever arrives.
+    for (const id of ['a', 'b', 'c']) {
+      assert.equal((await step(id, 7, 103)).length, 0, `${id} attempted dispatch`);
+      assert.equal((await step(id, 7, 108)).length, 0, 'cadence is not based on global step buckets');
+      assert.equal((await step(id, 7, 109)).length, 1, 'dispatch still receives +8 review');
+      assert.equal((await step(id, 7, 117)).length, 1, 'reviews continue after first batch');
+    }
+    call('d', 7, 'flash_control', JSON.stringify({ action: 'status' }));
+    call('e', 7, 'flash_control', JSON.stringify({ action: 'reply' }));
+    call('f', 7, 'flash_control', JSON.stringify({ action: 'cancel' }));
+    call('g', 7, 'flash_control', '{broken');
+    for (const id of ['d', 'e', 'f', 'g']) {
+      assert.equal((await step(id, 7, 103)).length, 1, `${id} has no dispatch attempt`);
+      assert.equal((await step(id, 7, 110)).length, 0);
+      assert.equal((await step(id, 7, 111)).length, 1);
+    }
+    assert.equal((await step('a', 8, 201)).length, 1, 'next turn starts at its own cumulative step');
+    assert.equal((await step('a', 8, 203)).length, 1, 'earlier turn dispatch does not leak');
+    // A replayed turn/start must preserve observed dispatch and reminder state.
+    ctx.emitEvent({ header: { id: 'a' } }, { type: 'turn/start', data: { turn: 7 } });
+    assert.equal((await step('a', 7, 117)).length, 0);
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previous;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('reminder gates preserve standard, Superfast, clean, cgflash and injection-off behavior', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'codex-ui-gates-'));
+  const previous = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  try {
+    const ctx = fakeCtx();
+    const turbo = registerTurbo(ctx);
+    writeEffortRecord(home, { tree: { superfast: true }, clean: { lightning: true }, 'session-cgflash-x': { lightning: true }, armed: { lightning: true } });
+    const step = (id, n, session) => ctx.fire('agent/pre-step', { agent: { id, session }, turn: 3, step: n });
+    const text = result => result.messages.flatMap(m => m.content ?? []).map(b => b.text).join('\n');
+    assert.doesNotMatch(text(await step('standard', 101)), /快速闪电协作已开启|超快闪电已开启/);
+    assert.match(text(await step('tree', 101)), /超快闪电已开启/);
+    for (const n of [103, 109, 117]) assert.doesNotMatch(text(await step('tree', n)), /超快闪电已开启/);
+    assert.equal((await step('clean', 101, { header: { agentPreset: 'clean' } })).messages.length, 0);
+    const child = text(await step('session-cgflash-x', 101));
+    assert.match(child, /你是后台闪电执行者/);
+    assert.doesNotMatch(child, /快速闪电协作已开启|超快闪电已开启/);
+    assert.match(text(await step('armed', 101)), /快速闪电协作已开启/);
+    const route = ctx.routes.find(r => r.path === TURBO_PATH);
+    const response = await route.fetch(new Request('http://local/api', { method: 'POST', body: JSON.stringify({
+      type: 'client-request', rpcId: 'off', method: TURBO_EVENT,
+      payload: { action: 'injection', sessionId: 'armed', id: 'lightning', enabled: false },
+    }) }));
+    assert.equal((await response.json()).result.ok, true);
+    for (const id of ['armed', 'tree']) assert.doesNotMatch(text(await step(id, 203)), /快速闪电协作已开启|超快闪电已开启/);
+    await turbo.settled();
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previous;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('formal context carries live policy and bounded reminder state without user-message injection', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'codex-ui-context-'));
+  const previous = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  const ctx = fakeCtx({ context: true });
+  const turbo = registerTurbo(ctx);
+  try {
+    assert.equal(ctx.contexts.length, 1);
+    const entry = ctx.contexts[0];
+    assert.equal(entry.name, 'dsh-codex-ui:mode-policy');
+    assert.equal(entry.order, 620);
+    assert.equal(entry.interpolate, false);
+    const agent = { id: 'armed' };
+    const render = (target = agent) => entry.text({ agent: target });
+    const step = n => ctx.fire('agent/pre-step', { agent, turn: 7, step: n });
+    writeEffortRecord(home, { armed: { lightning: true } });
+    const stable = render();
+    assert.match(stable, /首选flash_start提交2–4条独立任务/);
+    assert.doesNotMatch(stable, /快速闪电协作已开启/);
+    assert.deepEqual((await step(101)).messages, [], 'formal host persists no policy or nudge user row');
+    const first = render();
+    assert.ok(first.startsWith(stable));
+    assert.match(first, /turn 7 step 101/);
+    assert.deepEqual((await step(102)).messages, []);
+    assert.equal(render(), first, 'non-review steps preserve only the last short state');
+    assert.deepEqual((await step(103)).messages, []);
+    const reviewed = render();
+    assert.match(reviewed, /turn 7 step 103/);
+    assert.doesNotMatch(reviewed, /turn 7 step 101/, 'old reminders are replaced rather than accumulated');
+    assert.equal(reviewed.split(LIGHTNING_POLICY).length, 2, 'one stable contract remains');
+    assert.match(render({ id: 'standard' }), /当前模式：标准/);
+    assert.doesNotMatch(render({ id: 'standard' }), /快速闪电协作已开启/);
+    assert.equal(render({ id: 'armed', session: { header: { agentPreset: 'clean' } } }), '');
+    assert.match(render({ id: 'session-cgflash-x' }), /你是后台闪电执行者/);
+    assert.doesNotMatch(render({ id: 'session-cgflash-x' }), /快速闪电协作已开启/);
+
+    writeEffortRecord(home, { armed: { superfast: true } });
+    assert.match(render(), /## Superfast Mode/);
+    assert.doesNotMatch(render(), /快速闪电协作已开启/, 'a mode switch hides the prior mode reminder immediately');
+    await ctx.fire('agent/pre-step', { agent, turn: 8, step: 201 });
+    assert.match(render(), /超快闪电已开启/);
+    const tree = render();
+    await ctx.fire('agent/pre-step', { agent, turn: 8, step: 209 });
+    assert.equal(render(), tree, 'Superfast remains once per turn');
+    const child = { id: 'child', session: { header: { origin: 'subagent', delegationDepth: 1, parentSession: 'armed' } } };
+    assert.match(render(child), /你是直接执行者/);
+
+    const route = ctx.routes.find(r => r.path === TURBO_PATH);
+    const response = await route.fetch(new Request('http://local/api', { method: 'POST', body: JSON.stringify({
+      type: 'client-request', rpcId: 'context-off', method: TURBO_EVENT,
+      payload: { action: 'injection', sessionId: 'armed', id: 'lightning', enabled: false },
+    }) }));
+    assert.equal((await response.json()).result.ok, true);
+    assert.match(render(), /当前模式：标准/);
+    assert.doesNotMatch(render(), /超快闪电已开启|## Superfast Mode|快速闪电协作已开启/);
+    writeEffortRecord(home, {});
+    assert.doesNotMatch(render(), /## Superfast Mode/);
+    await turbo.settled();
+  } finally {
+    ctx.dispose();
+    assert.equal(ctx.contexts.length, 0, 'context contribution is disposed');
+    assert.equal(ctx.listenerCount, 0, 'all observation listeners are disposed');
+    if (previous === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previous;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('legacy reminder provenance cannot cause a stable policy to be re-injected', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'codex-ui-nudge-source-'));
+  const previous = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  const ctx = fakeCtx();
+  registerTurbo(ctx);
+  try {
+    writeEffortRecord(home, { armed: { lightning: true } });
+    const log = [];
+    const agent = { id: 'armed', session: sessionWith(log) };
+    const step = n => ctx.fire('agent/pre-step', { agent, turn: 1, step: n });
+    const first = await step(101);
+    const policy = first.messages.filter(m => m.source.kind === 'plugin:dsh-codex-ui');
+    const nudge = first.messages.filter(m => m.source.kind === 'plugin:dsh-codex-ui:nudge');
+    assert.equal(policy.length, 1);
+    assert.equal(nudge.length, 1);
+    assert.match(nudge[0].content[0].text, /快速闪电协作已开启/);
+    log.push(...first.messages);
+    assert.deepEqual((await step(102)).messages, [], 'persisted nudge is not mistaken for a policy revision');
+    const review = await step(103);
+    assert.equal(review.messages.length, 1, 'review appends only its short reminder');
+    assert.equal(review.messages[0].source.kind, 'plugin:dsh-codex-ui:nudge');
+    log.push(...review.messages);
+    assert.deepEqual((await step(104)).messages, []);
+  } finally {
+    ctx.dispose();
+    if (previous === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previous;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('fan-out logs use the exact session and turn and count calls rather than successes', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'codex-ui-counts-'));
+  const previous = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  try {
+    const ctx = fakeCtx();
+    registerTurbo(ctx);
+    writeEffortRecord(home, { a: { lightning: true }, b: { lightning: true }, c: { lightning: true } });
+    const call = (id, turn, name = 'read', args = '{}') => ctx.emitEvent({ header: { id } }, {
+      type: 'tool/call', data: { turn, name, arguments: args, callId: `${id}-${turn}-${name}` },
+    });
+    for (let i = 0; i < 8; i++) {
+      call('a', 4);
+      call('b', 4);
+      call('a', 5);
+      call('standard', 4);
+    }
+    call('b', 4, 'flash_control', JSON.stringify({ action: 'add' }));
+    // Newer map rows and other sessions must not select the report's turn.
+    call('c', 99);
+    const stop = (id, turn) => ctx.fire('agent/turn-stopping', { agent: { id, session: { id } }, turn });
+    await stop('b', 4);
+    assert.deepEqual(ctx.logs, [], 'add call is a dispatch even without a success result');
+    await stop('standard', 4);
+    assert.deepEqual(ctx.logs, [], 'standard is not subject to Lightning diagnostics');
+    await stop('a', 4);
+    assert.equal(ctx.logs.length, 1);
+    assert.match(ctx.logs[0], /session a turn 4 spent 8 tool calls with 0 dispatch attempts/);
+    assert.doesNotMatch(ctx.logs[0], /clause|\(a\)-\(d\)/);
+    await stop('a', 4);
+    assert.equal(ctx.logs.length, 1, 'one diagnostic per exact turn');
+    await stop('a', 5);
+    assert.equal(ctx.logs.length, 2);
+    assert.match(ctx.logs[1], /session a turn 5 spent 8 tool calls/);
+    await stop('a', 6);
+    assert.equal(ctx.logs.length, 2, 'missing turn never falls back to another row');
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previous;
+    rmSync(home, { recursive: true, force: true });
+  }
 });

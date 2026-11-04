@@ -7,7 +7,19 @@
 // wrong slider position that `node --check` cannot see.
 //
 // Keep this file ASCII-only: it may be rewritten by Windows PowerShell.
-import { test, after } from 'node:test';
+import { test, after, afterEach } from 'node:test';
+
+const bundleDisposers = new Set();
+function bundleEffect(fn) {
+  const dispose = typeof fn === 'function' ? fn() : undefined;
+  if (typeof dispose !== 'function') return () => {};
+  const tracked = () => { bundleDisposers.delete(tracked); dispose(); };
+  bundleDisposers.add(tracked);
+  return tracked;
+}
+afterEach(() => {
+  for (const dispose of [...bundleDisposers]) dispose();
+});
 
 // Browser-scoped background timeouts otherwise escape new Function into Node's global
 // timer queue. Keep real delays (the Ultra notice tests depend on them), then release
@@ -336,7 +348,7 @@ test('open control renders the clickable switch, the Ultra track and the flags r
   // The status line that used to sit under the track is gone; the cost figure now lives only
   // in the lightning switch's tooltip.
   assert.equal(byClass(open, 'cg-model-flags').length, 0, 'no status row under the track');
-  assert.match(treeText(open), /\d+\s*[x\u00d7]\s*token/i, 'the token multiplier is still stated, in the switch tooltip');
+  assert.match(treeText(open), /至少 1.5× token 消耗/, 'fast channel states the measured lower bound of the fast channel');
   // A meteor travels a measured pixel distance: `translateX(100%)` would resolve
   // against the meteor's own width and stop the shower halfway along the rail.
   assert.equal(field.style['--cg-meteor-travel'], '268px', 'travel must be the measured track width plus slack');
@@ -344,19 +356,21 @@ test('open control renders the clickable switch, the Ultra track and the flags r
 
 test('the cost line follows the multiplier the Host reports', () => {
   const permissive = mountControl([true, 'effort', '', null, null, true, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 4, exact: true }, false, {}, null, 0]).element;
-  assert.match(treeText(permissive), /4\s*[x\u00d7]\s*token/i, 'a different multiplier must be shown as-is');
+  assert.match(treeText(permissive), /至少 1.5× token 消耗/);
+  assert.doesNotMatch(treeText(permissive), /4\s*[x\u00d7]\s*token/i);
 
   // `undefined` in the alias slot on purpose: the component seeds `aliases` with a function
   // (`useState(readModelAliases)`, src/model-ui.js:246), so a scripted `{}` in that slot replaces the
   // map with an empty one and the shim never calls the initialiser. This test is about the multiplier,
   // not about names, so the slot is left unscripted and the real initial value runs.
   const inexact = mountControl([true, 'effort', '', null, null, true, false, false, { sessionId: 'session-1', phase: 'ready', retrySeq: 0 }, { value: 15, exact: false }, false, undefined, null, 0]).element;
-  assert.match(treeText(inexact), /15\s*[x\u00d7]\s*token/i, 'the fallback figure still shows');
+  assert.match(treeText(inexact), /至少 1.5× token 消耗/);
+  assert.doesNotMatch(treeText(inexact), /15\s*[x\u00d7]\s*token/i);
 
   const disarmed = mountControl(OPEN_REAL_TIER).element;
   // The figure now lives in the trigger's tooltip, which explains the menu in every state. The wording moved
   // with the interaction: the bolt opens a two-option menu, so a disarmed bolt advertises 快速.
-  assert.match(treeText(disarmed), /快速每轮至少并发 2 个子代理/, 'the disarmed bolt still explains what it offers');
+  assert.match(treeText(disarmed), /快速使用隐藏闪电通道/, 'the disarmed bolt still explains what it offers');
   assert.doesNotMatch(treeText(disarmed), /已开启/, 'and does not claim to be armed');
 });
 
@@ -674,7 +688,7 @@ test('the sidebar slot occupant renders inside its own root', () => {
     connection: { rpc: { call: () => Promise.resolve({ ok: true, value: {} }) } },
     sessions: { subagentAddress: () => undefined, binding: () => undefined },
     remote: { agentPresets: { list: () => Promise.resolve({ ok: true, value: [] }) } },
-    effect: () => noop,
+    effect: bundleEffect,
     on: () => noop,
     logger: { warn: noop, info: noop, error: noop },
     get: () => undefined,
@@ -811,7 +825,7 @@ function mountSidebar(sessions, options = {}) {
       },
     },
     remote: { agentPresets: { list: () => Promise.resolve({ ok: true, value: [] }) } },
-    effect: () => noop,
+    effect: bundleEffect,
     on: () => noop,
     logger: { warn: noop, info: noop, error: noop },
     get: () => undefined,
@@ -946,6 +960,24 @@ test('a refused or rejected rename keeps the dialog open and states the reason',
   const afterRejection = rejected.rerender();
   assert.equal(byClass(afterRejection, 'cg-rename-error')[0].props.children, '会话打不开');
   assert.ok(byClass(afterRejection, 'cg-rename-dialog')[0], 'a rejected hop keeps the draft');
+});
+
+test('hidden flash sessions never render or inflate ordinary child counts', () => {
+  const sessions = sidebarFixture();
+  for (const role of ['A', 'B', 'C']) {
+    const id = `session-cgflash-render-${role}`;
+    sessions[id] = { id, title: `FLASH_SECRET_${role}`, parentId: 'parent', origin: 'subagent', createdAt: 200, retainedBy: {} };
+  }
+  sessions['session-cgflash-root-A'] = { id: 'session-cgflash-root-A', title: 'FLASH_SECRET_ROOT', createdAt: 201, retainedBy: {} };
+  const { rerender } = mountSidebar(sessions, {
+    overrides: { [SIDEBAR_SLOT.recentOpen]: true, [SIDEBAR_SLOT.childPanel]: new Set(['parent']), [SIDEBAR_SLOT.subagentOpen]: new Set(['parent']), [SIDEBAR_SLOT.groupShowAll]: new Set(['parent:subagents']) },
+  });
+  const tree = rerender();
+  assert.doesNotMatch(treeText(tree), /FLASH_SECRET/);
+  const toggle = byClass(tree, 'cg-children-toggle')[0];
+  assert.equal(toggle.props['data-subagents'], 10);
+  assert.equal(toggle.props['data-branches'], 2);
+  assert.match(treeText(tree), /子代理 1/);
 });
 
 test('a spawning row splits its children into a subagent group and a branch group', () => {

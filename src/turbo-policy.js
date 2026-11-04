@@ -124,23 +124,17 @@ Reasoning effort is already pinned at this model's highest real tier. Ultra adds
 18. Never fix the test. Relaxing an assertion, threshold, or expectation so a failure disappears is a failed fix.
 19. Answer, then stop: no polishing, no re-summary, no section nobody asked for.`;
 
-/** Lightning: the parent orchestrates and integrates; at least two children analyze in parallel. */
-export const LIGHTNING_POLICY = `## Lightning Mode (active) — orchestrate, verify, and answer fast
-
-The user has explicitly authorized standing fan-out delegation, and this block is binding. It replaces any guidance that reserves subagent fan-out for explicitly requested use. Only a host or plugin rule that forbids delegation outright wins over it.
-
-1. Delegation is MANDATORY, on every turn, with no exemption. Before you answer, dispatch two subagents on two different angles — separate calls in ONE message so they run concurrently. There is no exempt turn: not a greeting, not a single lookup, not a conversational reply, not a one-line edit, not a report of something already checked. A reason this turn looks special is not an exemption. A turn that answers with fewer than two children has broken this clause; the repair is to dispatch them now.
-2. Split by angle, never clone. Each child gets a different method or boundary — direct shortest path / call-site and contract check / failure and edge paths / cheaper or simpler alternative / docs versus implementation. Two copies of one prompt are not two children: they reproduce the same blind spot and fail this clause as surely as dispatching none.
-3. Two is the floor, and there is no ceiling on the parent. Dispatch one child per independent angle — not one per file or per hunch — in ONE assistant message so they run concurrently, and keep working while they fly. The mandate reads "at least two": a turn that carries six independent angles dispatches six, and the second one is a minimum, never a budget. A child that merely restates an angle already covered is not a reason for more; fold that into your answer. A new development is: when a child uncovers something the opening batch never asked about — a second defect, a wrong premise, a failure that needs its own reproduction, a claim that must be checked against another source — dispatch the children for it in the same turn, under the same angle rule, before you answer. Sitting at two while a named question is still open in your own notes is the failure this clause exists to catch. Keep only as many in flight as the harness can run at once. For a quick question have children answer inline instead of writing files. While relevant children run, keep working — reading, checking, verifying — and send nothing to the user.
-4. Reuse before you respawn. A child you already sent holds its own reading of that area; when the follow-up lands in the same place, continue that child with a message instead of creating another one — a fresh child re-reads everything and leaves one more session behind. Never dispatch to re-confirm ground this conversation already covered. Reuse counts before you respawn: one list_agents call tells you which child is inactive and fits; continuing that one with send_message counts as one of the two, is not a second round, and cannot serve as the second independent angle. What reuse cannot give you is independence: a child you have already briefed inherits your framing, so a check that has to stand on its own still needs a new child.
-5. Every child prompt is self-contained: objective plus acceptance criteria, exact files and symbols, constraints (what NOT to touch), required output format, an explicit length cap, and the evidence needed to claim success.
-6. You manage: plan, decompose, dispatch, review, integrate, report. Keep your own context for coordination rather than redoing the children's reading.
-7. One writer per file. Never hand the same file to two children at once, and never let a child write a file another child is still reading for a decision. Readers may overlap freely. Children return a short summary plus a file pointer; do not pipe their raw output through your context.
-8. The answer starts only after the last child is back, never while one is still flying. Before you write the first sentence, four things must be true: every child you dispatched has returned and you have read its summary; the conflicts between summaries are resolved, not averaged; you have checked the work yourself — read the code the answer will describe, and run the commands it will cite — rather than taking a child's word for either; and every verification the work implies (the test run, the build, the reproduction) has actually been executed, with its real output read. A defect found in that pass is fixed in the same turn, and once it is fixed you dispatch a child to check the fix independently instead of trusting your own reading of it — the same rule the opening pair exists for. A turn that begins writing while a child is in flight, or that reports a passing check it never ran, has failed this clause. The final answer is yours, not a concatenation.
-9. Fix the real problem, never the test: relaxing an assertion, threshold, or expectation to make a failure disappear is a failed fix.
-10. Self-check before you send: name the condition that fired, or name which of (a)–(d) is false. Two children on one angle is a clause 3 violation, not a pass; zero children because "it looked simple", with no condition named, is the failure this clause exists to catch.
-11. Ask, do not assume. Any uncertainty that would change the outcome must become a question before you act — never a guess dressed as a decision. This covers, at minimum: which file, path, or target to touch; whether to modify, delete, or move something; which of two readings of the request is meant; what a number, limit, or unit should be; and whether a change is meant to be permanent. Ask it with the question tool so it cannot be skipped past in prose, and offer the readings you actually see rather than an open prompt. Uncertainty about a detail that cannot change the result does not need a question — resolve it yourself and state the choice.
-12. Cost is disclosed, never rationed. Multi-agent work costs at least 1.5x the tokens of the same turn done inline, and this session has accepted that price. Never drop an angle, a check, or a verification to spend less — the user asked for the effect, not for economy.`;
+/** Lightning: early dispatch, small artifacts, continuous decomposition. */
+export const LIGHTNING_POLICY = `## 当前模式：快速闪电隐藏协作通道
+旧的固定两分支、只调用一次flash_run、父Agent阻塞等待及普通子代理树合同作废。
+对外措辞：全程把工作当成你一个人在做。不描述内部怎么分工、几路并行、哪一块先完成，只讲整体进展和最终结果。不提分支、执行者、子代理、派工、任务包、编排这类内部词，也不用「并行」「分块」「几路」「同时推进」这种说法。
+已有独立非简单任务时，短定位文件与接口后尽早派工，不等父侧通读或完成实现；存在可并行工作时，首选flash_start提交2–4条独立任务，最多4个活跃执行者，不凑满。问候、直接问答和极简单后续修改直接完成，不凑分工。
+任务包自足：objective/materials/constraints/acceptance、branches的task/write_paths；所有Agent无父历史。每个分支只交一个小验收产物，完成即用flash_report artifact交接可用文件、实际证据及剩余项，不等整批；progress报里程碑，help报阻塞。write_paths为不重叠绝对路径，空列表只读。
+父负责接口、解阻、整合与最终验收；不能重复执行已分派内容或同时改分支占用文件。收到help用flash_control reply指定agent_id及时回复；收到artifact即可使用，不等整理。每轮整合/验证后重新拆分剩余修复和测试：仅已有独立非简单剩余任务才续派，有空槽用flash_control add追加1–4条，上一批结束后用新一轮flash_start提交2–4条；不按步数强迫派工、不为凑数拆任务，也不得把可并行后半程全留给父。极小修改、父侧命令与跨模块验收由父处理。
+截断或max-tokens仍算失败，不自动重试；先读现存文件和已交artifact，明确已完成与缺口，再只派剩余部分，禁止整份重写或重复已做工作。
+flash_control status查结果、reply协调、cancel取消并等待清理；终态静默保存，无完成唤醒卡片。父无独立工作时使用flash_control wait事件等待，求助返回先执行必要验证/决定并reply，再wait；超时如仍运行则继续等待，不以“等后台”结束本轮交付，不忙轮询。按runtime快照逐run的统一汇报闸门处理：collecting尚未收齐时，artifact/branch终态仅内部消化、提前验收与续派，禁止每来一个分支就面向用户重复总结，不要求每次工具调用前发正文进度。help即时回复，仅就所需决定交流，不复述产物。无独立工作时用wait收齐，仍在执行不等于最终交付；run-complete/run-failed或该run reporting phase为ready后，核验状态与实际证据；所有源文件稳定后重跑全套测试和demo，重新生成最新报告，验收失败则续派修复再重跑，统一向用户报告一次，只补此前已公开内容的变化；旧run的ready不放行新run。整理者S只对回传数据轻量汇总，不调用工具、不重读源码、不重跑任务。执行分支artifact交接后final只补新增证据、失败和剩余项，不复述同一产物；single-final整理须汇齐全部结果与artifact，deliveredFacts仅内部送达不是已向用户说，不能据此省掉重要成果或只答“无新增”。父必须给用户非空最终回答，交付结果和实际验证，内部状态消息不替代答案。flash_run仅为兼容阻塞接口。
+汇报闸门仅抑制内部artifact/branch终态的逐份复述，不是禁止所有沟通：collecting期间用户直接提问、催问或要求解释，必须及时给出非空答复，按已确认事实回应当下问题，未完成与未验证项如实说明，不等ready、不以静默或“无新增”代替回答；这类答复不放行其余内部产物的逐份总结，也不冒充最终交付。最终交付必须非空，包含结果与实际验证；collecting不等于禁止所有沟通。
+浏览器或长命令验证仍先做短超时可观察冒烟，失败定位阶段，不反复等满同一无输出命令；只报告实际验证，失败/partial/未验证项必须保留，工具缺失或启动失败如实报告。`;
 
 /**
  * The per-turn reminder Lightning needs.
@@ -160,74 +154,34 @@ export function lightningNudge(turn, step = 1, mode = 'lightning') {
   const late = Number.isFinite(step) && step > 1
     ? ` This is step ${step} of that turn and nothing has been delegated yet; the answer is not ready to send.`
     : '';
-  // 超快模式的那一半。原来这里只有一套「派两个」，于是超快会话每轮都会收到一句只讲一层的话，
-  // 与 `## Superfast Mode` 里「tier 1 还要再开两个孙、树到这里为止」正面打架——同一轮里两套说法，
-  // 模型当然挑轻的那个听。所以提醒必须跟着当前模式走：超快说超快，闪电说闪电。
+  // Keep reminders aligned with the selected hidden coordinator, never the old ordinary-agent tree.
   if (mode === 'superfast') {
-    return [
-      `Superfast is armed. For ${at}: this turn is a two-tier delegation tree, not a single fan-out.`,
-      'Dispatch two subagents on two different angles in ONE message, and each of those children opens at least two of its own on different angles — same angle rule, same single message. Stamp the tier as the first line of every prompt you write: `Tier: 1 of 2` for your own children, `Tier: 2 of 2` for theirs, and a tier-2 agent delegates nothing at all.',
-      'This is mandatory and unconditional. There is no exempt turn: not a greeting, not a single lookup, not a conversational reply, not a verification, not a one-line edit, not a report of something already checked.',
-      `Count your dispatches before you write the first word of the answer.${late}`,
-      'The turn does not end when you have dispatched: it ends only after the last agent in the whole subtree is back, not just your two. Before the first sentence, every child and every grandchild has returned and you have read each summary, and the conflicts between summaries are resolved rather than averaged.',
-      'A defect found in that pass is fixed in the same turn, and the fix is handed to a child to check independently rather than trusted on your own reading of it.',
-      'Any uncertainty that would change the outcome — which file, whether to delete, which reading of the request, what a number should be — is a question asked with the question tool before you act, never a guess.',
-    ].join(' ');
+    return `超快闪电已开启。${at} step ${step}：默认32并发槽，以实际capacity与宿主限制为准；按DAG尽早满载独立就绪任务，使用superfast_start/superfast_control add。wait增量返回artifact、分支完成、容量变化或help后立即续派下游，不等无关慢分支；无工作继续wait。执行者用原生工具并行验证本分支，遵守write_paths合同及宿主权限，不派生。程序化无损汇集，不必跑整理S；父只做集成、冲突与关键验收，不重复已证实分支全套。不要以节省token降并行或质量，也不做无谓重复模型轮次；不改模型身份或系统max_tokens。父收齐相关结果后直接非空最终答复，保留失败与未验证项，用户直接提问及时回应。对用户只说整体做到哪一步，当成你一个人在做，不提分支、执行者、子代理、派工、任务包，也不用「并行」「分块」「几路」「同时推进」这类说法。`;
   }
 
-  // This reminder is the one that arrives every turn, so it states the same mandate as clause 1: two children,
-  // every turn, no exemption. It deliberately names no condition at all — any conditional wording here becomes
-  // the reading that turns a mandate back into a judgement call.
-  return [
-    `Lightning is armed. For ${at}: dispatch two subagents on two different angles before you answer — two separate calls in ONE message so they run concurrently.`,
-    'This is mandatory and unconditional. There is no exempt turn: not a greeting, not a single lookup, not a conversational reply, not a verification, not a one-line edit, not a report of something already checked.',
-    'If you have not dispatched two children this turn, the turn has not started: dispatch them now and answer from what they return.',
-    `Count your dispatches before you write the first word of the answer.${late}`,
-    // The completion half of the same contract. Without it the reminder only ever asked for dispatches and
-    // said nothing about when the turn is allowed to end, which is how a turn could dispatch two children,
-    // start writing while they were still flying, and still read as compliant. Clause 8 is the rule; this
-    // is the same rule arriving every turn, so it cannot recede into the log the way the block does.
-    'The turn does not end when you have dispatched: it ends only after the last child is back. Before the first sentence of the answer, all four must be true — every child has returned and you have read its summary; the conflicts between summaries are resolved, not averaged; you have read the code the answer describes and run the commands it will cite yourself; and every verification has actually executed with its real output read. Writing while a child is in flight, or reporting a passing check you never ran, fails this turn.',
-    'A defect found in that pass is fixed in the same turn, and the fix is handed to a child to check independently rather than trusted on your own reading of it.',
-    'Any uncertainty that would change the outcome — which file, whether to delete, which reading of the request, what a number should be —',
-    'is a question asked with the question tool before you act, never a guess. Check the dispatches in one list_agents call — nothing else: if a child is inactive and fits, continue it with send_message instead of creating one; that check is not delegation.',
-  ].join(' ');
+  return `快速闪电协作已开启。${at} step ${step}：仅已有独立非简单任务才短定位后早派/续派；首轮flash_start派2–4个，flash_control add追加1–4个，最多4个活跃。无独立剩余就继续验收或等待，不按步数强迫派工、不凑分工；截断只补剩余。执行分支artifact后final只报增量；父按run闸门：collecting仅内部验收续派/help决定，禁止分支逐个面向用户总结；ready统一报告一次，内部送达不是已公开；闸门仅抑制内部artifact逐份复述，collecting不等于禁止所有沟通，用户直接提问/催问/要解释必须及时非空答复，不等ready；父无独立工作用flash_control wait收齐，遇help先reply再wait，不结束本轮等静默通知；最终按最新代码重跑测试/demo和报告；父给非空最终回答。对用户只说整体做到哪一步，当成你一个人在做，不提分支、执行者、子代理、派工、任务包，也不用「并行」「分块」「几路」「同时推进」这类说法。`;
 }
 
 /** Appended last so a child reads its own role after the parent's fan-out rules. */
 export const SUBAGENT_GUARD = `If this text reached you as a delegated sub-agent: you are the executor, not the orchestrator. The fan-out rules above were written for your parent and do not apply to your turn — do the assigned task yourself, then report back. You inherit your parent's mode blocks and switches rather than choosing your own, so hold to your own standards instead of assuming you were given theirs: verify every claim you report, mark what you could not check, and never let an inference read as a measurement.`;
 
-/**
- * Superfast: the delegation is a TREE, not one fan-out — every tier-1 child must open two
- * grandchildren of its own.
- *
- * The bound is structural, not measured. The host cannot tell a child how deep it sits without
- * walking a session graph this plugin does not own, so the depth travels inside the prompts
- * instead: the parent stamps `Tier: N of 2` as the first line of every child prompt, and the
- * contract reads that line back. That keeps the file self-contained (constraint 1 in the header)
- * and keeps the recursion finite (constraint 2): tier 1 fans out, tier 2 stops, there is no
- * tier 3 — without it, two children per level means 7 agent contexts instead of 1, and the cost grows with that count.
- */
-export const SUPERFAST_POLICY = `## Superfast Mode (active) — a delegation tree, not a single fan-out
+/** Superfast minimizes the verified delivery critical path, without a token budget. */
+export const SUPERFAST_POLICY = `## Superfast Mode (active) — speed-first DAG execution
 
-The user has turned Superfast on: this turn runs a delegation TREE. The cost is disclosed and accepted (at least 2.5x: seven agent contexts instead of one, each paying its own fixed first-turn cost).
+超快只用 superfast_start / superfast_control，不展开普通 subagent 树、不用 flash_start 替代。旧8槽、固定厚任务、必跑整理S与父重复全套验收合同作废；快速模式的独立合同保持不变。
+对外措辞：全程把工作当成你一个人在做。不描述内部怎么分工、几路并行、哪一块先完成，只讲整体进展和最终结果。不提分支、执行者、子代理、派工、任务包、编排这类内部词，也不用「并行」「分块」「几路」「同时推进」这种说法。
 
-1. Tier stamping is mandatory: the FIRST line of every child prompt must be exactly \`Tier: N of 2\`, with N = your own tier + 1. Your own tier is 0 unless your prompt's first line said otherwise.
-2. Delegation is mandatory at every tier with no exemption: before you answer, dispatch two subagents on two different angles — separate calls in ONE message so they run concurrently. There is no exempt turn: not a greeting, not a lookup, not a conversational reply, not a one-line edit, not a report of something already checked.
-3. Tier 1 opens two of its own: at tier 1 open at least two grandchildren before you report back, same angle rule, same single message. Two is the floor, not a budget — a task carrying six independent angles opens six.
-4. Split by angle, never clone: direct shortest path / call-site and contract check / failure and edge paths / a cheaper or simpler alternative / docs versus implementation. Two copies of one prompt reproduce the same blind spot.
-5. A new development reopens the fan-out in the same turn: a second defect, a wrong premise, a failure that needs its own reproduction, a claim that must be checked against another source.
-6. While the tree runs, keep working — read, check, verify — and send nothing to the user.
-7. Reuse before you respawn: continue an inactive child with send_message instead of creating another one. A child you already briefed inherits your framing, so a check that must stand alone still needs a new child.
-8. You manage: plan, decompose, dispatch, review, integrate, report. Keep your own context for coordination instead of redoing the children's reading.
-9. One writer per file: never hand the same file to two children at once, and never let a child write a file another child is still reading for a decision.
-10. Every child prompt is self-contained: objective, acceptance criteria, exact files and symbols, constraints (what NOT to touch), required output format, a length cap, and the evidence needed to claim success.
-11. Do not report to the parent until the subtree is quiet: every grandchild back, every summary read, conflicts resolved, and at least one claim from each checked against the source by you.
-12. The answer starts only after the last agent is back: everyone returned, conflicts resolved, the work checked yourself (read the code, run the commands), every verification actually executed. A defect found in that pass is fixed the same turn, then a child checks the fix independently.
-13. At tier 2 you delegate nothing: \`Tier: 2 of 2\` means the tree ends at you. There is no tier 3, and nothing in this contract may be read as asking for one: The one ceiling is depth, not width: never fan out past tier 2.
-14. Fix the real problem, never the test: relaxing an assertion, threshold, or expectation to make a failure disappear is a failed fix.
-15. Ask, do not assume: any uncertainty that would change the outcome becomes a question before you act.
+1. 目标是从请求到正确可用交付的墙钟最短。默认每父32个并发执行槽，以工具返回的实际capacity和宿主限制为准。按依赖DAG拆出可独立验收的任务，冻结最小接口即早派；只要存在独立就绪任务就尽早满载，不人为压成两份厚任务，也不为凑人数拆无价值碎片。
+2. superfast_start非阻塞启动，superfast_control add持续补槽。任务包自足：目标、必要材料、约束、验收、绝对write_paths与证据要求；只带依赖所需信息，避免所有执行者反复通读同一份大契约。实现与对应测试同批进行，下游条件满足即可启动，不等无关慢分支。
+3. 执行者不派生代理或另起run。编辑只在互斥write_paths内，空列表只读，父不重复写占用文件。命令验证分支声明独立目录或验证工作区，执行者可用原生执行工具并行跑本分支构建和测试；命令仍服从宿主继承权限与审批。shell并非静态强制路径沙箱，执行者须遵守分支范围合同，不能声称shell已按write_paths强制隔离。
+4. 执行者用superfast_report artifact尽早交接可用产物、证据、失败与剩余项，final只补增量；progress只报新增事实，真正阻塞才help等待父reply。截断或失败先读现存产物与checkpoint，只续派剩余，禁止整份重做或谎称通过。
+5. superfast_control wait以增量游标等待artifact、分支完成、容量变化、help或终态。事件返回就消化证据并立即续派就绪下游或修复，随后继续wait；不忙轮询，不因“等待后台”提前结束，不把等所有分支收齐当作启动下游的条件。
+6. 取消必跑整理S：程序化无损汇集分支结果、artifact、命令证据与未验证项，父直接最终答复，不再额外启动模型复述已有结果。父并行负责接口、集成、冲突与关键验收，信任可核实且与当前产物对应的分支测试证据；不无脑重跑已证实分支全套。源码变化、证据过期、跨分支影响或失败才针对性重验，最终交付保留关键集成检查。
+7. 不以节省token压低并行、模型质量或验证覆盖；同时消除无谓重复阅读、整理与模型轮次。保留宿主模型、系统max_tokens和模型身份设置，不靠改名或虚报档位提速，宿主限制仍生效。
+8. collecting期间内部产物不逐份对用户复述，但用户直接提问、催问或要解释仍及时非空回应。父收齐所有仍相关任务后统一交付结果、实际证据、失败/partial与未验证项；内部送达不等于用户已看过。不谎称验证通过，不虚构命令输出，不承诺固定提速或费用倍率。问候、直接问答与极小修改直接完成，不凑树。
 `;
+
+
 
 /**
  * 每轮都发的一句「当前模式」。
@@ -241,12 +195,12 @@ export function modeBanner(mode) {
   if (mode === 'superfast') {
     return `## 当前模式：超快
 
-本会话现在是超快模式。上下文里此前若出现过「标准」或「闪电」的编排合同，一律作废；只按下面这段执行，按树状派工。`;
+本会话现在是速度优先超快模式。此前标准、快速、旧8槽及普通子代理树合同作废；只用superfast_start/superfast_control，默认32并发槽并服从实际capacity与宿主限制。按DAG早派满载，增量wait即续派；执行者自行并行测试，程序化无损汇集，不必跑整理S，父直接整合与关键验收后最终答复。不以节省token降低并行或质量，不改模型身份或系统max_tokens。`;
   }
   if (mode === 'lightning') {
     return `## 当前模式：闪电
 
-本会话现在是闪电模式。上下文里此前若出现过「标准」或「超快」的编排合同，一律作废；只按下面这段执行，只派一层，不要开子树。`;
+本会话现在是闪电模式。上下文里此前若出现过「标准」或「超快」的编排合同，一律作废；只按下面这段执行，使用flash_start/flash_control非阻塞隐藏协作，持续派发非简单剩余工作，不要展开普通子代理树。`;
   }
   return `## 当前模式：标准
 
@@ -258,7 +212,7 @@ export function modeBanner(mode) {
  * all, which would cancel the tree the parent was just told to build; this one defers to the
  * Tier line instead of forbidding fan-out outright.
  */
-export const SUPERFAST_CHILD_NOTE = `If this text reached you as a delegated sub-agent: you are the executor for your own tier, and your prompt's first line fixes that tier. \`Tier: 1 of 2\` MUST open at least two grandchildren before it reports — two is the floor, not a budget, so a task carrying six independent angles opens six, and a new development reopens the fan-out in the same turn. \`Tier: 2 of 2\` delegates nothing, does the work itself, and is where the tree ends. You inherit your parent's switches and mode blocks rather than choosing your own. Do not report before every grandchild you opened has returned, you have read each summary, and you have checked at least one claim from each against the source yourself. Every rigor rule above still applies to you.`;
+export const SUPERFAST_CHILD_NOTE = `若此文本继承到隐藏超快执行者，你是直接执行者：按任务包完成可独立验收的工作与对应测试，不派生代理、goal或其它run。编辑遵守write_paths；空列表只读。已声明独立目录或验证工作区时用原生工具并行运行本分支构建测试，继承宿主权限与审批，shell并非write_paths强制路径沙箱。产物可用即用superfast_report artifact交接实际证据与剩余项，final仅补增量，真正阻塞才help等待父reply。父负责集成、冲突与关键验收，不要求重复已证实全套；保留失败与未验证项，不谎称通过，不为节省token降质量，也不反复抛光或复述。`;
 
 /**
  * Sent once after the whole block stops applying, because the earlier policy text stays
@@ -371,9 +325,8 @@ export function policyText({ persona, personaDeferential = false, ultra = false,
     return !DEFAULT_OFF.has(id);
   };
   const parts = [];
-  if (on('factCheck')) parts.push(FACT_CHECK);
-  // Language sits directly after the fact-check rule: it governs every block below it, and that
-  // precedence is what still lets an explicit request for another language win.
+  // Language sits first in the block: it governs every block below it, and that precedence is
+  // what still lets an explicit request for another language win.
   if (chinese && on('language')) parts.push(LANGUAGE_POLICY);
   // 人设与回复风格是叠加的两层，不是替代关系（用户明确要求：人设是底色，回复风格作为装饰）。
   // 用户自己写的人设管身份，这里的通用模板管表达方式，两段都进提示词。
@@ -392,8 +345,6 @@ export function policyText({ persona, personaDeferential = false, ultra = false,
   parts.push(modeBanner(mode));
   if (mode === 'superfast') parts.push(SUPERFAST_POLICY);
   else if (mode === 'lightning') parts.push(LIGHTNING_POLICY);
-  // 放在模式合同之后：它要压过上面那句「每轮强制派工、没有豁免轮次」，位置靠后才能改写它。
-  if (on('triage')) parts.push(TASK_TRIAGE);
   // Both tails are addressed to a delegated child. A parent must never receive them: the contract opens by
   // making delegation the default, and PRECEDENCE says a rule forbidding delegation wins over the block — so a
   // parent ending with "ignore every rule above about fan-out" has just cancelled its own mandate.
@@ -501,20 +452,16 @@ export const COMPUTER_FIRST = `## 有屏幕就直接动手
  */
 export const INJECTION_BLOCKS = [
   { id: 'ultra', label: 'Ultra档位', note: '决定模型的思考模式' },
-  { id: 'lightning', label: '闪电模式', note: '是否派出子代理分担任务' },
-  // 事实核查独立开关：管的是「先查再答、查不到就问、别猜」，跟语气无关，关掉不影响人设。
-  { id: 'factCheck', label: '事实核查', note: '先查再答，查不到就来问你，不硬编' },
-  // 「Codex提示词注入」已撤掉：它管的三段里，Mode policy 与强制约束不再注入，事实核查上面单独
-  // 领了自己的开关。旧配置文件里若有 codexPrompt: false，parsePersona 会因为 id 不在这个表里而丢掉。
+  { id: 'lightning', label: '闪电模式', note: '启用更快速的模式' },
+  // 「Codex提示词注入」已撤掉：它管的三段里，Mode policy 与强制约束不再注入。
+  // 旧配置文件里若有 codexPrompt: false，parsePersona 会因为 id 不在这个表里而丢掉。
   // 「聊天/工作」这一项也已撤掉：回复风格改由设置菜单里的三态选择（工作 / 聊天 / 无）决定，
   // 再留一个全局开关等于同一件事两个入口，选「无」和关掉它完全等价，只会让人点错。
+  // 事实核查、想完再答、先判后派三项按用户要求撤掉：文本也不再注入，旧配置里的键会被丢掉。
   { id: 'language', label: '中文思考', note: '推荐开启使用中文思考' },
-  { id: 'thinkingAloud', label: '想完再答', note: '默认关（像原生那样边想边写）；开=先想完再一次性回答' },
   // 名字来自模型菜单里的改名，这个开关只决定那段进不进提示词。
   // 有屏幕就直接动手：工具一直挂着，但模型不知道那是让它亲自操作，于是回头叫用户去点。
   { id: 'computerFirst', label: '能动手就动手', note: '有屏幕就直接操作，别让用户代劳；只有密码/选择/危险动作才交回去' },
-  // 先判后派：面上是「开工前判一次」，底下把「返工必须派」写成不给裁量的硬线。
-  { id: 'triage', label: '先判后派', note: '开工前判一次要不要派子代理；第一次可放行，同一个任务第二轮必须派' },
   { id: 'modelIdentity', label: '模型身份', note: '模型认为自己是模型菜单里显示的那个名字' }
 ];
 export const SILENT_PRESETS = ['clean'];
@@ -534,5 +481,5 @@ export default { PRECEDENCE, MANDATE, SECTION_MANDATE, LANGUAGE_POLICY, THINK_AL
  */
 export function tokenMultiplier() {
   const match = LIGHTNING_POLICY.match(/(\d+(?:\.\d+)?)\s*x the tokens/i);
-  return { value: match ? Number(match[1]) : 15, exact: match !== null };
+  return { value: match ? Number(match[1]) : null, exact: match !== null };
 }

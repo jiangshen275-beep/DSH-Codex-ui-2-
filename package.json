@@ -1,6 +1,6 @@
 {
   "name": "dsh-codex-ui",
-  "version": "4.1.0-preview.1",
+  "version": "4.0.0",
   "description": "Codex-style interface and prompt modes for DeepSeek Harness",
   "type": "module",
   "main": "./lib/index.js",
@@ -90,5 +90,6 @@
   "homepage": "https://github.com/jiangshen275-beep/DSH-Codex-ui-2-",
   "bugs": {
     "url": "https://github.com/jiangshen275-beep/DSH-Codex-ui-2-/issues"
-  }
+  },
+  "dshSuperfastImplementation": "speed-pipeline-v1"
 }

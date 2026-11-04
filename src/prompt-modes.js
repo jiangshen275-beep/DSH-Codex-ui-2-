@@ -81,6 +81,14 @@ let lastMode = null;
  * reader mutate the record the plugin writes.
  */
 let modeLookup = null;
+/**
+ * 正文是否已经由系统提示词那一节送出。宿主的动态 context 只在较新版本里有；没有它就得回落到
+ * 每轮提醒把正文带上，否则人设会静默消失。两个注入点不能同时带正文，那样同一份规则会重复两遍。
+ */
+const bodySectionSessions = new Set();
+export function personaBodyInSystemPrompt(sessionId) {
+  return typeof sessionId === 'string' && sessionId !== '' && bodySectionSessions.has(sessionId);
+}
 export function currentModeOf(session) {
   if (typeof modeLookup !== 'function' || !session) return null;
   try { return modeLookup(session); } catch { return null; }
@@ -223,14 +231,59 @@ export async function apply(ctx) {
     writes = writes.catch(() => {}).then(() => unit.putRecord('sessions', session.id, mode));
     writes.catch(error => ctx.logger.warn(`prompt mode fork save failed: ${error.message}`));
   });
-  // 人设正文不再从这里注入。宿主 `@deepseek-ai/dsh-system-prompt@0.2.1-rc.2` 的
-  // `AssembleContext` 只有 `{ scope, signal }`——**没有 agent**，而 section 的 text 回调只能拿到这个
-  // context。原先这里写的是 `text: ({ agent }) => { if (!agent) return ''; … }`，于是 `agent` 恒为
-  // undefined，这段每次组装都返回空串：正文一次都没进过系统提示，界面上却只有「人设仍在生效」
-  // 在说好话。模型的思考记录里写着「我实际收到的系统提示里没有明显的人设正文段落」，就是它。
-  // 正文改由 `persona-reminder.js` 在 `agent/pre-step` 每轮送出——那条路 `payload.agent` 是齐的，
-  // 而且作为最新一条消息，位置比系统提示更靠后，"时刻遵守"反而是它更强。
-  // 这里不再注册一个永远产出空串的 section：留着它只会让人以为它在工作。
+  // 人设正文必须进系统提示词，而 `assemble(context)` 只把 `{ scope, signal }` 交给 section 回调——
+  // 回调里永远拿不到 agent，这也是旧写法恒返回空串的原因。能拿到会话的地方是 `agent/pre-step` 的
+  // `payload.agent`：在**该会话自己的 context** 上注册一个静态 section，正文就以字符串进了这一层的
+  // 系统提示，不经过任何回调。人设切换或消失时重建这一节。
+  const personaSections = new Map();
+  const syncPersonaSection = agent => {
+    const session = agent?.session;
+    const sp = agent?.ctx?.systemPrompt;
+    if (!session || typeof session.id !== 'string' || typeof sp?.section !== 'function') return;
+    if (presetSilences(agent)) return;
+    const header = session.header ?? {};
+    if (header.origin === 'subagent' || (header.delegationDepth ?? 0) > 0) return;
+    const id = modeFor(session);
+    const raw = typeof id === 'string' ? textFor(id) : '';
+    const text = typeof raw === 'string' ? raw.trim() : '';
+    const current = personaSections.get(session.id);
+    if (current?.text === text) return;
+    try { current?.dispose?.(); } catch { /* 旧 section 的清理失败不该挡住新的注册 */ }
+    personaSections.delete(session.id);
+    bodySectionSessions.delete(session.id);
+    if (text === '') return;
+    let dispose;
+    try {
+      dispose = sp.section({
+        name: 'dsh-codex-ui:persona-body',
+        order: sp.getSectionOrder('DEPLOYMENT_PERSONA_SUFFIX') + 1,
+        interpolate: false,
+        text: `## 人设（本会话生效，硬设定）\n\n${text}`,
+      });
+    } catch (error) {
+      // 宿主不接受这个 section 时，正文仍由 persona-reminder 每轮送出，不能让人设因此消失。
+      ctx.logger?.warn?.(`[dsh-codex-ui] persona section registration failed: ${String(error)}`);
+      return;
+    }
+    personaSections.set(session.id, { text, dispose });
+    bodySectionSessions.add(session.id);
+  };
+  // `agent/pre-step` 是中间件链：处理器必须把下游的 decision 原样返回。早先这里写成普通监听、
+  // 返回 undefined，宿主要在结果上读 `decision.kind`，于是每个回合都抛
+  // "Cannot read properties of undefined (reading 'kind')"——人设 section 没注进去，整轮反而先崩了。
+  // 装配在 preStep 里先于 waterfall 发生，所以 pre-step 注册的这一节要到下一步才生效；
+  // agent/created 早于第一次装配，两个挂点都留着：新会话第一步、以及切换人设的下一步都能带上正文。
+  ctx.on('agent/created', ({ agent } = {}) => { try { syncPersonaSection(agent); } catch { /* 注入失败不能拖垮创建 */ } });
+  ctx.on('agent/pre-step', async (payload, next) => {
+    const decision = typeof next === 'function' ? await next() : undefined;
+    try { syncPersonaSection(payload?.agent); } catch { /* 注入失败不能拖垮这一步 */ }
+    return decision;
+  });
+  ctx.effect(() => () => {
+    for (const entry of personaSections.values()) { try { entry.dispose?.(); } catch { /* unload must not throw */ } }
+    personaSections.clear();
+    bodySectionSessions.clear();
+  });
 
   // 用户在会话里说「帮我在侧栏加个 XX」时，Agent 得知道去哪读说明书——它没有别的途径知道
   // 这个插件带了文档。路径从本文件的位置推，装到哪个 profile、目录叫什么名字都对；写死一个

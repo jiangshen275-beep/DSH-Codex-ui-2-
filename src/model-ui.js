@@ -429,13 +429,9 @@ function registerModelUI(ctx) {
     // position has no tone — it is not the lowest tier, it is no tier.
     const effortTone = trackUnknown ? 'off' : shownUltra ? 'ultra' : (effectiveIndex >= 0 ? steps[shownIndex]?.id ?? 'off' : 'off');
     const effortDepth = trackUnknown || maxIndex <= 0 ? 0 : Math.round(shownIndex / maxIndex * 4);
-    // The budget figure is measured, not guessed: one delegation costs a delegated turn about 1.5x a plain turn, and a
-// superfast turn about 3x — see CHANGELOG 1.0.0 for the ledger numbers behind those two ratios.
-    // The tree runs one extra tier (each tier-1 child opens two grandchildren), so it costs several flat
-  // rounds at once. The figure is the Host's own per-round multiple, not a second measurement: the UI must
-  // not invent a number it cannot source.
-  const treeTokenLabel = `每层再开 2 个，至少 2.5× token`;
-  const tokenLabel = `${budget.exact ? '至少 ' : '约 '}${budget.value}× token`;
+    // Cost labels are historical disclosure text, not measured price or speed guarantees.
+  const treeTokenLabel = `父→2–32个执行者（流水并行），速度优先，不限制 token 预算`;
+  const tokenLabel = '至少 1.5× token 消耗 甚至更多';
     const modelName = chosen ? aliasOf(chosen.group.id, chosen.model) : state.current?.model || '选择模型';
     const busy = locked || state.pending !== null;
     const close = React.useCallback(() => { setOpen(false); setDraftIndex(null); triggerRef.current?.focus(); }, []);
@@ -884,7 +880,7 @@ function registerModelUI(ctx) {
             h('button', { className: 'cg-model-mode', type: 'button', role: 'menuitemradio', 'aria-checked': modeFast, 'data-on': modeFast, 'data-mode': 'fast', disabled: busy || !sessionId, onClick: () => chooseMode('fast') },
               h('span', { className: 'cg-model-mode-text' },
                 h('strong', null, '快速'),
-                h('span', null, '至少 1.5× 消耗 甚至更多')),
+                h('span', null, '至少 1.5× token 消耗 甚至更多')),
               h('span', { className: 'cg-model-mode-check', 'aria-hidden': true }, modeFast && h(Icon, { name: 'check', size: 14 }))),
             h('button', { className: 'cg-model-mode', type: 'button', role: 'menuitemradio', 'aria-checked': modeTree, 'data-on': modeTree, 'data-mode': 'tree', disabled: busy || !sessionId, onClick: () => chooseMode('tree') },
               h('span', { className: 'cg-model-mode-text' },
@@ -895,7 +891,7 @@ function registerModelUI(ctx) {
           h('div', { className: 'cg-model-top' },
             h('button', { className: 'cg-model-zap', type: 'button', 'data-on': modeFast || modeTree, 'data-mode': !turboSynced ? 'unknown' : modeTree ? 'tree' : modeFast ? 'fast' : 'off', disabled: busy || !sessionId, 'aria-haspopup': 'menu', 'aria-expanded': pane === 'lightning', 'aria-label': !turboSynced ? '编排模式：状态未同步，点击查看' : modeTree ? '编排模式：超快已开启，点击更换' : modeFast ? '编排模式：快速已开启，点击更换' : '编排模式：选择快速或超快', onClick: () => setPane(pane === 'lightning' ? 'effort' : 'lightning') },
               modeTree ? boltGlyph('cg-model-zap-glyph', true, 'gold') : boltGlyph('cg-model-zap-glyph', modeFast),
-              h('span', { className: 'cg-model-tooltip', role: 'tooltip' }, !turboSynced ? '编排模式：正在读取本会话的状态' : modeTree ? `超快编排：已开启，每个子代理再开两个孙代理，${treeTokenLabel}` : modeFast ? `快速编排：已开启，${tokenLabel}` : `编排模式：快速每轮至少并发 2 个子代理，${tokenLabel}`)),
+              h('span', { className: 'cg-model-tooltip', role: 'tooltip' }, !turboSynced ? '编排模式：正在读取本会话的状态' : modeTree ? `超快编排：已开启，${treeTokenLabel}` : modeFast ? `快速编排：已开启，${tokenLabel}` : `编排模式：快速使用隐藏闪电通道，${tokenLabel}`)),
             h('button', { className: 'cg-model-summary', type: 'button', disabled: busy, 'aria-label': '更换模型', onClick: () => { setPane('model'); focusPending.current = true; } }, h('strong', { 'aria-live': 'polite', 'data-notice': claimUltra && ultraNotice }, turboFailed ? '未同步' : steps.length ? displayLabel : '选择模型'), h('span', { className: 'cg-model-summary-name' }, modelName, h(Icon, { name: 'chevron', size: 11 }))),
             h('button', { className: 'cg-model-reset', type: 'button', 'aria-label': '恢复默认强度', disabled: busy || !reasoning || !state.current, onClick: reset }, glyph('reset'), h('span', { className: 'cg-model-tooltip', role: 'tooltip' }, '重置为默认')),
             // The burst lives on the row, not inside the bolt: when the knob lands on Ultra the notice hides the
